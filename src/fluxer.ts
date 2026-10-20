@@ -443,9 +443,10 @@ const startFluxerClient = async ({
             }
         }
 
-        // Cat-noise conversation (issue #4): meow back at anyone who meows at
-        // us, then bridge our half of the exchange too (our own messages are
-        // otherwise skipped at the top of this handler).
+        // Cat-noise conversation (issue #4): meow back at Fluxer users who
+        // meow at us (Fluxer only, by request on the issue), then bridge our
+        // half of the exchange too (our own messages are otherwise skipped at
+        // the top of this handler).
         if (
             botConfig.meow.enabled &&
             message.guildId &&

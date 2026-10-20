@@ -42,8 +42,6 @@ import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryDiscordCommandHandler from './commands/discord/handlers/CategoryDiscordCommandHandler';
 import VoiceDiscordCommandHandler from './commands/discord/handlers/VoiceDiscordCommandHandler';
-import MeowService from './services/meow/MeowService';
-import type { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
     linkService,
@@ -59,7 +57,6 @@ const startDiscordClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
-    botConfig,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
@@ -74,7 +71,6 @@ const startDiscordClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
-    botConfig: BotConfig;
 }): Promise<Client> => {
     const client = new Client({
         intents: [
@@ -105,7 +101,6 @@ const startDiscordClient = async ({
     const messageTransformer = new DiscordMessageTransformer(
         new MentionBridgeService(linkService)
     );
-    const meowService = new MeowService();
     const messageRelay = new DiscordToFluxerMessageRelay({
         linkService,
         webhookService,
@@ -423,27 +418,6 @@ const startDiscordClient = async ({
             !isCommandString(message.content, COMMAND_PREFIX)
         ) {
             await messageRelay.relayMessage(message);
-        }
-
-        // Cat-noise conversation (issue #4): meow back at anyone who meows at
-        // us, then bridge our half of the exchange too (our own messages are
-        // otherwise skipped at the top of this handler).
-        if (
-            botConfig.meow.enabled &&
-            message.inGuild() &&
-            !message.author.bot &&
-            !message.webhookId &&
-            meowService.shouldReply(message.content, message.channelId)
-        ) {
-            try {
-                const reply = await message.reply({
-                    content: meowService.reply(message.content),
-                    allowedMentions: { repliedUser: false },
-                });
-                await messageRelay.relayMessage(reply);
-            } catch (error) {
-                logger.error('❌ Failed to meow back:', error);
-            }
         }
     });
 

@@ -4,7 +4,10 @@
  * When a message consists of nothing but cat noises (meow, mrrp, nya, purr and
  * their stretched or decorated variants such as `meooow!!`, `mrrrp~` or
  * `nya :3`), the bridge answers with a cat noise of its own so it looks like
- * it is chatting back. The reply stays in the same "register" as the message
+ * it is chatting back. Only messages written on Fluxer are answered (asked
+ * for on the issue): a Discord user's meow is bridged as usual but gets no
+ * reply, while a reply given on Fluxer is bridged to Discord like any other
+ * message. The reply stays in the same "register" as the message
  * (a `nyah` gets a nya-family answer, a `mrrp` a trill or purr), mirrors how
  * stretched and how decorated the message was, and drifts to a neighbouring
  * noise now and then so a long exchange does not repeat itself.

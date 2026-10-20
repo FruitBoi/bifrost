@@ -14,7 +14,7 @@
 - Easy setup using our hosted bot or self-hosting with Docker
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
-- Meows back when someone meows at it (see [Cat chat](#cat-chat))
+- Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
 
@@ -128,7 +128,7 @@ Voice links ship as migration `00006-voice-links`, which adds the `voice_links` 
 
 ## Cat chat
 
-Say `meow`, `mrrp`, `nyah` or `purr` (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so both sides see the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
+Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. **Only Fluxer users get an answer**: a meow written on Discord is bridged like any other message but is not replied to. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so Discord still sees the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
 
 ## Community
 
@@ -172,7 +172,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
-| `meow.enabled` | `true` | Answer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; see [Cat chat](#cat-chat). |
+| `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:
 
