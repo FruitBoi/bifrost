@@ -1,16 +1,24 @@
-import { Message } from '@fluxerjs/core';
+import { Message, MessageType } from '@fluxerjs/core';
 import MessageRelay from './MessageRelay';
 import logger from '../../utils/logging/logger';
 import { formatJoinMessage } from '../../utils/formatJoinMessage';
 import MessageQueueService, { toSerializable } from '../MessageQueueService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import DiscordEntityResolver from '../entityResolver/DiscordEntityResolver';
-import { LinkService } from '../LinkService';
+import { LinkContext, LinkService } from '../LinkService';
 import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
+import ThreadSyncService from '../threadSync/ThreadSyncService';
+
+/** System messages emitted alongside thread creation; never worth bridging. */
+const SKIPPED_MESSAGE_TYPES = new Set<number>([
+    MessageType.ThreadCreated,
+    MessageType.ThreadStarterMessage,
+]);
 
 export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
     private readonly discordEntityResolver: DiscordEntityResolver;
+    private readonly threadSyncService: ThreadSyncService;
 
     constructor({
         linkService,
@@ -19,6 +27,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         metricsService,
         queueService,
         discordEntityResolver,
+        threadSyncService,
     }: {
         linkService: LinkService;
         webhookService: WebhookService;
@@ -26,6 +35,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         metricsService?: MetricsService;
         queueService?: MessageQueueService;
         discordEntityResolver: DiscordEntityResolver;
+        threadSyncService: ThreadSyncService;
     }) {
         super({
             linkService,
@@ -35,24 +45,54 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
             queueService,
         });
         this.discordEntityResolver = discordEntityResolver;
+        this.threadSyncService = threadSyncService;
+    }
+
+    private async resolveContext(
+        message: Message
+    ): Promise<LinkContext | null> {
+        const channel =
+            message.channel ??
+            (await message.resolveChannel().catch(() => null));
+
+        if (channel?.isThread()) {
+            return this.threadSyncService.resolveFluxerThread(channel);
+        }
+
+        const channelLink =
+            await this.getLinkService().getChannelLinkByFluxerChannelId(
+                message.channelId
+            );
+        return channelLink ? { channelLink, threadLink: null } : null;
     }
 
     public async relayMessage(message: Message): Promise<void> {
         const linkService = this.getLinkService();
         const webhookService = this.getWebhookService();
 
-        const linkedChannel = await linkService.getChannelLinkByFluxerChannelId(
-            message.channelId
-        );
-        if (!linkedChannel) return;
+        if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
+
+        const context = await this.resolveContext(message);
+        if (!context) return;
+        const { channelLink: linkedChannel, threadLink } = context;
+
+        // Our own webhook echoing a bridged message back into the channel/thread.
+        if (
+            message.webhookId &&
+            message.webhookId === linkedChannel.fluxerWebhookId
+        )
+            return;
+
         const guildLink = await linkService.getGuildLinkById(
             linkedChannel.guildLinkId
         );
         if (!guildLink) return;
 
+        const discordThreadId = threadLink?.discordThreadId ?? null;
+
         // Build payload before attempting send so it can be queued on failure
         let msg: WebhookMessageData;
-        if (message.type === 7) {
+        if (message.type === MessageType.UserJoin) {
             msg = {
                 content: formatJoinMessage(
                     message.author.username +
@@ -86,14 +126,19 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
             }
 
             const { messageId: webhookMessageId } =
-                await webhookService.sendMessageViaDiscordWebhook(webhook, msg);
+                await webhookService.sendMessageViaDiscordWebhook(
+                    webhook,
+                    msg,
+                    discordThreadId
+                );
 
-            if (message.type !== 7) {
+            if (message.type !== MessageType.UserJoin) {
                 await linkService.createMessageLink({
                     discordMessageId: webhookMessageId,
                     fluxerMessageId: message.id,
                     guildLinkId: linkedChannel.guildLinkId,
                     channelLinkId: linkedChannel.id,
+                    threadLinkId: threadLink?.id ?? null,
                 });
             }
             this.metricsService?.messagesRelayed.inc({
@@ -108,7 +153,8 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
                 'fluxer_to_discord',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg)
+                toSerializable(msg),
+                threadLink?.id ?? null
             );
         }
     }

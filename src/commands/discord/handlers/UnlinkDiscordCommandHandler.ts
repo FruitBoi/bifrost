@@ -1,6 +1,7 @@
 import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
 import { WebhookService } from '../../../services/WebhookService';
+import ThreadSyncService from '../../../services/threadSync/ThreadSyncService';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -19,6 +20,12 @@ type PendingUnlink =
           discordWebhookToken: string;
           fluxerWebhookId: string;
           fluxerWebhookToken: string;
+      }
+    | {
+          type: 'thread';
+          threadLinkId: string;
+          discordThreadId: string;
+          fluxerThreadId: string;
       };
 
 export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
@@ -30,7 +37,8 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
     constructor(
         client: Client,
         private readonly linkService: LinkService,
-        private readonly webhookService: WebhookService
+        private readonly webhookService: WebhookService,
+        private readonly threadSyncService: ThreadSyncService
     ) {
         super(client);
     }
@@ -144,6 +152,44 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     });
                     logger.error('Unlink guild failed:', err);
                 }
+            } else if (pending.type === 'thread') {
+                if (
+                    !(await this.requirePermission(
+                        message,
+                        PermissionFlagsBits.ManageWebhooks,
+                        'Manage Webhooks'
+                    ))
+                )
+                    return;
+                try {
+                    await this.threadSyncService.unlinkThread(
+                        pending.threadLinkId
+                    );
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Thread bridge removed for <#${pending.discordThreadId}> ↔ Fluxer thread \`${pending.fluxerThreadId}\`.`
+                                )
+                                .setColor(EmbedColors.Success)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to unlink thread: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Unlink thread failed:', err);
+                }
             } else {
                 if (
                     !(await this.requirePermission(
@@ -215,7 +261,7 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     new EmbedBuilder()
                         .setDescription(
                             `Usage: \`${COMMAND_PREFIX}unlink <id>\`\n` +
-                                `> Provide the Fluxer guild ID to unbridge servers, or a Fluxer channel ID to remove a channel link.\n` +
+                                `> Provide the Fluxer guild ID to unbridge servers, a Fluxer channel ID to remove a channel link, or a Fluxer thread ID to remove a thread link.\n` +
                                 `> Then run \`${COMMAND_PREFIX}unlink confirm\` to proceed.\n` +
                                 `> Use \`${COMMAND_PREFIX}list\` to see active links and their IDs.`
                         )
@@ -288,6 +334,41 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     new EmbedBuilder()
                         .setDescription(
                             `This will remove the channel bridge for Fluxer channel \`${id}\` ↔ <#${channelLink.discordChannelId}>.\n` +
+                                `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
+                        )
+                        .setColor(EmbedColors.Warning)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        // 3. Check if ID matches a thread link by Fluxer thread ID
+        const threadLink = await this.linkService
+            .getThreadLinkByFluxerThreadId(id)
+            .catch(() => null);
+        if (threadLink) {
+            if (
+                !(await this.requirePermission(
+                    message,
+                    PermissionFlagsBits.ManageWebhooks,
+                    'Manage Webhooks'
+                ))
+            )
+                return;
+            this.setPending(message.author.id, {
+                type: 'thread',
+                threadLinkId: threadLink.id,
+                discordThreadId: threadLink.discordThreadId,
+                fluxerThreadId: id,
+            });
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `This will remove the thread bridge for Fluxer thread \`${id}\` ↔ <#${threadLink.discordThreadId}>.\n` +
+                                `Neither thread is deleted; they just stop mirroring each other.\n` +
                                 `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
                         )
                         .setColor(EmbedColors.Warning)

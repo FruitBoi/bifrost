@@ -41,10 +41,34 @@ export interface UnlinkedChannelSummary extends ChannelSummary {
     categoryPosition: number | null;
 }
 
+export interface ThreadLinkSummary {
+    id: string;
+    discordThread: ChannelSummary;
+    fluxerThread: ChannelSummary;
+}
+
 export interface ChannelLinkSummary {
     id: string;
     discordChannel: ChannelSummary;
     fluxerChannel: ChannelSummary;
+    /** When true, new threads in either channel are bridged automatically. */
+    autoSyncThreads: boolean;
+    threads: ThreadLinkSummary[];
+}
+
+export interface UpdateChannelLinkBody {
+    autoSyncThreads: boolean;
+}
+
+export interface ChannelThreadsResponse {
+    unlinkedDiscordThreads: ChannelSummary[];
+    unlinkedFluxerThreads: ChannelSummary[];
+}
+
+export interface CreateThreadLinkBody {
+    channelLinkId: string;
+    discordThreadId: string;
+    fluxerThreadId: string;
 }
 
 export interface GuildChannelsResponse {

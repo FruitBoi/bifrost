@@ -30,6 +30,12 @@ export type WebhookMessageData = {
     embeds?: WebhookEmbed[];
 };
 
+/** Appends `key=value` to a route that may or may not already carry a query string. */
+function appendQuery(route: string, key: string, value: string): string {
+    const separator = route.includes('?') ? '&' : '?';
+    return `${route}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
 export class WebhookService {
     private discordClient: DiscordClient | null = null;
     private fluxerClient: FluxerClient | null = null;
@@ -89,9 +95,14 @@ export class WebhookService {
         }
     }
 
+    /**
+     * Sends a message through a Discord webhook. When `threadId` is given the
+     * message is posted into that thread of the webhook's channel.
+     */
     async sendMessageViaDiscordWebhook(
         webhook: DiscordWebhook,
-        data: WebhookMessageData
+        data: WebhookMessageData,
+        threadId?: string | null
     ): Promise<{ messageId: string }> {
         try {
             const files = data.attachments?.map((att) => {
@@ -109,6 +120,7 @@ export class WebhookService {
                 files,
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
+                threadId: threadId ?? undefined,
             });
 
             return { messageId: id };
@@ -121,7 +133,8 @@ export class WebhookService {
     async editMessageViaDiscordWebhook(
         webhook: DiscordWebhook,
         messageId: string,
-        data: WebhookMessageData
+        data: WebhookMessageData,
+        threadId?: string | null
     ): Promise<void> {
         try {
             const files = data.attachments?.map((att) => {
@@ -137,6 +150,7 @@ export class WebhookService {
                 files,
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
+                threadId: threadId ?? undefined,
             });
         } catch (error: unknown) {
             logger.error('Error editing message via Discord webhook:', error);
@@ -220,12 +234,64 @@ export class WebhookService {
         }
     }
 
+    /**
+     * `Webhook.send` in @fluxerjs/core builds the execute route internally and
+     * offers no thread option, but the Fluxer API accepts `?thread_id=` on
+     * execute exactly like Discord. This returns a webhook bound to a client
+     * whose REST `post` transparently appends that query parameter, so the
+     * SDK's payload/multipart handling is reused untouched.
+     */
+    private fluxerWebhookTargetingThread(
+        webhook: FluxerWebhook,
+        threadId: string
+    ): FluxerWebhook {
+        const client = webhook.client;
+        const realRest = client.rest;
+
+        const rest = new Proxy(realRest, {
+            get(target, prop) {
+                if (prop === 'post') {
+                    return (route: string, options?: unknown) =>
+                        target.post(
+                            appendQuery(route, 'thread_id', threadId),
+                            options as never
+                        );
+                }
+                const value = Reflect.get(target, prop);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+
+        const proxiedClient = new Proxy(client, {
+            get(target, prop) {
+                if (prop === 'rest') return rest;
+                const value = Reflect.get(target, prop);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+
+        return FluxerWebhook.fromToken(
+            proxiedClient as FluxerClient,
+            webhook.id,
+            webhook.token!
+        );
+    }
+
+    /**
+     * Sends a message through a Fluxer webhook. When `threadId` is given the
+     * message is posted into that thread of the webhook's channel.
+     */
     async sendMessageViaFluxerWebhook(
         webhook: FluxerWebhook,
-        data: WebhookMessageData
+        data: WebhookMessageData,
+        threadId?: string | null
     ): Promise<{ messageId: string }> {
         try {
-            const msg = await webhook.send(
+            const target = threadId
+                ? this.fluxerWebhookTargetingThread(webhook, threadId)
+                : webhook;
+
+            const msg = await target.send(
                 {
                     content: data.content,
                     username: data.username,
@@ -268,12 +334,15 @@ export class WebhookService {
     async editMessageViaFluxerWebhook(
         webhook: FluxerWebhook,
         messageId: string,
-        data: WebhookMessageData
+        data: WebhookMessageData,
+        threadId?: string | null
     ): Promise<void> {
         try {
-            const route =
+            let route =
                 FluxerRoutes.webhookExecute(webhook.id, webhook.token!) +
                 `/messages/${messageId}`;
+            if (threadId) route = appendQuery(route, 'thread_id', threadId);
+
             await webhook.client.rest.patch(route, {
                 body: {
                     content: data.content,

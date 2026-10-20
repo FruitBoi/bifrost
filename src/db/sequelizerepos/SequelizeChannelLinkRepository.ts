@@ -81,6 +81,18 @@ export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
         return model.toJSON() as ChannelLink;
     }
 
+    async setAutoSyncThreads(
+        id: string,
+        enabled: boolean
+    ): Promise<ChannelLink> {
+        const model = await ChannelLinkModel.findOne({ where: { id } });
+        if (!model) {
+            throw new Error('Channel link not found');
+        }
+        await model.update({ autoSyncThreads: enabled });
+        return model.toJSON() as ChannelLink;
+    }
+
     async deleteById(id: string): Promise<void> {
         await ChannelLinkModel.destroy({
             where: { id },

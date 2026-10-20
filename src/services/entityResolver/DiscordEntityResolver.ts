@@ -1,4 +1,11 @@
-import { Channel, Client, Guild, GuildEmoji, Message } from 'discord.js';
+import {
+    AnyThreadChannel,
+    Channel,
+    Client,
+    Guild,
+    GuildEmoji,
+    Message,
+} from 'discord.js';
 import NodeCache from 'node-cache';
 import EntityResolver from '../entityResolver/EntityResolver';
 
@@ -50,6 +57,19 @@ export default class DiscordEntityResolver implements EntityResolver<
             if (!guild) return null;
 
             return await guild.channels.fetch(channelId);
+        } catch {
+            return null;
+        }
+    }
+
+    /** Fetches a thread by ID; returns null when the ID is not a thread. */
+    async fetchThread(threadId: string): Promise<AnyThreadChannel | null> {
+        const client = this.ensureClient();
+
+        try {
+            const channel = await client.channels.fetch(threadId);
+            if (!channel || !channel.isThread()) return null;
+            return channel;
         } catch {
             return null;
         }

@@ -53,36 +53,55 @@ const commandList: Command[] = [
         name: 'link',
         discord: {
             description:
-                'Links this server to a Fluxer guild (by guild ID), or links the current channel to a Fluxer channel (by channel ID). Run with `confirm` to proceed.',
-            usageArgs: ['<fluxerGuildId | fluxerChannelId>'],
+                'Links this server to a Fluxer guild (by guild ID), links the current channel to a Fluxer channel (by channel ID), or, when run inside a thread of a linked channel, links that thread to a Fluxer thread (by thread ID). Run with `confirm` to proceed.',
+            usageArgs: ['<fluxerGuildId | fluxerChannelId | fluxerThreadId>'],
         },
         fluxer: {
             description:
-                'Links this server to a Discord guild (by guild ID), or links the current channel to a Discord channel (by channel ID). Run with `confirm` to proceed.',
-            usageArgs: ['<discordGuildId | discordChannelId>'],
+                'Links this server to a Discord guild (by guild ID), links the current channel to a Discord channel (by channel ID), or, when run inside a thread of a linked channel, links that thread to a Discord thread (by thread ID). Run with `confirm` to proceed.',
+            usageArgs: [
+                '<discordGuildId | discordChannelId | discordThreadId>',
+            ],
         },
     },
     {
         name: 'unlink',
         discord: {
             description:
-                'Unlinks this Discord guild from its linked Fluxer guild, or removes a specific channel link by Fluxer channel ID.',
-            usageArgs: ['<fluxerGuildId | fluxerChannelId>'],
+                'Unlinks this Discord guild from its linked Fluxer guild, removes a channel link by Fluxer channel ID, or removes a thread link by Fluxer thread ID.',
+            usageArgs: ['<fluxerGuildId | fluxerChannelId | fluxerThreadId>'],
         },
         fluxer: {
             description:
-                'Unlinks this Fluxer guild from its linked Discord guild, or removes a specific channel link by Discord channel ID.',
-            usageArgs: ['<discordGuildId | discordChannelId>'],
+                'Unlinks this Fluxer guild from its linked Discord guild, removes a channel link by Discord channel ID, or removes a thread link by Discord thread ID.',
+            usageArgs: [
+                '<discordGuildId | discordChannelId | discordThreadId>',
+            ],
+        },
+    },
+    {
+        name: 'threads',
+        discord: {
+            description:
+                'Shows or sets whether new threads in the current linked channel are bridged automatically. Run inside the channel (or one of its threads) with `on` or `off`; with no argument the current setting is shown.',
+            usageArgs: ['[on | off]'],
+        },
+        fluxer: {
+            description:
+                'Shows or sets whether new threads in the current linked channel are bridged automatically. Run inside the channel (or one of its threads) with `on` or `off`; with no argument the current setting is shown.',
+            usageArgs: ['[on | off]'],
         },
     },
     {
         name: 'list',
         discord: {
-            description: 'Lists all channel links in this server.',
+            description:
+                'Lists all channel links in this server, including bridged threads.',
             usageArgs: [],
         },
         fluxer: {
-            description: 'Lists all channel links in this server.',
+            description:
+                'Lists all channel links in this server, including bridged threads.',
             usageArgs: [],
         },
     },

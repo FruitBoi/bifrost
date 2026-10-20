@@ -137,6 +137,24 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
         return result;
     }
 
+    async setAutoSyncThreads(
+        id: string,
+        enabled: boolean
+    ): Promise<ChannelLink> {
+        const updated = await this.repository.setAutoSyncThreads(id, enabled);
+
+        this.cache.set(updated.id, updated);
+        this.cache.set(
+            this.guildKey(updated.guildLinkId, updated.linkId),
+            updated
+        );
+        this.cache.set(this.discordKey(updated.discordChannelId), updated);
+        this.cache.set(this.fluxerKey(updated.fluxerChannelId), updated);
+        this.cache.del(this.guildAllKey(updated.guildLinkId));
+
+        return updated;
+    }
+
     async deleteById(id: string): Promise<void> {
         const existing = await this.repository.findById(id);
         if (!existing) return;

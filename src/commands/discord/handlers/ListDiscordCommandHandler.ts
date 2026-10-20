@@ -1,5 +1,6 @@
 import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
+import { ChannelLink } from '../../../db/entities/ChannelLink';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -18,26 +19,54 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
     }
 
     private async buildChannelLines(
-        channelLinks: {
-            fluxerChannelId: string;
-            discordChannelId: string;
-            linkId: string;
-        }[],
+        channelLinks: Pick<
+            ChannelLink,
+            | 'id'
+            | 'fluxerChannelId'
+            | 'discordChannelId'
+            | 'linkId'
+            | 'autoSyncThreads'
+        >[],
         fluxerGuildId: string,
         showLinkId = false
     ): Promise<string[]> {
         return Promise.all(
             channelLinks.map(async (link) => {
-                const fluxerChannel = await this.fluxerEntityResolver
-                    .fetchChannel(fluxerGuildId, link.fluxerChannelId)
-                    .catch(() => null);
+                const [fluxerChannel, threadLinks] = await Promise.all([
+                    this.fluxerEntityResolver
+                        .fetchChannel(fluxerGuildId, link.fluxerChannelId)
+                        .catch(() => null),
+                    this.linkService
+                        .getThreadLinksForChannelLink(link.id)
+                        .catch(() => []),
+                ]);
                 const fluxerName =
                     (fluxerChannel as { name?: string } | null)?.name ??
                     link.fluxerChannelId;
                 const fluxerUrl = `https://fluxer.app/channels/${fluxerGuildId}/${link.fluxerChannelId}`;
                 const suffix = showLinkId ? ` | \`${link.linkId}\`` : '';
+                const autoThreads = link.autoSyncThreads
+                    ? ' · 🧵 auto-threads'
+                    : '';
                 // Discord on left, Fluxer on right (viewing from Discord)
-                return `<#${link.discordChannelId}> ←→ [#${fluxerName}](${fluxerUrl})${suffix}\n  └ \`${link.discordChannelId}\` · \`${link.fluxerChannelId}\``;
+                const lines = [
+                    `<#${link.discordChannelId}> ←→ [#${fluxerName}](${fluxerUrl})${suffix}${autoThreads}\n  └ \`${link.discordChannelId}\` · \`${link.fluxerChannelId}\``,
+                ];
+
+                const threadLines = await Promise.all(
+                    threadLinks.map(async (threadLink) => {
+                        const fluxerThread = await this.fluxerEntityResolver
+                            .fetchThread(threadLink.fluxerThreadId)
+                            .catch(() => null);
+                        const threadName =
+                            fluxerThread?.name ?? threadLink.fluxerThreadId;
+                        const threadUrl = `https://fluxer.app/channels/${fluxerGuildId}/${threadLink.fluxerThreadId}`;
+                        return `    ↳ <#${threadLink.discordThreadId}> ←→ [${threadName}](${threadUrl})\n      └ \`${threadLink.discordThreadId}\` · \`${threadLink.fluxerThreadId}\``;
+                    })
+                );
+                lines.push(...threadLines);
+
+                return lines.join('\n');
             })
         );
     }

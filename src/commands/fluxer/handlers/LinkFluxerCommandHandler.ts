@@ -7,6 +7,7 @@ import {
 import { LinkService } from '../../../services/LinkService';
 import { WebhookService } from '../../../services/WebhookService';
 import DiscordEntityResolver from '../../../services/entityResolver/DiscordEntityResolver';
+import ThreadSyncService from '../../../services/threadSync/ThreadSyncService';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
@@ -20,6 +21,13 @@ type PendingLink =
           channelName: string;
           guildLinkId: string;
           fluxerChannelId: string;
+      }
+    | {
+          type: 'thread';
+          channelLinkId: string;
+          fluxerThreadId: string;
+          discordThreadId: string;
+          threadName: string;
       };
 
 export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
@@ -32,7 +40,8 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
         client: Client,
         private readonly linkService: LinkService,
         private readonly webhookService: WebhookService,
-        private readonly discordEntityResolver: DiscordEntityResolver
+        private readonly discordEntityResolver: DiscordEntityResolver,
+        private readonly threadSyncService: ThreadSyncService
     ) {
         super(client);
     }
@@ -120,6 +129,55 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
                     });
                     logger.error('Link guild failed:', err);
                 }
+            } else if (pending.type === 'thread') {
+                if (
+                    !(await this.requirePermission(
+                        message,
+                        PermissionsBitField.Flags.ManageWebhooks,
+                        'Manage Webhooks'
+                    ))
+                )
+                    return;
+                try {
+                    const channelLink =
+                        await this.linkService.getChannelLinkById(
+                            pending.channelLinkId
+                        );
+                    if (!channelLink) {
+                        throw new Error(
+                            'the parent channel link no longer exists'
+                        );
+                    }
+                    await this.threadSyncService.linkExistingThreads({
+                        channelLink,
+                        discordThreadId: pending.discordThreadId,
+                        fluxerThreadId: pending.fluxerThreadId,
+                    });
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Linked this thread ↔ Discord thread **${pending.threadName}** successfully.`
+                                )
+                                .setColor(EmbedColors.Success)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to link thread: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Link thread failed:', err);
+                }
             } else {
                 if (
                     !(await this.requirePermission(
@@ -187,9 +245,98 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
                         .setDescription(
                             `Usage: \`${COMMAND_PREFIX}link <id>\`\n` +
                                 `> Provide a Discord guild ID to bridge servers, or a Discord channel ID to bridge channels.\n` +
+                                `> Inside a thread of a linked channel, provide a Discord thread ID to bridge threads.\n` +
                                 `> Then run \`${COMMAND_PREFIX}link confirm\` to proceed.`
                         )
                         .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        // Thread flow: invoked inside a thread -> id must be a Discord thread ID
+        const channel =
+            message.channel ??
+            (await message.resolveChannel().catch(() => null));
+        if (channel?.isThread()) {
+            const parentLink = channel.parentId
+                ? await this.linkService
+                      .getChannelLinkByFluxerChannelId(channel.parentId)
+                      .catch(() => null)
+                : null;
+            if (!parentLink) {
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setDescription(
+                                `This thread's parent channel is not linked. Link the parent channel first with \`${COMMAND_PREFIX}link <discord-channel-id>\`.`
+                            )
+                            .setColor(EmbedColors.Error)
+                            .setFooter(footer)
+                            .setTimestamp(),
+                    ],
+                });
+                return;
+            }
+
+            if (
+                !(await this.requirePermission(
+                    message,
+                    PermissionsBitField.Flags.ManageWebhooks,
+                    'Manage Webhooks'
+                ))
+            )
+                return;
+
+            const discordThread = await this.discordEntityResolver
+                .fetchThread(id)
+                .catch(() => null);
+            if (!discordThread) {
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setDescription(
+                                `Could not find a Discord thread with ID \`${id}\`.`
+                            )
+                            .setColor(EmbedColors.Error)
+                            .setFooter(footer)
+                            .setTimestamp(),
+                    ],
+                });
+                return;
+            }
+            if (discordThread.parentId !== parentLink.discordChannelId) {
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setDescription(
+                                `Discord thread **${discordThread.name}** does not belong to the Discord channel linked to this thread's parent channel.`
+                            )
+                            .setColor(EmbedColors.Error)
+                            .setFooter(footer)
+                            .setTimestamp(),
+                    ],
+                });
+                return;
+            }
+
+            this.setPending(message.author.id, {
+                type: 'thread',
+                channelLinkId: parentLink.id,
+                fluxerThreadId: message.channelId,
+                discordThreadId: id,
+                threadName: discordThread.name,
+            });
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Found Discord thread **${discordThread.name}**.\n` +
+                                `Run \`${COMMAND_PREFIX}link confirm\` to link this thread to it.`
+                        )
+                        .setColor(EmbedColors.Warning)
                         .setFooter(footer)
                         .setTimestamp(),
                 ],

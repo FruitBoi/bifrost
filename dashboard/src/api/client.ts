@@ -5,12 +5,15 @@ import type {
     AutolinkPreviewResponse,
     AutolinkResponse,
     ChannelLinkSummary,
+    ChannelThreadsResponse,
     CreateChannelLinkBody,
     CreateGuildLinkBody,
+    CreateThreadLinkBody,
     GuildChannelsResponse,
     GuildsResponse,
     InviteLinkResponse,
     MeResponse,
+    UpdateChannelLinkBody,
 } from '../../../src/web/types';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -111,6 +114,73 @@ export function useDeleteChannelLink(guildLinkId: string | undefined) {
             queryClient.invalidateQueries({
                 queryKey: ['guild-channels', guildLinkId],
             }),
+    });
+}
+
+export function useUpdateChannelLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({
+            channelLinkId,
+            ...body
+        }: UpdateChannelLinkBody & { channelLinkId: string }) =>
+            apiFetch<{ id: string; autoSyncThreads: boolean }>(
+                `/channel-links/${channelLinkId}`,
+                { method: 'PATCH', body: JSON.stringify(body) }
+            ),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['guild-channels', guildLinkId],
+            }),
+    });
+}
+
+export function useChannelThreads(
+    channelLinkId: string | undefined,
+    enabled: boolean
+) {
+    return useQuery({
+        queryKey: ['channel-threads', channelLinkId],
+        queryFn: () =>
+            apiFetch<ChannelThreadsResponse>(
+                `/channel-links/${channelLinkId}/threads`
+            ),
+        enabled: !!channelLinkId && enabled,
+    });
+}
+
+export function useCreateThreadLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (body: CreateThreadLinkBody) =>
+            apiFetch<{ id: string }>('/thread-links', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            }),
+        onSuccess: (_data, variables) => {
+            queryClient.invalidateQueries({
+                queryKey: ['guild-channels', guildLinkId],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ['channel-threads', variables.channelLinkId],
+            });
+        },
+    });
+}
+
+export function useDeleteThreadLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (threadLinkId: string) =>
+            apiFetch<void>(`/thread-links/${threadLinkId}`, {
+                method: 'DELETE',
+            }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({
+                queryKey: ['guild-channels', guildLinkId],
+            });
+            queryClient.invalidateQueries({ queryKey: ['channel-threads'] });
+        },
     });
 }
 

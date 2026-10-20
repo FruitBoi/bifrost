@@ -1,10 +1,12 @@
 import { CachedChannelLinkRepository } from './db/cachedrepos/CachedChannelLinkRepository';
 import { CachedGuildLinkRepository } from './db/cachedrepos/CachedGuildLinkRepository';
 import { CachedMessageLinkRepository } from './db/cachedrepos/CachedMessageLinkRepository';
+import { CachedThreadLinkRepository } from './db/cachedrepos/CachedThreadLinkRepository';
 import { initDatabase } from './db/migrator';
 import { SequelizeChannelLinkRepository } from './db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeGuildLinkRepository } from './db/sequelizerepos/SequelizeGuildLinkRepository';
 import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMessageLinkRepository';
+import { SequelizeThreadLinkRepository } from './db/sequelizerepos/SequelizeThreadLinkRepository';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -16,6 +18,7 @@ import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
 import { LinkService } from './services/LinkService';
 import { WebhookService } from './services/WebhookService';
+import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
@@ -63,6 +66,7 @@ const main = async () => {
     const guildLinkRepo = new SequelizeGuildLinkRepository();
     const channelLinkRepo = new SequelizeChannelLinkRepository();
     const messageLinkRepo = new SequelizeMessageLinkRepository();
+    const threadLinkRepo = new SequelizeThreadLinkRepository();
 
     const cachedGuildLinkRepo = new CachedGuildLinkRepository(guildLinkRepo, 0);
     const cachedChannelLinkRepo = new CachedChannelLinkRepository(
@@ -73,15 +77,25 @@ const main = async () => {
         messageLinkRepo,
         15_000
     );
+    const cachedThreadLinkRepo = new CachedThreadLinkRepository(
+        threadLinkRepo,
+        0
+    );
 
     const linkService = new LinkService(
         cachedGuildLinkRepo,
         cachedChannelLinkRepo,
-        cachedMessageLinkRepo
+        cachedMessageLinkRepo,
+        cachedThreadLinkRepo
     );
     const webhookService = new WebhookService();
     const discordEntityResolver = new DiscordEntityResolver();
     const fluxerEntityResolver = new FluxerEntityResolver();
+    const threadSyncService = new ThreadSyncService(
+        linkService,
+        discordEntityResolver,
+        fluxerEntityResolver
+    );
     const discordStatsService = new DiscordStatsService();
     const fluxerStatsService = new FluxerStatsService();
     const dbStatsService = new DbStatsService(
@@ -99,6 +113,7 @@ const main = async () => {
         healthCheckService,
         discordEntityResolver,
         fluxerEntityResolver,
+        threadSyncService,
         metricsService,
         queueService,
         discordStatsService,
@@ -178,7 +193,11 @@ const main = async () => {
         );
     });
 
-    const perms = '536947712';
+    // View Channel, Send Messages, Embed Links, Read Message History,
+    // Manage Webhooks (536947712) plus the thread bits, which share the same
+    // values on Discord and Fluxer: Manage Threads (1<<34),
+    // Create Public Threads (1<<35) and Send Messages in Threads (1<<38).
+    const perms = '326954462208';
     const discordBotInviteLink = generateDiscordBotInviteLink(
         DISCORD_APP_ID,
         perms
@@ -206,6 +225,7 @@ const main = async () => {
             healthCheckService,
             discordEntityResolver,
             fluxerEntityResolver,
+            threadSyncService,
             metricsService,
             queueService,
             discordStatsService,
@@ -225,6 +245,7 @@ const main = async () => {
         const webApp = createWebApp({
             linkService,
             webhookService,
+            threadSyncService,
             discordClient,
             fluxerClientRef,
             discordStatsService,

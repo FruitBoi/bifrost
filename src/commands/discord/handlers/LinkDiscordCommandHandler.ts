@@ -2,6 +2,7 @@ import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
 import { WebhookService } from '../../../services/WebhookService';
 import FluxerEntityResolver from '../../../services/entityResolver/FluxerEntityResolver';
+import ThreadSyncService from '../../../services/threadSync/ThreadSyncService';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -17,6 +18,13 @@ type PendingLink =
           channelName: string;
           guildLinkId: string;
           discordChannelId: string;
+      }
+    | {
+          type: 'thread';
+          channelLinkId: string;
+          discordThreadId: string;
+          fluxerThreadId: string;
+          threadName: string;
       };
 
 export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
@@ -29,7 +37,8 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
         client: Client,
         private readonly linkService: LinkService,
         private readonly webhookService: WebhookService,
-        private readonly fluxerEntityResolver: FluxerEntityResolver
+        private readonly fluxerEntityResolver: FluxerEntityResolver,
+        private readonly threadSyncService: ThreadSyncService
     ) {
         super(client);
     }
@@ -117,6 +126,56 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                     });
                     logger.error('Link guild failed:', err);
                 }
+            } else if (pending.type === 'thread') {
+                if (
+                    !(await this.requirePermission(
+                        message,
+                        PermissionFlagsBits.ManageWebhooks,
+                        'Manage Webhooks'
+                    ))
+                )
+                    return;
+                try {
+                    const channelLink =
+                        await this.linkService.getChannelLinkById(
+                            pending.channelLinkId
+                        );
+                    if (!channelLink) {
+                        throw new Error(
+                            'The parent channel link no longer exists'
+                        );
+                    }
+                    await this.threadSyncService.linkExistingThreads({
+                        channelLink,
+                        discordThreadId: pending.discordThreadId,
+                        fluxerThreadId: pending.fluxerThreadId,
+                    });
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Linked thread <#${pending.discordThreadId}> ↔ **${pending.threadName}** successfully.\n` +
+                                        `Messages, edits, deletes and renames will now be bridged between the two threads.`
+                                )
+                                .setColor(EmbedColors.Success)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to link thread: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Link thread failed:', err);
+                }
             } else {
                 if (
                     !(await this.requirePermission(
@@ -184,6 +243,7 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                         .setDescription(
                             `Usage: \`${COMMAND_PREFIX}link <id>\`\n` +
                                 `> Provide a Fluxer guild ID to bridge servers, or a Fluxer channel ID to bridge channels.\n` +
+                                `> Inside a thread of a linked channel, provide a Fluxer thread ID to bridge threads.\n` +
                                 `> Then run \`${COMMAND_PREFIX}link confirm\` to proceed.`
                         )
                         .setColor(EmbedColors.Error)
@@ -191,6 +251,12 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                         .setTimestamp(),
                 ],
             });
+            return;
+        }
+
+        // 0. Inside a thread: link this thread to a Fluxer thread
+        if (message.channel.isThread()) {
+            await this.handleThreadLink(message, id);
             return;
         }
 
@@ -281,6 +347,121 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                         `Could not find a Fluxer guild or channel with ID \`${id}\`.${hint}`
                     )
                     .setColor(EmbedColors.Error)
+                    .setFooter(footer)
+                    .setTimestamp(),
+            ],
+        });
+    }
+
+    private async handleThreadLink(
+        message: DiscordCommandHandlerMessage,
+        fluxerThreadId: string
+    ): Promise<void> {
+        const footer = this.footer(message);
+        const thread = message.channel;
+        if (!thread.isThread()) return;
+
+        const parentId = thread.parentId;
+        const channelLink = parentId
+            ? await this.linkService
+                  .getChannelLinkByDiscordChannelId(parentId)
+                  .catch(() => null)
+            : null;
+        if (!channelLink) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `This thread's parent channel is not linked. ` +
+                                `Link the parent channel first with \`${COMMAND_PREFIX}link <fluxer-channel-id>\`, then link threads inside it.`
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        const existing = await this.linkService
+            .getThreadLinkByDiscordThreadId(thread.id)
+            .catch(() => null);
+        if (existing) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `This thread is already linked to Fluxer thread \`${existing.fluxerThreadId}\`.\n` +
+                                `Use \`${COMMAND_PREFIX}unlink ${existing.fluxerThreadId}\` to remove it first.`
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        const fluxerThread = await this.fluxerEntityResolver
+            .fetchThread(fluxerThreadId)
+            .catch(() => null);
+        if (!fluxerThread) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Could not find a Fluxer thread with ID \`${fluxerThreadId}\`.\n` +
+                                `> Inside a thread, \`${COMMAND_PREFIX}link <id>\` expects the ID of a thread in the linked Fluxer channel.`
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        if (fluxerThread.parentId !== channelLink.fluxerChannelId) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Fluxer thread \`${fluxerThreadId}\` is not a thread of the linked Fluxer channel \`${channelLink.fluxerChannelId}\`.\n` +
+                                `> Threads can only be bridged to threads of the channel their parent is linked to.`
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        if (
+            !(await this.requirePermission(
+                message,
+                PermissionFlagsBits.ManageWebhooks,
+                'Manage Webhooks'
+            ))
+        )
+            return;
+
+        const threadName = fluxerThread.name ?? fluxerThreadId;
+        this.setPending(message.author.id, {
+            type: 'thread',
+            channelLinkId: channelLink.id,
+            discordThreadId: thread.id,
+            fluxerThreadId,
+            threadName,
+        });
+        await message.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setDescription(
+                        `Found Fluxer thread **${threadName}**.\n` +
+                            `Run \`${COMMAND_PREFIX}link confirm\` to link this thread to it.`
+                    )
+                    .setColor(EmbedColors.Warning)
                     .setFooter(footer)
                     .setTimestamp(),
             ],

@@ -3,6 +3,7 @@ import path from 'path';
 import type { Client as DiscordClient } from 'discord.js';
 import { LinkService } from '../services/LinkService';
 import { WebhookService } from '../services/WebhookService';
+import ThreadSyncService from '../services/threadSync/ThreadSyncService';
 import { DbStatsService } from '../services/DbStatsService';
 import type StatsService from '../services/statsService/StatsService';
 import { isProduction, WEB_TRUST_PROXY } from '../utils/env';
@@ -20,6 +21,7 @@ const DASHBOARD_DIST = path.join(__dirname, '..', '..', 'dashboard', 'dist');
 export function createWebApp({
     linkService,
     webhookService,
+    threadSyncService,
     discordClient,
     fluxerClientRef,
     discordStatsService,
@@ -28,6 +30,7 @@ export function createWebApp({
 }: {
     linkService: LinkService;
     webhookService: WebhookService;
+    threadSyncService: ThreadSyncService;
     discordClient: DiscordClient;
     fluxerClientRef: FluxerClientRef;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,6 +62,7 @@ export function createWebApp({
         createChannelsRouter({
             linkService,
             webhookService,
+            threadSyncService,
             discordClient,
             fluxerClientRef,
         })

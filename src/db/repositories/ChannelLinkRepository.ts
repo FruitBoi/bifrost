@@ -26,6 +26,8 @@ export interface ChannelLinkRepository {
 
     findByFluxerChannelId(fluxerChannelId: string): Promise<ChannelLink | null>;
 
+    setAutoSyncThreads(id: string, enabled: boolean): Promise<ChannelLink>;
+
     deleteById(id: string): Promise<void>;
 
     deleteByGuildLinkId(guildLinkId: string): Promise<void>;

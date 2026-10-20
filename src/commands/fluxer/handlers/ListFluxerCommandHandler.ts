@@ -5,6 +5,7 @@ import {
     PermissionsBitField,
 } from '@fluxerjs/core';
 import { LinkService } from '../../../services/LinkService';
+import { ChannelLink } from '../../../db/entities/ChannelLink';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import DiscordEntityResolver from '../../../services/entityResolver/DiscordEntityResolver';
 import logger from '../../../utils/logging/logger';
@@ -20,12 +21,31 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
         super(client);
     }
 
+    private async buildThreadLines(
+        link: ChannelLink,
+        discordGuildId: string
+    ): Promise<string> {
+        const threadLinks = await this.linkService
+            .getThreadLinksForChannelLink(link.id)
+            .catch(() => []);
+        if (threadLinks.length === 0) return '';
+
+        const lines = await Promise.all(
+            threadLinks.map(async (threadLink) => {
+                const discordThread = await this.discordEntityResolver
+                    .fetchThread(threadLink.discordThreadId)
+                    .catch(() => null);
+                const discordName =
+                    discordThread?.name ?? threadLink.discordThreadId;
+                const discordUrl = `https://discord.com/channels/${discordGuildId}/${threadLink.discordThreadId}`;
+                return `    ↳ <#${threadLink.fluxerThreadId}> ←→ [${discordName}](${discordUrl})\n      └ \`${threadLink.fluxerThreadId}\` · \`${threadLink.discordThreadId}\``;
+            })
+        );
+        return '\n' + lines.join('\n');
+    }
+
     private async buildChannelLines(
-        channelLinks: {
-            fluxerChannelId: string;
-            discordChannelId: string;
-            linkId: string;
-        }[],
+        channelLinks: ChannelLink[],
         discordGuildId: string,
         showLinkId = false
     ): Promise<string[]> {
@@ -39,7 +59,14 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                     link.discordChannelId;
                 const discordUrl = `https://discord.com/channels/${discordGuildId}/${link.discordChannelId}`;
                 const suffix = showLinkId ? ` | \`${link.linkId}\`` : '';
-                return `<#${link.fluxerChannelId}> ←→ [#${discordName}](${discordUrl})${suffix}\n  └ \`${link.fluxerChannelId}\` · \`${link.discordChannelId}\``;
+                const autoThreads = link.autoSyncThreads
+                    ? ' · 🧵 auto-threads'
+                    : '';
+                const threadLines = await this.buildThreadLines(
+                    link,
+                    discordGuildId
+                );
+                return `<#${link.fluxerChannelId}> ←→ [#${discordName}](${discordUrl})${suffix}${autoThreads}\n  └ \`${link.fluxerChannelId}\` · \`${link.discordChannelId}\`${threadLines}`;
             })
         );
     }

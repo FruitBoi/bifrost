@@ -48,6 +48,12 @@ ChannelLinkModel.init(
             type: DataTypes.STRING,
             allowNull: false,
         },
+
+        autoSyncThreads: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
     },
     {
         sequelize,

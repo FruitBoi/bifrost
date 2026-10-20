@@ -12,5 +12,9 @@ export interface ChannelLink {
     fluxerWebhookToken: string;
 
     linkId: string;
+
+    /** When true, new threads in either channel are bridged automatically. */
+    autoSyncThreads: boolean;
+
     createdAt: Date;
 }

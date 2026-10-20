@@ -1,4 +1,11 @@
-import { Channel, Client, Guild, GuildEmoji, Message } from '@fluxerjs/core';
+import {
+    Channel,
+    Client,
+    Guild,
+    GuildEmoji,
+    Message,
+    ThreadChannel,
+} from '@fluxerjs/core';
 import NodeCache from 'node-cache';
 import logger from '../../utils/logging/logger';
 import {
@@ -43,11 +50,16 @@ export default class FluxerEntityResolver implements EntityResolver<
         }
     }
 
+    /**
+     * Fetches a channel that belongs to the given guild. Guild channel listings
+     * do not include threads, so thread IDs fall back to a direct channel fetch
+     * and are verified against the guild.
+     */
     async fetchChannel(
         guildOrId: string | Guild,
         channelId: string
     ): Promise<Channel | null> {
-        this.ensureClient();
+        const client = this.ensureClient();
 
         try {
             const guild =
@@ -57,11 +69,29 @@ export default class FluxerEntityResolver implements EntityResolver<
 
             if (!guild) return null;
 
-            return (
-                (await guild.fetchChannels()).find(
-                    (ch) => ch.id === channelId
-                ) || null
+            const listed = (await guild.fetchChannels()).find(
+                (ch) => ch.id === channelId
             );
+            if (listed) return listed;
+
+            const direct = await client.channels.fetch(channelId);
+            if (!direct || !direct.isGuild() || direct.guildId !== guild.id) {
+                return null;
+            }
+            return direct;
+        } catch {
+            return null;
+        }
+    }
+
+    /** Fetches a thread by ID; returns null when the ID is not a thread. */
+    async fetchThread(threadId: string): Promise<ThreadChannel | null> {
+        const client = this.ensureClient();
+
+        try {
+            const channel = await client.channels.fetch(threadId);
+            if (!channel || !channel.isThread()) return null;
+            return channel;
         } catch {
             return null;
         }

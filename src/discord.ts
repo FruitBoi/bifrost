@@ -20,6 +20,7 @@ import { LinkService } from './services/LinkService';
 import LinkDiscordCommandHandler from './commands/discord/handlers/LinkDiscordCommandHandler';
 import UnlinkDiscordCommandHandler from './commands/discord/handlers/UnlinkDiscordCommandHandler';
 import ListDiscordCommandHandler from './commands/discord/handlers/ListDiscordCommandHandler';
+import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDiscordCommandHandler';
 import { WebhookService } from './services/WebhookService';
 import DiscordToFluxerMessageRelay from './services/messageRelay/DiscordToFluxerMessageRelay';
 import HelpDiscordCommandHandler from './commands/discord/handlers/HelpDiscordCommandHandler';
@@ -34,6 +35,7 @@ import FluxerStatsService from './services/statsService/FluxerStatsService';
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscordCommandHandler';
 import { DbStatsService } from './services/DbStatsService';
+import ThreadSyncService from './services/threadSync/ThreadSyncService';
 
 const startDiscordClient = async ({
     linkService,
@@ -41,6 +43,7 @@ const startDiscordClient = async ({
     healthCheckService,
     discordEntityResolver,
     fluxerEntityResolver,
+    threadSyncService,
     metricsService,
     queueService,
     discordStatsService,
@@ -52,6 +55,7 @@ const startDiscordClient = async ({
     healthCheckService: HealthCheckService;
     discordEntityResolver: DiscordEntityResolver;
     fluxerEntityResolver: FluxerEntityResolver;
+    threadSyncService: ThreadSyncService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -79,6 +83,7 @@ const startDiscordClient = async ({
     webhookService.setDiscordClient(client);
     healthCheckService.setDiscordClient(client);
     discordEntityResolver.setDiscordClient(client);
+    threadSyncService.setDiscordClient(client);
     discordStatsService.setClient(client);
 
     const messageTransformer = new DiscordMessageTransformer();
@@ -89,6 +94,7 @@ const startDiscordClient = async ({
         metricsService,
         queueService,
         fluxerEntityResolver,
+        threadSyncService,
     });
 
     const commandRegistry = new CommandRegistry<DiscordCommandHandler>();
@@ -111,16 +117,26 @@ const startDiscordClient = async ({
             client,
             linkService,
             webhookService,
-            fluxerEntityResolver
+            fluxerEntityResolver,
+            threadSyncService
         )
     );
     commandRegistry.registerCommand(
         'unlink',
-        new UnlinkDiscordCommandHandler(client, linkService, webhookService)
+        new UnlinkDiscordCommandHandler(
+            client,
+            linkService,
+            webhookService,
+            threadSyncService
+        )
     );
     commandRegistry.registerCommand(
         'list',
         new ListDiscordCommandHandler(client, linkService, fluxerEntityResolver)
+    );
+    commandRegistry.registerCommand(
+        'threads',
+        new ThreadsDiscordCommandHandler(client, linkService)
     );
     commandRegistry.registerCommand(
         'autolink',
@@ -154,6 +170,38 @@ const startDiscordClient = async ({
         logger.error('Discord client error:', error);
     });
 
+    client.on(Events.ThreadCreate, async (thread, newlyCreated) => {
+        // `newlyCreated` is false when the bot merely gained access to an
+        // existing thread; those are handled lazily on their first message.
+        if (!newlyCreated) return;
+        if (isFluxerApiBlocked()) return;
+        try {
+            await threadSyncService.resolveDiscordThread(thread, 'auto');
+        } catch (error) {
+            logger.error('Error handling Discord thread creation:', error);
+        }
+    });
+
+    client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
+        if (isFluxerApiBlocked()) return;
+        try {
+            await threadSyncService.handleDiscordThreadUpdate(
+                oldThread,
+                newThread
+            );
+        } catch (error) {
+            logger.error('Error handling Discord thread update:', error);
+        }
+    });
+
+    client.on(Events.ThreadDelete, async (thread) => {
+        try {
+            await threadSyncService.handleDiscordThreadDelete(thread.id);
+        } catch (error) {
+            logger.error('Error handling Discord thread deletion:', error);
+        }
+    });
+
     client.on(Events.MessageDelete, async (message) => {
         if (!message.inGuild()) return;
 
@@ -168,10 +216,10 @@ const startDiscordClient = async ({
             logger.error('Error deleting message link from database:', error);
         }
 
-        const channelLink = await linkService.getChannelLinkById(
-            messageLink.channelLinkId
-        );
-        if (!channelLink) return;
+        const context =
+            await linkService.resolveContextForMessageLink(messageLink);
+        if (!context) return;
+        const { channelLink, threadLink } = context;
 
         const guildLink = await linkService.getGuildLinkById(
             channelLink.guildLinkId
@@ -180,11 +228,13 @@ const startDiscordClient = async ({
 
         if (isFluxerApiBlocked()) return;
 
-        const msg = await fluxerEntityResolver.fetchMessage(
-            guildLink.fluxerGuildId,
-            channelLink.fluxerChannelId,
-            messageLink.fluxerMessageId
-        );
+        const msg = await fluxerEntityResolver
+            .fetchMessage(
+                guildLink.fluxerGuildId,
+                threadLink?.fluxerThreadId ?? channelLink.fluxerChannelId,
+                messageLink.fluxerMessageId
+            )
+            .catch(() => null);
         if (!msg) {
             logger.error(
                 'Could not find linked Fluxer message to delete for Discord message ID:',
@@ -207,10 +257,10 @@ const startDiscordClient = async ({
             await linkService.getMessageLinkByDiscordMessageId(newMessage.id);
         if (!linkedMessage) return;
 
-        const linkedChannel = await linkService.getChannelLinkById(
-            linkedMessage.channelLinkId
-        );
-        if (!linkedChannel) return;
+        const context =
+            await linkService.resolveContextForMessageLink(linkedMessage);
+        if (!context) return;
+        const { channelLink: linkedChannel, threadLink } = context;
 
         const guildLink = await linkService.getGuildLinkById(
             linkedChannel.guildLinkId
@@ -242,7 +292,8 @@ const startDiscordClient = async ({
             await webhookService.editMessageViaFluxerWebhook(
                 webhook,
                 linkedMessage.fluxerMessageId,
-                newMsg
+                newMsg,
+                threadLink?.fluxerThreadId ?? null
             );
         } catch (error) {
             logger.error('Error editing message via Fluxer webhook:', error);
@@ -253,13 +304,12 @@ const startDiscordClient = async ({
         if (message.author.id === client.user?.id) return;
 
         if (message.inGuild() && message.webhookId) {
-            const webhookLink =
-                await linkService.getChannelLinkByDiscordChannelId(
-                    message.channelId
-                );
+            const context = await linkService.resolveDiscordContext(
+                message.channelId
+            );
             if (
-                webhookLink &&
-                webhookLink.discordWebhookId === message.webhookId
+                context &&
+                context.channelLink.discordWebhookId === message.webhookId
             )
                 return;
         }
@@ -314,7 +364,8 @@ const startDiscordClient = async ({
 
         if (
             message.inGuild() &&
-            message.channel instanceof TextChannel &&
+            (message.channel instanceof TextChannel ||
+                message.channel.isThread()) &&
             !isCommandString(message.content, COMMAND_PREFIX)
         ) {
             await messageRelay.relayMessage(message);

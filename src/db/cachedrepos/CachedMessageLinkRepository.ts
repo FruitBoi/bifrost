@@ -35,13 +35,15 @@ export class CachedMessageLinkRepository implements MessageLinkRepository {
         guildLinkId: string,
         channelLinkId: string,
         discordMessageId: string,
-        fluxerMessageId: string
+        fluxerMessageId: string,
+        threadLinkId: string | null = null
     ): Promise<void> {
         await this.repository.createMessageLink(
             guildLinkId,
             channelLinkId,
             discordMessageId,
-            fluxerMessageId
+            fluxerMessageId,
+            threadLinkId
         );
 
         const created =
@@ -88,6 +90,20 @@ export class CachedMessageLinkRepository implements MessageLinkRepository {
 
         for (const [key, value] of this.cache.entries()) {
             if (value.channelLinkId === channelLinkId) {
+                this.cache.delete(key);
+                this.cache.delete(this.idKey(value.id));
+                this.cache.delete(this.discordKey(value.discordMessageId));
+                this.cache.delete(this.fluxerKey(value.fluxerMessageId));
+            }
+        }
+        this.metaCache.delete('count');
+    }
+
+    async deleteByThreadLinkId(threadLinkId: string): Promise<void> {
+        await this.repository.deleteByThreadLinkId(threadLinkId);
+
+        for (const [key, value] of this.cache.entries()) {
+            if (value.threadLinkId === threadLinkId) {
                 this.cache.delete(key);
                 this.cache.delete(this.idKey(value.id));
                 this.cache.delete(this.discordKey(value.discordMessageId));
