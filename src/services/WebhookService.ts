@@ -12,6 +12,7 @@ import {
     WebhookClient,
 } from 'discord.js';
 import logger from '../utils/logging/logger';
+import { sanitizeDiscordWebhookUsername } from '../utils/sanitizeDiscordWebhookUsername';
 import WebhookEmbed from './WebhookEmbed';
 
 type DiscordWebhook = WebhookClient;
@@ -146,7 +147,7 @@ export class WebhookService {
 
             const { id } = await webhook.send({
                 content: data.content,
-                username: data.username,
+                username: sanitizeDiscordWebhookUsername(data.username),
                 avatarURL: data.avatarURL,
                 files,
                 embeds:
