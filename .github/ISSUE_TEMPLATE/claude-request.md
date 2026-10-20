@@ -1,5 +1,5 @@
 ---
-name: Feature request
+name: Claude request
 about: Give claude instructions
 title: ''
 labels: ''
