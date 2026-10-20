@@ -1,8 +1,8 @@
 ---
 name: Claude request
-about: Give claude instructions
+about: Give claude instructions. When claude finishes, it will comment "Claude wins again" (with a gross amount of emojis) and close the issue.
 title: ''
-labels: ''
+labels: 'claude'
 assignees: ''
 
 ---
