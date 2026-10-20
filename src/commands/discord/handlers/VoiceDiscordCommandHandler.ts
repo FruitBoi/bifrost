@@ -211,7 +211,7 @@ export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
             embeds[embeds.length - 1]
                 .setFooter(this.footer(message))
                 .setTimestamp();
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
         } catch (err: unknown) {
             await this.replyError(
                 message,

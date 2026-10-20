@@ -215,7 +215,7 @@ export default class VoiceFluxerCommandHandler extends FluxerCommandHandler {
             embeds[embeds.length - 1]
                 .setFooter(this.footer(message))
                 .setTimestamp();
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
         } catch (err: unknown) {
             await this.replyError(
                 message,

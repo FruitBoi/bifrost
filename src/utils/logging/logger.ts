@@ -4,17 +4,32 @@ import { LoggerColors as Colors, getLevelColor } from './LoggerColors';
 import { CONFIG_PATH, isProduction } from '../env';
 
 const splatSymbol = Symbol.for('splat');
+// Set once the splat has been folded into `info.message`. The logger's format runs first and each
+// transport's format runs again on a shallow copy (symbol keys included), so without this the
+// console would print every serialized argument twice.
+const splatEnrichedSymbol = Symbol('bifrost.splatEnriched');
 
+/**
+ * JSON.stringify that replaces only true cycles with '[Circular]'. A value reached twice through
+ * different paths (FluxerAPIError's `errors` is also `rawBody.errors`) is printed both times.
+ */
 const stringifySafe = (value: unknown): string => {
-    const seen = new WeakSet<object>();
+    const ancestors: object[] = [];
 
     return JSON.stringify(
         value,
-        (_key, currentValue) => {
-            if (typeof currentValue === 'object' && currentValue !== null) {
-                if (seen.has(currentValue)) return '[Circular]';
-                seen.add(currentValue);
-            }
+        function (this: unknown, _key, currentValue: unknown) {
+            if (typeof currentValue !== 'object' || currentValue === null)
+                return currentValue;
+
+            // `this` is the object holding currentValue; unwind to it so only its ancestors remain.
+            while (
+                ancestors.length > 0 &&
+                ancestors[ancestors.length - 1] !== this
+            )
+                ancestors.pop();
+            if (ancestors.includes(currentValue)) return '[Circular]';
+            ancestors.push(currentValue);
 
             return currentValue;
         },
@@ -22,9 +37,41 @@ const stringifySafe = (value: unknown): string => {
     );
 };
 
-const serializeLogValue = (value: unknown): string => {
-    if (value instanceof Error)
-        return value.stack || `${value.name}: ${value.message}`;
+/**
+ * Properties API errors carry beyond `message`/`stack`: FluxerAPIError (@fluxerjs/rest) has
+ * code/statusCode/errors/rawBody/method/path, discord.js DiscordAPIError has
+ * code/status/method/url/rawError. The server's field-level detail lives in `errors`/`rawBody`/
+ * `rawError`, so logging only the stack loses it.
+ */
+const ERROR_DETAIL_KEYS = [
+    'code',
+    'statusCode',
+    'status',
+    'method',
+    'path',
+    'url',
+    'errors',
+    'rawBody',
+    'rawError',
+] as const;
+
+const errorDetail = (error: Error): Record<string, unknown> | undefined => {
+    const source = error as unknown as Record<string, unknown>;
+    const detail: Record<string, unknown> = {};
+    for (const key of ERROR_DETAIL_KEYS) {
+        if (key in source && source[key] !== undefined)
+            detail[key] = source[key];
+    }
+
+    return Object.keys(detail).length > 0 ? detail : undefined;
+};
+
+export const serializeLogValue = (value: unknown): string => {
+    if (value instanceof Error) {
+        const base = value.stack || `${value.name}: ${value.message}`;
+        const detail = errorDetail(value);
+        return detail ? `${base}\n${stringifySafe(detail)}` : base;
+    }
     if (typeof value === 'string') return value;
     if (typeof value === 'object' && value !== null)
         return stringifySafe(value);
@@ -33,6 +80,9 @@ const serializeLogValue = (value: unknown): string => {
 };
 
 const enrichMessageWithSplat = format((info) => {
+    if (info[splatEnrichedSymbol]) return info;
+    info[splatEnrichedSymbol] = true;
+
     const splatValues = info[splatSymbol] as unknown[] | undefined;
     if (!splatValues || splatValues.length === 0) return info;
 

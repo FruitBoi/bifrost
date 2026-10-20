@@ -173,7 +173,7 @@ export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
                     .setColor(EmbedColors.Warning);
             });
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
             return;
         }
 
@@ -222,6 +222,6 @@ export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
             });
         }
         embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-        await message.reply({ embeds });
+        await this.replyEmbeds(message, embeds);
     }
 }

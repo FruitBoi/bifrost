@@ -6,7 +6,7 @@ import {
     PermissionResolvable,
 } from 'discord.js';
 import CommandHandler from '../CommandHandler';
-import { EmbedColors } from '../../utils/embeds';
+import { batchEmbeds, EmbedColors } from '../../utils/embeds';
 import { DELETE_INVOCATION } from '../../utils/env';
 
 export type DiscordCommandHandlerMessage = OmitPartialGroupDMChannel<
@@ -23,6 +23,38 @@ export default abstract class DiscordCommandHandler extends CommandHandler<
             text: `${message.author.username} used ${message.content}`,
             iconURL: message.author.displayAvatarURL(),
         };
+    }
+
+    /**
+     * Reply with embeds, splitting them into as many messages as the per-message embed
+     * count and character limits require. The first batch is sent as a reply; later
+     * batches are sent as follow-up messages in the same channel.
+     */
+    protected async replyEmbeds(
+        message: DiscordCommandHandlerMessage,
+        embeds: EmbedBuilder[]
+    ): Promise<void> {
+        const batches = batchEmbeds(embeds);
+        for (const [i, batch] of batches.entries()) {
+            if (i === 0 || !message.channel.isSendable()) {
+                await message.reply({ embeds: batch });
+            } else {
+                await message.channel.send({ embeds: batch });
+            }
+        }
+    }
+
+    /**
+     * Send embeds through `send` (e.g. `dm.send`), one call per batch that fits in a
+     * single message.
+     */
+    protected async sendEmbeds(
+        embeds: EmbedBuilder[],
+        send: (options: { embeds: EmbedBuilder[] }) => Promise<unknown>
+    ): Promise<void> {
+        for (const batch of batchEmbeds(embeds)) {
+            await send({ embeds: batch });
+        }
     }
 
     protected async requirePermission(

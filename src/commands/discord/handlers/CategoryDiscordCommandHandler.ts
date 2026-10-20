@@ -87,7 +87,7 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
         embeds[embeds.length - 1]
             .setFooter(this.footer(message))
             .setTimestamp();
-        await message.reply({ embeds });
+        await this.replyEmbeds(message, embeds);
     }
 
     /**

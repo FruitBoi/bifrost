@@ -172,7 +172,7 @@ export default class AutolinkDiscordCommandHandler extends DiscordCommandHandler
                     .setColor(EmbedColors.Warning);
             });
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
             return;
         }
 
@@ -221,6 +221,6 @@ export default class AutolinkDiscordCommandHandler extends DiscordCommandHandler
             });
         }
         embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-        await message.reply({ embeds });
+        await this.replyEmbeds(message, embeds);
     }
 }

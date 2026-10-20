@@ -223,11 +223,13 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
                 if (!message.inGuild()) {
-                    await message.reply({ embeds });
+                    await this.replyEmbeds(message, embeds);
                 } else {
                     try {
                         const dm = await message.author.createDM();
-                        await dm.send({ embeds });
+                        await this.sendEmbeds(embeds, (options) =>
+                            dm.send(options)
+                        );
                     } catch {
                         await message.reply({
                             embeds: [
@@ -364,11 +366,13 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                     embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
                     if (!message.inGuild()) {
-                        await message.reply({ embeds });
+                        await this.replyEmbeds(message, embeds);
                     } else {
                         try {
                             const dm = await message.author.createDM();
-                            await dm.send({ embeds });
+                            await this.sendEmbeds(embeds, (options) =>
+                                dm.send(options)
+                            );
                         } catch {
                             await message.reply({
                                 embeds: [
@@ -497,7 +501,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
             );
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
         } catch (err: unknown) {
             await message.reply({
                 embeds: [

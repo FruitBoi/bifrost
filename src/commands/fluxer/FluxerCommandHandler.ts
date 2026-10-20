@@ -7,13 +7,15 @@ import {
 } from '@fluxerjs/core';
 import CommandHandler from '../CommandHandler';
 import logger from '../../utils/logging/logger';
-import { EmbedColors } from '../../utils/embeds';
+import { batchEmbeds, EmbedColors } from '../../utils/embeds';
 import { DELETE_INVOCATION } from '../../utils/env';
 
 // @fluxerjs/core does not expose ownerId on the Guild type declaration
 interface FluxerGuildWithOwner {
     ownerId?: string;
 }
+
+type EmbedSender = (payload: { embeds: EmbedBuilder[] }) => Promise<unknown>;
 
 export default abstract class FluxerCommandHandler extends CommandHandler<
     Client,
@@ -32,6 +34,37 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
                     message.author as { avatarURL?: () => string | undefined }
                 ).avatarURL?.() ?? undefined,
         };
+    }
+
+    /**
+     * Send `embeds` across as many messages as the per-message embed limits require
+     * (see {@link batchEmbeds}): the first batch through `sendFirst`, every later batch
+     * through `send`. A single batch is sent exactly as before, in one message.
+     */
+    protected async sendEmbeds(
+        embeds: EmbedBuilder[],
+        send: EmbedSender,
+        sendFirst: EmbedSender = send
+    ): Promise<void> {
+        const batches = batchEmbeds(embeds);
+        for (let i = 0; i < batches.length; i++) {
+            await (i === 0 ? sendFirst : send)({ embeds: batches[i] });
+        }
+    }
+
+    /**
+     * Reply to `message` with `embeds`; any batch that does not fit in the reply is sent
+     * as a standalone follow-up message in the same channel.
+     */
+    protected async replyEmbeds(
+        message: Message,
+        embeds: EmbedBuilder[]
+    ): Promise<void> {
+        await this.sendEmbeds(
+            embeds,
+            (payload) => message.send(payload),
+            (payload) => message.reply(payload)
+        );
     }
 
     protected async requirePermission(

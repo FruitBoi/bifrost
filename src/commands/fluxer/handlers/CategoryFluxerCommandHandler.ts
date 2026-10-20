@@ -191,7 +191,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                         .setColor(EmbedColors.Info)
                 );
                 embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-                await message.reply({ embeds });
+                await this.replyEmbeds(message, embeds);
             } catch (err: unknown) {
                 await this.replyError(
                     message,
@@ -299,7 +299,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                     )
             );
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
         } catch (err: unknown) {
             await this.replyError(
                 message,

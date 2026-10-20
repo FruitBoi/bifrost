@@ -232,7 +232,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                 embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
                 if (!message.guildId) {
-                    await message.reply({ embeds });
+                    await this.replyEmbeds(message, embeds);
                 } else {
                     try {
                         const dm = await (
@@ -243,7 +243,9 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                             }
                         ).createDM?.();
                         if (!dm) throw new Error('DM not supported');
-                        await dm.send({ embeds });
+                        await this.sendEmbeds(embeds, (payload) =>
+                            dm.send(payload)
+                        );
                     } catch {
                         await message.reply({
                             embeds: [
@@ -376,7 +378,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                     embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
                     if (!message.guildId) {
-                        await message.reply({ embeds });
+                        await this.replyEmbeds(message, embeds);
                     } else {
                         try {
                             const dm = await (
@@ -389,7 +391,9 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                                 }
                             ).createDM?.();
                             if (!dm) throw new Error('DM not supported');
-                            await dm.send({ embeds });
+                            await this.sendEmbeds(embeds, (payload) =>
+                                dm.send(payload)
+                            );
                         } catch {
                             await message.reply({
                                 embeds: [
@@ -512,7 +516,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
             );
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
-            await message.reply({ embeds });
+            await this.replyEmbeds(message, embeds);
         } catch (err: unknown) {
             await message.reply({
                 embeds: [
