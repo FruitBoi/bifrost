@@ -134,6 +134,14 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'map',
+        fluxer: {
+            description:
+                'Records that the mentioned Fluxer member is the given Discord user, so pings of either account are bridged to the other. Only works when neither account is mapped yet; existing mappings are shown and left alone (`role` replaces them). Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
+            usageArgs: ['<@fluxerUser> <discordUserId>'],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:

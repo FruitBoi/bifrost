@@ -54,6 +54,7 @@ import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 import RoleFluxerCommandHandler from './commands/fluxer/handlers/RoleFluxerCommandHandler';
+import MapFluxerCommandHandler from './commands/fluxer/handlers/MapFluxerCommandHandler';
 import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
@@ -202,6 +203,15 @@ const startFluxerClient = async ({
             linkService,
             discordEntityResolver,
             threadMemberSyncService,
+            botConfig.roles.copyAllowedRoleIds
+        )
+    );
+    commandRegistry.registerCommand(
+        'map',
+        new MapFluxerCommandHandler(
+            client,
+            linkService,
+            discordEntityResolver,
             botConfig.roles.copyAllowedRoleIds
         )
     );

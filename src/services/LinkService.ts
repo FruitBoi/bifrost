@@ -464,6 +464,33 @@ export class LinkService {
         return { link, unchanged: false, replaced };
     }
 
+    /**
+     * Maps a Discord user to a Fluxer user only when neither is mapped yet in
+     * the guild link. Returns the new row, or null plus the rows that stand
+     * in the way (which may be this very mapping, already present).
+     */
+    async createUserLinkIfUnmapped(data: {
+        guildLinkId: string;
+        discordUserId: string;
+        fluxerUserId: string;
+    }): Promise<{ link: UserLink | null; existing: UserLink[] }> {
+        const byDiscord = await this.userRepo.findByDiscordUser(
+            data.guildLinkId,
+            data.discordUserId
+        );
+        const byFluxer = await this.userRepo.findByFluxerUser(
+            data.guildLinkId,
+            data.fluxerUserId
+        );
+        const existing: UserLink[] = [];
+        for (const row of [byDiscord, byFluxer]) {
+            if (row && !existing.some((e) => e.id === row.id))
+                existing.push(row);
+        }
+        if (existing.length > 0) return { link: null, existing };
+        return { link: await this.userRepo.create(data), existing: [] };
+    }
+
     async removeUserLink(userLinkId: string): Promise<UserLink> {
         const link = await this.userRepo.findById(userLinkId);
         if (!link) {

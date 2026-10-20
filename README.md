@@ -133,11 +133,13 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 
 ## Identity mapping
 
-Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with a single Fluxer command, which also copies roles and thread memberships for someone who has just moved over:
+Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with two Fluxer commands: `role`, which also copies roles and thread memberships for someone who has just moved over, and `map`, which records the mapping alone:
 
 - `!b role <@fluxerUser> <discordUserId>` — run on Fluxer, mentioning the Fluxer member and passing the ID of their Discord account. Only members holding one of the Fluxer roles listed in `roles.copyAllowedRoleIds` in the [configuration file](#configuration-file) may run it.
 
-The command does three things at once and reports the outcome of each:
+- `!b map <@fluxerUser> <discordUserId>` — records only the identity mapping, and only when neither account is mapped yet. If one of them already is, the existing mapping is shown and nothing changes; use `!b role` to replace it. Same permission rule as `!b role`.
+
+The `role` command does three things at once and reports the outcome of each:
 
 1. **Roles** — every Fluxer role with the same name as one of the Discord user's roles is added to the Fluxer member.
 2. **Identity mapping** — the two accounts are recorded as the same person for this server pair. Mappings are one-to-one: re-running the command for either account replaces that account's previous mapping. They are removed together with the server link.

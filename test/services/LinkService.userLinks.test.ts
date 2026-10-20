@@ -195,6 +195,71 @@ describe('LinkService user links', () => {
         expect(await service.getUserLinksCount()).toBe(2);
     });
 
+    it('createUserLinkIfUnmapped maps only when both accounts are free', async () => {
+        const first = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd1',
+            fluxerUserId: 'f1',
+        });
+        expect(first.link).toMatchObject({
+            discordUserId: 'd1',
+            fluxerUserId: 'f1',
+        });
+        expect(first.existing).toEqual([]);
+
+        // The identical mapping is reported as existing, not re-created.
+        const same = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd1',
+            fluxerUserId: 'f1',
+        });
+        expect(same.link).toBeNull();
+        expect(same.existing.map((e) => e.id)).toEqual([first.link!.id]);
+
+        // Either side already mapped blocks the new pair and nothing changes.
+        const discordTaken = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd1',
+            fluxerUserId: 'f2',
+        });
+        expect(discordTaken.link).toBeNull();
+        expect(discordTaken.existing.map((e) => e.id)).toEqual([
+            first.link!.id,
+        ]);
+        const fluxerTaken = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd2',
+            fluxerUserId: 'f1',
+        });
+        expect(fluxerTaken.link).toBeNull();
+        expect(fluxerTaken.existing.map((e) => e.id)).toEqual([first.link!.id]);
+
+        // Two different stale rows are both reported.
+        const second = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd2',
+            fluxerUserId: 'f2',
+        });
+        const crossed = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g1',
+            discordUserId: 'd1',
+            fluxerUserId: 'f2',
+        });
+        expect(crossed.link).toBeNull();
+        expect(crossed.existing.map((e) => e.id).sort()).toEqual(
+            [first.link!.id, second.link!.id].sort()
+        );
+        expect(users.rows).toHaveLength(2);
+
+        // Other guild links are unaffected.
+        const other = await service.createUserLinkIfUnmapped({
+            guildLinkId: 'g2',
+            discordUserId: 'd1',
+            fluxerUserId: 'f1',
+        });
+        expect(other.link).not.toBeNull();
+    });
+
     it('removes a mapping by id', async () => {
         const { link } = await service.setUserLink({
             guildLinkId: 'g1',
