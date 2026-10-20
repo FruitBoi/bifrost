@@ -19,7 +19,7 @@ export interface VoiceBridgeServiceOptions {
     fluxer: VoiceTransport;
     createMixer: AudioMixerFactory;
     metricsService?: MetricsService;
-    /** How long both channels may stay empty before the bot leaves. */
+    /** How long a bridge may stay with one side empty before the bot leaves. */
     leaveGraceMs?: number;
     /** Delays between successive join attempts after a failure or a drop. */
     joinRetryBackoffMs?: number[];
@@ -29,13 +29,19 @@ export interface VoiceBridgeServiceOptions {
     silentSideWarnMs?: number;
 }
 
+/**
+ * A bridge that is live. Both sides had at least one human when it joined;
+ * one of them may be empty for up to `leaveGraceMs` before it leaves.
+ */
 export interface LiveVoiceBridge {
     voiceLinkId: string;
     guildLinkId: string;
     discordChannelId: string;
     fluxerChannelId: string;
     since: Date;
+    /** Humans currently on the Discord side. */
     discordParticipants: number;
+    /** Humans currently on the Fluxer side. */
     fluxerParticipants: number;
 }
 
@@ -47,6 +53,8 @@ const DEFAULT_LEAVE_GRACE_MS = 30_000;
 const DEFAULT_JOIN_RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000];
 const DEFAULT_STATS_INTERVAL_MS = 15_000;
 const DEFAULT_SILENT_SIDE_WARN_MS = 10_000;
+
+const BOTH_SIDES_EMPTY = 'both sides are empty';
 
 /**
  * idle (no entry in `bridges`) → joining → live → leaving → idle.
@@ -86,6 +94,12 @@ interface BridgeSide {
     detach: () => void;
 }
 
+/** Human head count of each side of a voice link. */
+interface SideOccupancy {
+    discord: number;
+    fluxer: number;
+}
+
 interface Bridge {
     link: VoiceLink;
     guildLink: GuildLink;
@@ -103,14 +117,17 @@ interface Bridge {
 }
 
 /**
- * Keeps the bot in both channels of a voice link while humans are around and
- * relays each side's mixed audio into the other.
+ * Keeps the bot in both channels of a voice link while humans are on BOTH
+ * sides and relays each side's mixed audio into the other. A channel with
+ * people in it but nobody on the other side is left alone: there is nobody
+ * to bridge them to.
  *
  * Joins are triggered by voice state updates seen on either transport (or by
- * a link being created/enabled while people are already in voice). Once the
- * bot is in, the sessions' own participant events drive mute mapping and the
- * auto-leave grace timer. Only one bridge per guild link can be live, since
- * a bot can only sit in one voice channel per guild on each platform.
+ * a link being created/enabled while people are already in voice on both
+ * sides). Once the bot is in, the sessions' own participant events drive
+ * mute mapping and the auto-leave grace timer, which arms as soon as either
+ * side empties. Only one bridge per guild link can be live, since a bot can
+ * only sit in one voice channel per guild on each platform.
  *
  * While live, every bridge counts the audio flowing in each direction and
  * logs the deltas periodically, so a one-way audio problem shows up in the
@@ -131,6 +148,11 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     private readonly links = new Map<string, VoiceLink>();
     /** Bridges that are joining, live or leaving, keyed by voice link id. */
     private readonly bridges = new Map<string, Bridge>();
+    /**
+     * Last "not joining" reason logged per voice link, so a lone user's
+     * mute toggles do not repeat it. Cleared when the occupancy changes.
+     */
+    private readonly waitingReason = new Map<string, string>();
 
     private started = false;
 
@@ -208,6 +230,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             )
         );
         this.links.clear();
+        this.waitingReason.clear();
     }
 
     onVoiceLinkChanged(voiceLinkId: string, link: VoiceLink | null): void {
@@ -215,6 +238,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
 
         if (!link) {
             this.links.delete(voiceLinkId);
+            this.waitingReason.delete(voiceLinkId);
             if (bridge) void this.teardown(bridge, 'voice link removed');
             return;
         }
@@ -223,6 +247,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         if (bridge) bridge.link = link;
 
         if (!link.enabled) {
+            this.waitingReason.delete(voiceLinkId);
             if (bridge) void this.teardown(bridge, 'voice link disabled');
             return;
         }
@@ -256,16 +281,31 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         update: VoiceParticipantUpdate
     ) {
         if (!this.started) return;
-        if (update.channelId === null) return;
         if (update.isBot || this.isBotUser(update.userId)) return;
+
+        const linkedChannel = (link: VoiceLink) =>
+            platform === 'discord'
+                ? link.discordChannelId
+                : link.fluxerChannelId;
+
+        // Someone left a linked channel: the next arrival there is news
+        // again, even if the other side is still empty.
+        if (
+            update.previousChannelId !== null &&
+            update.previousChannelId !== update.channelId
+        ) {
+            for (const link of this.links.values()) {
+                if (linkedChannel(link) === update.previousChannelId) {
+                    this.waitingReason.delete(link.id);
+                }
+            }
+        }
+
+        if (update.channelId === null) return;
 
         for (const link of this.links.values()) {
             if (!link.enabled) continue;
-            const channelId =
-                platform === 'discord'
-                    ? link.discordChannelId
-                    : link.fluxerChannelId;
-            if (channelId !== update.channelId) continue;
+            if (linkedChannel(link) !== update.channelId) continue;
             void this.evaluate(link);
         }
     }
@@ -280,7 +320,10 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         }
     }
 
-    /** Starts a bridge for `link` if humans are present and nothing blocks it. */
+    /**
+     * Starts a bridge for `link` if humans are present on both of its sides
+     * and nothing blocks it.
+     */
     private async evaluate(link: VoiceLink): Promise<void> {
         if (!this.started || !link.enabled) return;
         if (this.bridges.has(link.id)) return;
@@ -318,7 +361,21 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             return;
         }
 
-        if (!this.humansPresent(current, guildLink)) return;
+        const empty = this.emptySides(this.occupancy(current, guildLink));
+        if (empty) {
+            if (empty === BOTH_SIDES_EMPTY) {
+                // Nothing to wait for; forget any earlier reason so the next
+                // arrival on either side is logged again.
+                this.waitingReason.delete(link.id);
+            } else if (this.waitingReason.get(link.id) !== empty) {
+                this.waitingReason.set(link.id, empty);
+                logger.info(
+                    `[VoiceBridge] ⏳ Not joining voice link ${link.id}: ${empty}; waiting for someone on the other side`
+                );
+            }
+            return;
+        }
+        this.waitingReason.delete(link.id);
 
         const bridge: Bridge = {
             link: current,
@@ -345,36 +402,60 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         return null;
     }
 
-    private humansPresent(link: VoiceLink, guildLink: GuildLink): boolean {
-        return (
-            this.humansIn(
+    /** Human head count of each channel of `link`, as the transports see it. */
+    private occupancy(link: VoiceLink, guildLink: GuildLink): SideOccupancy {
+        return {
+            discord: this.humansIn(
                 this.discord,
                 guildLink.discordGuildId,
                 link.discordChannelId
-            ) ||
-            this.humansIn(
+            ),
+            fluxer: this.humansIn(
                 this.fluxer,
                 guildLink.fluxerGuildId,
                 link.fluxerChannelId
-            )
-        );
+            ),
+        };
+    }
+
+    /** Human head count of each side of a bridge, from its sessions. */
+    private bridgeOccupancy(bridge: Bridge): SideOccupancy {
+        return {
+            discord: bridge.discord?.participants.size ?? 0,
+            fluxer: bridge.fluxer?.participants.size ?? 0,
+        };
+    }
+
+    /**
+     * The join/stay condition: null when both sides are populated, else
+     * which side(s) have no humans, phrased for a log line. One of
+     * {@link BOTH_SIDES_EMPTY}, "Discord side is empty" or "Fluxer side is
+     * empty".
+     */
+    private emptySides(occupancy: SideOccupancy): string | null {
+        if (occupancy.discord === 0 && occupancy.fluxer === 0) {
+            return BOTH_SIDES_EMPTY;
+        }
+        if (occupancy.discord === 0) return 'Discord side is empty';
+        if (occupancy.fluxer === 0) return 'Fluxer side is empty';
+        return null;
     }
 
     private humansIn(
         transport: VoiceTransport,
         guildId: string,
         channelId: string
-    ): boolean {
+    ): number {
         try {
             return transport
                 .listParticipants(guildId, channelId)
-                .some((p) => this.isHuman(p));
+                .filter((p) => this.isHuman(p)).length;
         } catch (err) {
             logger.error(
                 `[VoiceBridge] ❌ Failed to list ${transport.platform} participants of ${channelId}`,
                 err
             );
-            return false;
+            return 0;
         }
     }
 
@@ -400,9 +481,11 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             this.bridges.get(link.id) !== bridge ||
             bridge.generation !== generation;
 
-        if (!this.humansPresent(link, guildLink)) {
+        // Someone may have left while we were backing off from a failure.
+        const empty = this.emptySides(this.occupancy(link, guildLink));
+        if (empty) {
             logger.info(
-                `[VoiceBridge] 👋 Not joining voice link ${link.id}: both channels are empty`
+                `[VoiceBridge] 👋 Not joining voice link ${link.id}: ${empty}`
             );
             this.bridges.delete(link.id);
             return;
@@ -684,31 +767,33 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         this.reconcileOccupancy(bridge);
     }
 
-    private humanCount(bridge: Bridge): number {
-        return (
-            (bridge.discord?.participants.size ?? 0) +
-            (bridge.fluxer?.participants.size ?? 0)
-        );
-    }
-
-    /** Starts or cancels the auto-leave grace timer based on who is left. */
+    /**
+     * Starts or cancels the auto-leave grace timer based on who is left: the
+     * timer arms as soon as either side has no humans and is cancelled when
+     * both sides are populated again.
+     */
     private reconcileOccupancy(bridge: Bridge) {
         if (bridge.state !== 'live') return;
 
-        if (this.humanCount(bridge) === 0) {
+        const empty = this.emptySides(this.bridgeOccupancy(bridge));
+        if (empty) {
             if (bridge.leaveTimer) return;
             logger.info(
-                `[VoiceBridge] 👋 Both channels of voice link ${bridge.link.id} are empty; leaving in ${this.leaveGraceMs} ms`
+                `[VoiceBridge] 👋 Voice link ${bridge.link.id}: ${empty}; leaving in ${this.leaveGraceMs} ms`
             );
             bridge.leaveTimer = setTimeout(() => {
                 bridge.leaveTimer = null;
-                void this.teardown(bridge, 'both channels empty');
+                void this.teardown(
+                    bridge,
+                    this.emptySides(this.bridgeOccupancy(bridge)) ??
+                        'one side emptied'
+                );
             }, this.leaveGraceMs);
         } else if (bridge.leaveTimer) {
             clearTimeout(bridge.leaveTimer);
             bridge.leaveTimer = null;
             logger.info(
-                `[VoiceBridge] 🔗 Someone returned to voice link ${bridge.link.id}; staying`
+                `[VoiceBridge] 🔗 Both sides of voice link ${bridge.link.id} are populated again; staying`
             );
         }
     }
@@ -836,7 +921,9 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     ): Promise<void> {
         if (bridge.state !== 'live') return;
 
-        const humans = this.humanCount(bridge);
+        // Captured before releaseSides() forgets the sides: we only come
+        // back if both sides still had people when the session dropped.
+        const empty = this.emptySides(this.bridgeOccupancy(bridge));
         logger.warn(
             `[VoiceBridge] ⚠️ ${platform} voice session closed for voice link ${bridge.link.id}: ${reason}`
         );
@@ -851,13 +938,14 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         if (this.bridges.get(bridge.link.id) !== bridge) return;
 
         const current = this.links.get(bridge.link.id);
-        if (!this.started || !current?.enabled || humans === 0) {
+        const blocker = !this.started
+            ? 'service stopped'
+            : !current?.enabled
+              ? 'link no longer enabled'
+              : empty;
+        if (blocker) {
             logger.info(
-                `[VoiceBridge] 👋 Not reconnecting voice link ${bridge.link.id}: ${
-                    humans === 0
-                        ? 'nobody left in either channel'
-                        : 'link no longer enabled'
-                }`
+                `[VoiceBridge] 👋 Not reconnecting voice link ${bridge.link.id}: ${blocker}`
             );
             this.bridges.delete(bridge.link.id);
             return;

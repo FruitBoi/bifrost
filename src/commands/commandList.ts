@@ -112,14 +112,14 @@ const commandList: Command[] = [
         name: 'voice',
         discord: {
             description:
-                "Bridges a Discord voice channel with a Fluxer voice channel (both by ID), immediately; link once and the bot joins automatically whenever someone is in either channel. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
+                "Bridges a Discord voice channel with a Fluxer voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
             usageArgs: [
                 '<discordVoiceChannelId> <fluxerVoiceChannelId> | unlink <discordVoiceChannelId> | on <discordVoiceChannelId> | off <discordVoiceChannelId> | confirm',
             ],
         },
         fluxer: {
             description:
-                "Bridges a Fluxer voice channel with a Discord voice channel (both by ID), immediately; link once and the bot joins automatically whenever someone is in either channel. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
+                "Bridges a Fluxer voice channel with a Discord voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
             usageArgs: [
                 '<fluxerVoiceChannelId> <discordVoiceChannelId> | unlink <fluxerVoiceChannelId> | on <fluxerVoiceChannelId> | off <fluxerVoiceChannelId> | confirm',
             ],

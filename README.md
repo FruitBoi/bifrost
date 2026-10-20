@@ -88,26 +88,26 @@ Thread bridging ships as three migrations. `00003-add-thread-links` adds `channe
 
 ## Voice
 
-A **voice link** bridges a Discord voice channel with a Fluxer voice channel. While the bridge is live, the bot sits in both channels and plays the mixed audio of each side into the other, so each side hears everyone on the other side as one extra participant. **You link a pair of channels once**: the link is stored in the database and the bot joins both channels on its own whenever someone enters either of them, so nobody has to run a command before a voice chat. Voice bridging is **off by default** and is switched on with `BF_ENABLE_VOICE_BRIDGE=true`; without it the voice packages are never loaded and the commands below report that the feature is disabled.
+A **voice link** bridges a Discord voice channel with a Fluxer voice channel. While the bridge is live, the bot sits in both channels and plays the mixed audio of each side into the other, so each side hears everyone on the other side as one extra participant. **You link a pair of channels once**: the link is stored in the database and the bot joins both channels on its own once there are people in both of them, so nobody has to run a command before a voice chat. Voice bridging is **off by default** and is switched on with `BF_ENABLE_VOICE_BRIDGE=true`; without it the voice packages are never loaded and the commands below report that the feature is disabled.
 
 Two constraints follow from how both platforms work:
 
-- A bot can be in **one voice channel per server** on either platform, so a linked server pair can have many voice links but only **one live bridge at a time**. If a second linked channel gets visitors while a bridge is live, it is left alone until the first one ends.
+- A bot can be in **one voice channel per server** on either platform, so a linked server pair can have many voice links but only **one live bridge at a time**. If a second linked channel pair has people on both sides while a bridge is live, it is left alone until the first one ends.
 - The bot cannot speak as individual users. Discord shows one participant for the whole Fluxer side and vice versa.
 
 ### Lifecycle
 
 - A voice link is created once and persists; there is nothing to re-run when people come and go.
-- The bridge joins both channels automatically as soon as a person (not a bot) is in either linked channel, leaves both after they have been empty for `BF_VOICE_LEAVE_GRACE_MS` (default 30 seconds), and comes back by itself the next time someone enters.
+- The bridge joins both channels automatically only when a person (not a bot) is in the Discord channel **and** a person is in the Fluxer channel; if only one side has people, the bot stays out. Once either side is empty it leaves both after `BF_VOICE_LEAVE_GRACE_MS` (default 30 seconds) unless someone rejoins that side in time, and comes back by itself the next time both sides have people.
 - Users who self-mute or deafen are left out of the mix for the other side; everyone else is mixed in as they speak.
-- If either voice connection drops while people are still present, the bridge leaves the other side too and rejoins with a short backoff. After a few failed attempts it gives up until someone joins again.
+- If either voice connection drops while both sides still have people, the bridge leaves the other side too and rejoins with a short backoff. After a few failed attempts it gives up until someone joins again.
 - Disabling or removing a voice link while its bridge is live disconnects the bridge immediately.
 
 ### Commands
 
 From either platform (the first ID is a voice channel on the platform you run the command on, the second one is on the other platform):
 
-- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — links the two voice channels immediately, no confirmation step. Run it once per channel pair; from then on the bot joins by itself whenever someone is in either channel.
+- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — links the two voice channels immediately, no confirmation step. Run it once per channel pair; from then on the bot joins by itself whenever people are in both channels.
 - `!b voice unlink <voiceChannelId>` — removes the link. Confirm with `!b voice confirm`.
 - `!b voice on <voiceChannelId>` / `!b voice off <voiceChannelId>` — enables or disables a link without removing it.
 - `!b voice` — lists the server's voice links and whether they are enabled. `!b list` shows them too, marked with 🔊.

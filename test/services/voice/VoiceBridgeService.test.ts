@@ -79,9 +79,29 @@ function setup(
         silentSideWarnMs: options.silentSideWarnMs,
     });
 
+    /** Puts 'alice' in the Discord channel of the link. */
     const joinAlice = async () => {
         discord.setParticipant(DGUILD, link.discordChannelId, {
             userId: 'alice',
+        });
+        await flush();
+    };
+
+    /** Puts 'fred' in the Fluxer channel of the link. */
+    const joinFred = async () => {
+        fluxer.setParticipant(FGUILD, link.fluxerChannelId, {
+            userId: 'fred',
+        });
+        await flush();
+    };
+
+    /** Populates both sides, which is what makes the bridge join. */
+    const joinBoth = async () => {
+        discord.setParticipant(DGUILD, link.discordChannelId, {
+            userId: 'alice',
+        });
+        fluxer.setParticipant(FGUILD, link.fluxerChannelId, {
+            userId: 'fred',
         });
         await flush();
     };
@@ -94,6 +114,8 @@ function setup(
         mixers: mixers.mixers,
         service,
         joinAlice,
+        joinFred,
+        joinBoth,
     };
 }
 
@@ -121,12 +143,18 @@ function logged(spy: ReturnType<typeof vi.spyOn>): string[] {
 }
 
 describe('joining', () => {
-    it('joins both sides when a human enters the Discord side of an enabled link', async () => {
+    it('joins both sides once humans are on both the Discord and the Fluxer side', async () => {
         const t = setup();
         await t.service.start();
         expect(t.links.listener).toBe(t.service);
 
         await t.joinAlice();
+
+        expect(t.discord.joinCalls).toEqual([]);
+        expect(t.fluxer.joinCalls).toEqual([]);
+        expect(t.service.status().live).toEqual([]);
+
+        await t.joinFred();
 
         expect(t.discord.joinCalls).toEqual([
             { guildId: DGUILD, channelId: 'dvoice' },
@@ -134,38 +162,145 @@ describe('joining', () => {
         expect(t.fluxer.joinCalls).toEqual([
             { guildId: FGUILD, channelId: 'fvoice' },
         ]);
-        expect(t.service.status().live).toHaveLength(1);
+        const live = t.service.status().live;
+        expect(live).toHaveLength(1);
+        expect(live[0].discordParticipants).toBe(1);
+        expect(live[0].fluxerParticipants).toBe(1);
         expect(t.mixers).toHaveLength(2);
         expect(t.mixers.every((m) => m.started)).toBe(true);
     });
 
-    it('joins both sides when a human enters the Fluxer side', async () => {
+    it('joins when the Discord side gets its first human after the Fluxer side', async () => {
         const t = setup();
         await t.service.start();
 
+        await t.joinFred();
+
+        expect(t.discord.joinCalls).toEqual([]);
+        expect(t.fluxer.joinCalls).toEqual([]);
+        expect(t.service.status().live).toEqual([]);
+
+        await t.joinAlice();
+
+        expect(t.discord.joinCalls).toHaveLength(1);
+        expect(t.fluxer.joinCalls).toHaveLength(1);
+        expect(t.service.status().live).toHaveLength(1);
+    });
+
+    it('does not join when only the Discord side has people', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup();
+        await t.service.start();
+
+        await t.joinAlice();
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'bob' });
+        await flush();
+
+        expect(t.discord.joinCalls).toEqual([]);
+        expect(t.fluxer.joinCalls).toEqual([]);
+        expect(t.service.status().live).toEqual([]);
+        expect(t.mixers).toEqual([]);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] ⏳ Not joining voice link ${t.link.id}: Fluxer side is empty; waiting for someone on the other side`
+        );
+    });
+
+    it('does not join when only the Fluxer side has people', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup();
+        await t.service.start();
+
+        await t.joinFred();
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'gina' });
+        await flush();
+
+        expect(t.discord.joinCalls).toEqual([]);
+        expect(t.fluxer.joinCalls).toEqual([]);
+        expect(t.service.status().live).toEqual([]);
+        expect(t.mixers).toEqual([]);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] ⏳ Not joining voice link ${t.link.id}: Discord side is empty; waiting for someone on the other side`
+        );
+    });
+
+    it('logs why it is waiting once per occupancy change, not on every voice state update', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup();
+        await t.service.start();
+        const waiting = () =>
+            logged(info).filter((m) => m.includes('Not joining voice link'));
+
+        await t.joinAlice();
+        t.discord.setParticipant(DGUILD, 'dvoice', {
+            userId: 'alice',
+            selfMute: true,
+        });
+        t.discord.setParticipant(DGUILD, 'dvoice', {
+            userId: 'alice',
+            selfMute: false,
+        });
+        await flush();
+        expect(waiting()).toHaveLength(1);
+
+        // Leaving and coming back is news again.
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        await t.joinAlice();
+        expect(waiting()).toHaveLength(2);
+
+        // So is the empty side flipping.
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        await t.joinFred();
+        expect(waiting()).toHaveLength(3);
+        expect(waiting()[2]).toContain('Discord side is empty');
+
+        expect(t.discord.joinCalls).toEqual([]);
+    });
+
+    it('joins on start() when both sides are already populated', async () => {
+        const t = setup();
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
         t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+
+        await t.service.start();
         await flush();
 
         expect(t.discord.joinCalls).toHaveLength(1);
         expect(t.fluxer.joinCalls).toHaveLength(1);
-        expect(t.service.status().live[0].fluxerParticipants).toBe(1);
-    });
-
-    it('joins on start() when someone is already in voice', async () => {
-        const t = setup();
-        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
-
-        await t.service.start();
-        await flush();
-
         expect(t.service.status().live).toHaveLength(1);
     });
+
+    it.each(['discord', 'fluxer'] as const)(
+        'does not join on start() when only the %s side is populated',
+        async (side) => {
+            const info = vi.spyOn(logger, 'info');
+            const t = setup();
+            if (side === 'discord') {
+                t.discord.setParticipant(DGUILD, 'dvoice', {
+                    userId: 'alice',
+                });
+            } else {
+                t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+            }
+
+            await t.service.start();
+            await flush();
+
+            expect(t.discord.joinCalls).toEqual([]);
+            expect(t.fluxer.joinCalls).toEqual([]);
+            expect(t.service.status().live).toEqual([]);
+            expect(logged(info)).toContain(
+                `[VoiceBridge] ⏳ Not joining voice link ${t.link.id}: ${
+                    side === 'discord' ? 'Fluxer' : 'Discord'
+                } side is empty; waiting for someone on the other side`
+            );
+        }
+    );
 
     it('does not join for a disabled link', async () => {
         const t = setup({ links: [makeVoiceLink({ enabled: false })] });
         await t.service.start();
 
-        await t.joinAlice();
+        await t.joinBoth();
 
         expect(t.discord.joinCalls).toHaveLength(0);
         expect(t.fluxer.joinCalls).toHaveLength(0);
@@ -176,29 +311,42 @@ describe('joining', () => {
         const t = setup();
         await t.service.start();
 
+        await t.joinFred();
         t.discord.setParticipant(DGUILD, 'other-voice', { userId: 'alice' });
         await flush();
 
         expect(t.discord.joinCalls).toHaveLength(0);
+        expect(t.fluxer.joinCalls).toHaveLength(0);
     });
 
     it("ignores the bots' own voice states and other bots", async () => {
         const t = setup();
         await t.service.start();
 
-        t.discord.setParticipant(DGUILD, 'dvoice', {
-            userId: 'dbot',
-            isBot: true,
-        });
+        // A human on Discord, only the bot on Fluxer: not populated.
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
         t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fbot' });
-        t.discord.setParticipant(DGUILD, 'dvoice', {
-            userId: 'some-other-bot',
-            isBot: true,
-        });
         await flush();
 
         expect(t.discord.joinCalls).toHaveLength(0);
         expect(t.fluxer.joinCalls).toHaveLength(0);
+
+        // A human on Fluxer, only bots on Discord: still not populated.
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        t.discord.setParticipant(DGUILD, 'dvoice', {
+            userId: 'dbot',
+            isBot: true,
+        });
+        t.discord.setParticipant(DGUILD, 'dvoice', {
+            userId: 'some-other-bot',
+            isBot: true,
+        });
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        await flush();
+
+        expect(t.discord.joinCalls).toHaveLength(0);
+        expect(t.fluxer.joinCalls).toHaveLength(0);
+        expect(t.service.status().live).toHaveLength(0);
     });
 
     it('leaves the first side again when the second join fails, then retries', async () => {
@@ -206,7 +354,7 @@ describe('joining', () => {
         await t.service.start();
         t.fluxer.rejectNextJoins(1);
 
-        await t.joinAlice();
+        await t.joinBoth();
 
         expect(t.discord.sessions).toHaveLength(1);
         expect(t.discord.sessions[0].left).toBe(true);
@@ -217,6 +365,30 @@ describe('joining', () => {
 
         expect(t.discord.joinCalls).toHaveLength(2);
         expect(t.fluxer.joinCalls).toHaveLength(2);
+        expect(t.service.status().live).toHaveLength(1);
+    });
+
+    it('abandons a retry when one side emptied during the backoff', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ joinRetryBackoffMs: [1_000] });
+        await t.service.start();
+        t.fluxer.rejectNextJoins(1);
+
+        await t.joinBoth();
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await flush();
+
+        expect(t.discord.joinCalls).toHaveLength(1);
+        expect(t.fluxer.joinCalls).toHaveLength(1);
+        expect(t.service.status().live).toHaveLength(0);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Not joining voice link ${t.link.id}: Fluxer side is empty`
+        );
+
+        // Nothing lingers: both sides populated again means a fresh join.
+        await t.joinFred();
+        expect(t.discord.joinCalls).toHaveLength(2);
         expect(t.service.status().live).toHaveLength(1);
     });
 
@@ -233,14 +405,18 @@ describe('joining', () => {
         await t.service.start();
 
         t.discord.setParticipant(DGUILD, 'dv-a', { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, 'fv-a', { userId: 'fred' });
         await flush();
         t.discord.setParticipant(DGUILD, 'dv-b', { userId: 'bob' });
+        t.fluxer.setParticipant(FGUILD, 'fv-b', { userId: 'gina' });
         await flush();
 
         expect(t.discord.joinCalls).toEqual([
             { guildId: DGUILD, channelId: 'dv-a' },
         ]);
-        expect(t.fluxer.joinCalls).toHaveLength(1);
+        expect(t.fluxer.joinCalls).toEqual([
+            { guildId: FGUILD, channelId: 'fv-a' },
+        ]);
         const live = t.service.status().live;
         expect(live).toHaveLength(1);
         expect(live[0].voiceLinkId).toBe(a.id);
@@ -259,9 +435,14 @@ describe('joining', () => {
         await t.service.start();
 
         t.discord.setParticipant(DGUILD, 'dv-a', { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, 'fv-a', { userId: 'fred' });
         await flush();
         t.discord.setParticipant(DGUILD, 'dv-b', { userId: 'bob' });
+        t.fluxer.setParticipant(FGUILD, 'fv-b', { userId: 'gina' });
         await flush();
+        expect(t.service.status().live[0].voiceLinkId).toBe(a.id);
+
+        // Fred is still in fv-a, but a bridge needs both sides.
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
         await vi.advanceTimersByTimeAsync(1_000);
         await flush();
@@ -269,6 +450,10 @@ describe('joining', () => {
         const live = t.service.status().live;
         expect(live).toHaveLength(1);
         expect(live[0].voiceLinkId).toBe(b.id);
+        expect(t.discord.joinCalls).toEqual([
+            { guildId: DGUILD, channelId: 'dv-a' },
+            { guildId: DGUILD, channelId: 'dv-b' },
+        ]);
     });
 });
 
@@ -276,7 +461,7 @@ describe('audio routing', () => {
     it('routes Discord audio into the toFluxer mixer and its frames to the Fluxer session', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         const [toFluxer] = t.mixers;
         const discordSession = t.discord.sessions[0];
         const fluxerSession = t.fluxer.sessions[0];
@@ -294,7 +479,7 @@ describe('audio routing', () => {
     it('routes Fluxer audio into the toDiscord mixer and its frames to the Discord session', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         const [, toDiscord] = t.mixers;
         const discordSession = t.discord.sessions[0];
         const fluxerSession = t.fluxer.sessions[0];
@@ -312,7 +497,7 @@ describe('audio routing', () => {
     it('never feeds audio attributed to either bot into a mixer', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         t.discord.sessions[0].simulateAudio('dbot', pkt('x'));
         t.discord.sessions[0].simulateAudio('fbot', pkt('y'));
@@ -327,7 +512,7 @@ describe('mute mapping', () => {
     it('mutes and unmutes the source on the mixer the user feeds', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         const [toFluxer, toDiscord] = t.mixers;
 
         t.discord.setParticipant(DGUILD, 'dvoice', {
@@ -362,31 +547,35 @@ describe('mute mapping', () => {
             userId: 'alice',
             selfMute: true,
         });
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
         await t.service.start();
         await flush();
 
+        expect(t.service.status().live).toHaveLength(1);
         expect(t.mixers[0].mutedState('alice')).toBe(true);
+        expect(t.mixers[1].mutedState('fred')).toBeUndefined();
     });
 
     it('removes the source when a participant leaves', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        await t.joinBoth();
 
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
 
         expect(t.mixers[0].removed).toEqual(['alice']);
         expect(t.mixers[1].removed).toEqual([]);
         expect(t.service.status().live[0].discordParticipants).toBe(0);
+        expect(t.service.status().live[0].fluxerParticipants).toBe(1);
     });
 });
 
 describe('auto-leave', () => {
-    it('leaves both channels after the grace period once everyone is gone', async () => {
+    it('leaves after the grace period when one side empties while the other still has people', async () => {
+        const info = vi.spyOn(logger, 'info');
         const t = setup({ leaveGraceMs: 30_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         const discordSession = t.discord.sessions[0];
         const fluxerSession = t.fluxer.sessions[0];
 
@@ -394,8 +583,12 @@ describe('auto-leave', () => {
         await vi.advanceTimersByTimeAsync(29_999);
         await flush();
 
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Voice link ${t.link.id}: Discord side is empty; leaving in 30000 ms`
+        );
         expect(t.service.status().live).toHaveLength(1);
         expect(discordSession.left).toBe(false);
+        expect(fluxerSession.left).toBe(false);
 
         await vi.advanceTimersByTimeAsync(1);
         await flush();
@@ -404,41 +597,96 @@ describe('auto-leave', () => {
         expect(fluxerSession.left).toBe(true);
         expect(t.mixers.every((m) => m.stopped)).toBe(true);
         expect(t.service.status().live).toHaveLength(0);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Leaving voice link ${t.link.id}: Discord side is empty`
+        );
+
+        // Fred alone on Fluxer does not bring the bot back.
+        expect(t.fluxer.listParticipants(FGUILD, 'fvoice')).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await flush();
+        expect(t.discord.joinCalls).toHaveLength(1);
+        expect(t.fluxer.joinCalls).toHaveLength(1);
     });
 
-    it('cancels the grace timer when someone returns', async () => {
+    it('leaves after the grace period when the Fluxer side empties', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ leaveGraceMs: 1_000 });
+        await t.service.start();
+        await t.joinBoth();
+
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await flush();
+
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Voice link ${t.link.id}: Fluxer side is empty; leaving in 1000 ms`
+        );
+        expect(t.discord.sessions[0].left).toBe(true);
+        expect(t.fluxer.sessions[0].left).toBe(true);
+        expect(t.service.status().live).toHaveLength(0);
+    });
+
+    it('cancels the grace timer when the empty side is repopulated', async () => {
+        const info = vi.spyOn(logger, 'info');
         const t = setup({ leaveGraceMs: 30_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
         await vi.advanceTimersByTimeAsync(10_000);
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'bob' });
         await vi.advanceTimersByTimeAsync(60_000);
         await flush();
 
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 🔗 Both sides of voice link ${t.link.id} are populated again; staying`
+        );
         expect(t.service.status().live).toHaveLength(1);
         expect(t.discord.sessions[0].left).toBe(false);
         expect(t.fluxer.sessions[0].left).toBe(false);
     });
 
-    it('stays while someone is still on the other side', async () => {
-        const t = setup({ leaveGraceMs: 1_000 });
+    it('does not cancel the grace timer when someone joins the side that was populated anyway', async () => {
+        const t = setup({ leaveGraceMs: 30_000 });
         await t.service.start();
-        await t.joinAlice();
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        await t.joinBoth();
 
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(10_000);
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'gina' });
+        await vi.advanceTimersByTimeAsync(20_000);
         await flush();
 
-        expect(t.service.status().live).toHaveLength(1);
+        expect(t.service.status().live).toHaveLength(0);
+        expect(t.discord.sessions[0].left).toBe(true);
+        expect(t.fluxer.sessions[0].left).toBe(true);
     });
 
-    it('rejoins when someone comes back after the bot left', async () => {
+    it('leaves when everyone is gone', async () => {
+        const info = vi.spyOn(logger, 'info');
         const t = setup({ leaveGraceMs: 1_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
+
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await flush();
+
+        expect(t.discord.sessions[0].left).toBe(true);
+        expect(t.fluxer.sessions[0].left).toBe(true);
+        expect(t.mixers.every((m) => m.stopped)).toBe(true);
+        expect(t.service.status().live).toHaveLength(0);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Leaving voice link ${t.link.id}: both sides are empty`
+        );
+    });
+
+    it('rejoins when both sides are populated again after the bot left', async () => {
+        const t = setup({ leaveGraceMs: 1_000 });
+        await t.service.start();
+        await t.joinBoth();
 
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
         await vi.advanceTimersByTimeAsync(1_000);
@@ -448,6 +696,7 @@ describe('auto-leave', () => {
         await t.joinAlice();
 
         expect(t.discord.joinCalls).toHaveLength(2);
+        expect(t.fluxer.joinCalls).toHaveLength(2);
         expect(t.service.status().live).toHaveLength(1);
     });
 });
@@ -456,7 +705,7 @@ describe('reconnect', () => {
     it('leaves the other side and rejoins after the first backoff when a session drops', async () => {
         const t = setup({ joinRetryBackoffMs: [2_000, 5_000] });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         const discordSession = t.discord.sessions[0];
         const fluxerSession = t.fluxer.sessions[0];
 
@@ -485,7 +734,7 @@ describe('reconnect', () => {
         const backoff = [2_000, 5_000, 15_000, 60_000];
         const t = setup({ joinRetryBackoffMs: backoff });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         t.discord.rejectNextJoins(100);
 
         t.discord.sessions[0].simulateClose('network');
@@ -510,10 +759,11 @@ describe('reconnect', () => {
         expect(t.service.status().live).toHaveLength(1);
     });
 
-    it('does not reconnect when nobody is left in either channel', async () => {
-        const t = setup({ joinRetryBackoffMs: [1_000] });
+    it('does not reconnect when one side is empty at the time of the drop', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ joinRetryBackoffMs: [1_000], leaveGraceMs: 30_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
 
         t.fluxer.sessions[0].simulateClose('kicked');
@@ -523,7 +773,37 @@ describe('reconnect', () => {
 
         expect(t.discord.sessions[0].left).toBe(true);
         expect(t.discord.joinCalls).toHaveLength(1);
+        expect(t.fluxer.joinCalls).toHaveLength(1);
         expect(t.service.status().live).toHaveLength(0);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Not reconnecting voice link ${t.link.id}: Discord side is empty`
+        );
+
+        // Nothing is pending: the old grace timer must not fire anything.
+        await vi.advanceTimersByTimeAsync(60_000);
+        await flush();
+        expect(t.discord.joinCalls).toHaveLength(1);
+    });
+
+    it('does not reconnect when nobody is left in either channel', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ joinRetryBackoffMs: [1_000] });
+        await t.service.start();
+        await t.joinBoth();
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+
+        t.fluxer.sessions[0].simulateClose('kicked');
+        await flush();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await flush();
+
+        expect(t.discord.sessions[0].left).toBe(true);
+        expect(t.discord.joinCalls).toHaveLength(1);
+        expect(t.service.status().live).toHaveLength(0);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] 👋 Not reconnecting voice link ${t.link.id}: both sides are empty`
+        );
     });
 });
 
@@ -531,7 +811,7 @@ describe('link changes', () => {
     it('tears the bridge down when the link is removed', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         t.service.onVoiceLinkChanged(t.link.id, null);
         await flush();
@@ -541,15 +821,15 @@ describe('link changes', () => {
         expect(t.mixers.every((m) => m.stopped)).toBe(true);
         expect(t.service.status().live).toHaveLength(0);
 
-        // Nobody listens for that channel any more.
-        await t.joinAlice();
+        // Nobody listens for those channels any more.
+        await t.joinBoth();
         expect(t.discord.joinCalls).toHaveLength(1);
     });
 
     it('tears the bridge down when the link is disabled and rejoins when re-enabled', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         t.service.onVoiceLinkChanged(t.link.id, { ...t.link, enabled: false });
         await flush();
@@ -565,7 +845,30 @@ describe('link changes', () => {
         expect(t.service.status().live).toHaveLength(1);
     });
 
-    it('joins a newly created link when people are already in its channels', async () => {
+    it('joins a newly created link when people are already in both its channels', async () => {
+        const t = setup({ links: [] });
+        await t.service.start();
+        const link = makeVoiceLink({
+            discordChannelId: 'dv-new',
+            fluxerChannelId: 'fv-new',
+        });
+        t.discord.setParticipant(DGUILD, 'dv-new', { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, 'fv-new', { userId: 'fred' });
+
+        t.service.onVoiceLinkChanged(link.id, link);
+        await flush();
+
+        expect(t.discord.joinCalls).toEqual([
+            { guildId: DGUILD, channelId: 'dv-new' },
+        ]);
+        expect(t.fluxer.joinCalls).toEqual([
+            { guildId: FGUILD, channelId: 'fv-new' },
+        ]);
+        expect(t.service.status().live[0].voiceLinkId).toBe(link.id);
+    });
+
+    it('does not join a newly created link when only one of its channels has people', async () => {
+        const info = vi.spyOn(logger, 'info');
         const t = setup({ links: [] });
         await t.service.start();
         const link = makeVoiceLink({
@@ -577,16 +880,23 @@ describe('link changes', () => {
         t.service.onVoiceLinkChanged(link.id, link);
         await flush();
 
-        expect(t.discord.joinCalls).toEqual([
-            { guildId: DGUILD, channelId: 'dv-new' },
-        ]);
+        expect(t.discord.joinCalls).toEqual([]);
+        expect(t.fluxer.joinCalls).toEqual([]);
+        expect(t.service.status().live).toEqual([]);
+        expect(logged(info)).toContain(
+            `[VoiceBridge] ⏳ Not joining voice link ${link.id}: Discord side is empty; waiting for someone on the other side`
+        );
+
+        t.discord.setParticipant(DGUILD, 'dv-new', { userId: 'alice' });
+        await flush();
+
         expect(t.service.status().live[0].voiceLinkId).toBe(link.id);
     });
 
     it('cancels a pending reconnect when the link is removed', async () => {
         const t = setup({ joinRetryBackoffMs: [5_000] });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         t.discord.sessions[0].simulateClose('network');
         await flush();
 
@@ -623,8 +933,7 @@ describe('diagnostics', () => {
         const info = vi.spyOn(logger, 'info');
         const t = setup({ statsIntervalMs: 15_000, leaveGraceMs: 1_000 });
         await t.service.start();
-        await t.joinAlice();
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        await t.joinBoth();
         const [toFluxer, toDiscord] = t.mixers;
         const discordSession = t.discord.sessions[0];
         const fluxerSession = t.fluxer.sessions[0];
@@ -670,7 +979,7 @@ describe('diagnostics', () => {
         const info = vi.spyOn(logger, 'info');
         const t = setup({ statsIntervalMs: 15_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
         t.fluxer.sessions[0].statsOverride = {
             framesIn: 0,
             packetsOut: 750,
@@ -680,7 +989,7 @@ describe('diagnostics', () => {
         await vi.advanceTimersByTimeAsync(15_000);
 
         expect(statsLines(info)).toEqual([
-            `[VoiceBridge] 📊 link ${t.link.id}: Discord→Fluxer in=0 out=0 (0 voiced) · Fluxer→Discord in=0 out=0 (0 voiced) · participants D=1 F=0 · Fluxer session framesIn=0 packetsOut=750 participants=2`,
+            `[VoiceBridge] 📊 link ${t.link.id}: Discord→Fluxer in=0 out=0 (0 voiced) · Fluxer→Discord in=0 out=0 (0 voiced) · participants D=1 F=1 · Fluxer session framesIn=0 packetsOut=750 participants=2`,
         ]);
     });
 
@@ -688,8 +997,7 @@ describe('diagnostics', () => {
         const warn = vi.spyOn(logger, 'warn');
         const t = setup({ silentSideWarnMs: 10_000 });
         await t.service.start();
-        await t.joinAlice();
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        await t.joinBoth();
         t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'gina' });
 
         // Discord audio flows, Fluxer audio never arrives: today's bug.
@@ -711,11 +1019,13 @@ describe('diagnostics', () => {
         const warn = vi.spyOn(logger, 'warn');
         const t = setup({ silentSideWarnMs: 10_000 });
         await t.service.start();
-        await t.joinAlice();
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
         t.fluxer.setParticipant(FGUILD, 'fvoice', {
             userId: 'fred',
             selfMute: true,
         });
+        await flush();
+        expect(t.service.status().live).toHaveLength(1);
 
         t.discord.sessions[0].simulateAudio('alice', pkt('a1'));
         await vi.advanceTimersByTimeAsync(10_000);
@@ -727,7 +1037,7 @@ describe('diagnostics', () => {
         const warn = vi.spyOn(logger, 'warn');
         const t = setup({ silentSideWarnMs: 10_000 });
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         t.service.onVoiceLinkChanged(t.link.id, null);
         await flush();
@@ -743,9 +1053,8 @@ describe('status and stop', () => {
         await t.service.start();
         expect(t.service.status()).toEqual({ live: [] });
 
-        await t.joinAlice();
+        await t.joinBoth();
         t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'bob' });
-        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
         t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fbot' });
 
         const status = t.service.status();
@@ -764,7 +1073,7 @@ describe('status and stop', () => {
     it('stop() leaves everything and unregisters the listener', async () => {
         const t = setup();
         await t.service.start();
-        await t.joinAlice();
+        await t.joinBoth();
 
         await t.service.stop();
 
@@ -773,7 +1082,7 @@ describe('status and stop', () => {
         expect(t.fluxer.sessions[0].left).toBe(true);
         expect(t.service.status().live).toHaveLength(0);
 
-        await t.joinAlice();
+        await t.joinBoth();
         expect(t.discord.joinCalls).toHaveLength(1);
     });
 });
