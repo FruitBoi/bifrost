@@ -10,10 +10,12 @@ import * as locationLinks from '../../src/db/migrations/00004-location-links';
 import * as categoryLinks from '../../src/db/migrations/00005-category-links';
 import * as voiceLinks from '../../src/db/migrations/00006-voice-links';
 import * as messageLinkAuthors from '../../src/db/migrations/00007-message-link-authors';
+import * as userLinks from '../../src/db/migrations/00008-user-links';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
+import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeVoiceLinkRepository } from '../../src/db/sequelizerepos/SequelizeVoiceLinkRepository';
 
 // Same storage/context as src/db/migrator.ts, but over the TypeScript sources
@@ -50,6 +52,11 @@ const umzug = new Umzug({
             name: '00007-message-link-authors.js',
             up: messageLinkAuthors.up,
             down: messageLinkAuthors.down,
+        },
+        {
+            name: '00008-user-links.js',
+            up: userLinks.up,
+            down: userLinks.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -696,6 +703,154 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(await messages.getMessageLinksCount()).toBe(countBefore - 2);
     });
 
+    it('00008 adds user_links with its indexes, and rolls back cleanly', async () => {
+        expect(await executed()).toContain('00008-user-links.js');
+        expect(await qi.tableExists('user_links')).toBe(true);
+
+        const cols = await qi.describeTable('user_links');
+        expect(cols.id).toMatchObject({ primaryKey: true });
+        expect(cols.guildLinkId).toMatchObject({ allowNull: false });
+        expect(cols.discordUserId).toMatchObject({ allowNull: false });
+        expect(cols.fluxerUserId).toMatchObject({ allowNull: false });
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('user_links');
+        const byName = (name: string) => indexes.find((i) => i.name === name);
+        expect(byName('user_links_guild_discord_user')).toMatchObject({
+            unique: true,
+            fields: [
+                { attribute: 'guildLinkId' },
+                { attribute: 'discordUserId' },
+            ],
+        });
+        expect(byName('user_links_guild_fluxer_user')).toMatchObject({
+            unique: true,
+            fields: [
+                { attribute: 'guildLinkId' },
+                { attribute: 'fluxerUserId' },
+            ],
+        });
+        expect(byName('user_links_guild_link_id')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'guildLinkId' }],
+        });
+
+        // The repository works against the new schema.
+        const users = new SequelizeUserLinkRepository();
+        const created = await users.create({
+            guildLinkId: 'g1',
+            discordUserId: 'du-1',
+            fluxerUserId: 'fu-1',
+        });
+        expect(created).toMatchObject({
+            guildLinkId: 'g1',
+            discordUserId: 'du-1',
+            fluxerUserId: 'fu-1',
+        });
+        expect(created.id).toBeTruthy();
+        expect(created.createdAt).toBeInstanceOf(Date);
+        expect(await users.findById(created.id)).toMatchObject({
+            discordUserId: 'du-1',
+            fluxerUserId: 'fu-1',
+        });
+        expect(await users.findById('missing')).toBeNull();
+        expect(await users.findByDiscordUser('g1', 'du-1')).toMatchObject({
+            id: created.id,
+        });
+        expect(await users.findByFluxerUser('g1', 'fu-1')).toMatchObject({
+            id: created.id,
+        });
+        expect(await users.findByDiscordUser('g1', 'nope')).toBeNull();
+        expect(await users.findByFluxerUser('g1', 'nope')).toBeNull();
+        // Lookups are scoped to the guild link.
+        expect(await users.findByDiscordUser('g-other', 'du-1')).toBeNull();
+        expect(await users.findByFluxerUser('g-other', 'fu-1')).toBeNull();
+
+        const second = await users.create({
+            guildLinkId: 'g1',
+            discordUserId: 'du-2',
+            fluxerUserId: 'fu-2',
+        });
+        expect((await users.findAllByGuild('g1')).map((u) => u.id)).toEqual([
+            created.id,
+            second.id,
+        ]);
+        expect(await users.findAllByGuild('g-other')).toEqual([]);
+        expect(await users.getUserLinksCount()).toBe(2);
+
+        // The mapping is one-to-one inside a guild link: neither the Discord
+        // user nor the Fluxer user can be mapped a second time there...
+        await expect(
+            users.create({
+                guildLinkId: 'g1',
+                discordUserId: 'du-1',
+                fluxerUserId: 'fu-other',
+            })
+        ).rejects.toThrow();
+        await expect(
+            users.create({
+                guildLinkId: 'g1',
+                discordUserId: 'du-other',
+                fluxerUserId: 'fu-1',
+            })
+        ).rejects.toThrow();
+        expect(await users.getUserLinksCount()).toBe(2);
+        // ...but the same users can be mapped again under another guild link.
+        const elsewhere = await users.create({
+            guildLinkId: 'g-other',
+            discordUserId: 'du-1',
+            fluxerUserId: 'fu-1',
+        });
+        expect(elsewhere.id).not.toBe(created.id);
+        expect(await users.findByDiscordUser('g-other', 'du-1')).toMatchObject({
+            id: elsewhere.id,
+        });
+        expect(await users.findByDiscordUser('g1', 'du-1')).toMatchObject({
+            id: created.id,
+        });
+        expect(await users.getUserLinksCount()).toBe(3);
+
+        await users.deleteById(second.id);
+        expect(await users.findById(second.id)).toBeNull();
+        expect(await users.getUserLinksCount()).toBe(2);
+        await users.deleteByGuildLinkId('g1');
+        expect(await users.findAllByGuild('g1')).toEqual([]);
+        expect(await users.findById(elsewhere.id)).toMatchObject({
+            guildLinkId: 'g-other',
+        });
+        expect(await users.getUserLinksCount()).toBe(1);
+        await users.deleteByGuildLinkId('g-other');
+        expect(await users.getUserLinksCount()).toBe(0);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00008-user-links.js' });
+        expect(await executed()).toEqual([
+            '00001-baseline.js',
+            '00002-add-channel-link-indexes.js',
+            '00003-add-thread-links.js',
+            '00004-location-links.js',
+            '00005-category-links.js',
+            '00006-voice-links.js',
+            '00007-message-link-authors.js',
+        ]);
+        expect(await qi.tableExists('user_links')).toBe(false);
+        expect(await qi.tableExists('message_links')).toBe(true);
+        expect(await qi.tableExists('voice_links')).toBe(true);
+        expect(await qi.tableExists('category_links')).toBe(true);
+        expect(
+            (await qi.describeTable('message_links')).sourceAuthorId
+        ).toBeDefined();
+        expect(
+            (await select<{ id: string }>('SELECT id FROM channel_links'))
+                .length
+        ).toBe(4);
+
+        await umzug.up();
+        expect(await executed()).toContain('00008-user-links.js');
+        expect(await qi.tableExists('user_links')).toBe(true);
+        expect(await users.getUserLinksCount()).toBe(0);
+    });
+
     it('rolls 00004 back to the thread_links schema and re-applies', async () => {
         await umzug.down({ to: '00004-location-links.js' });
         expect(await executed()).toEqual([
@@ -763,6 +918,7 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(await executed()).toContain('00005-category-links.js');
         expect(await executed()).toContain('00006-voice-links.js');
         expect(await executed()).toContain('00007-message-link-authors.js');
+        expect(await executed()).toContain('00008-user-links.js');
         expect(
             (
                 await new SequelizeChannelLinkRepository().findByDiscordLocation(
@@ -772,5 +928,6 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         ).toBe('ft0');
         expect(await qi.tableExists('category_links')).toBe(true);
         expect(await qi.tableExists('voice_links')).toBe(true);
+        expect(await qi.tableExists('user_links')).toBe(true);
     });
 });

@@ -15,6 +15,7 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
+- Map a Fluxer account to a Discord account so pings reach the same person on both sides (see [Identity mapping](#identity-mapping))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
 
@@ -130,6 +131,28 @@ Voice links ship as migration `00006-voice-links`, which adds the `voice_links` 
 
 Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. **Only Fluxer users get an answer**: a meow written on Discord is bridged like any other message but is not replied to. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so Discord still sees the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
 
+## Identity mapping
+
+Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with a single Fluxer command, which also copies roles and thread memberships for someone who has just moved over:
+
+- `!b role <@fluxerUser> <discordUserId>` — run on Fluxer, mentioning the Fluxer member and passing the ID of their Discord account. Only members holding one of the Fluxer roles listed in `roles.copyAllowedRoleIds` in the [configuration file](#configuration-file) may run it.
+
+The command does three things at once and reports the outcome of each:
+
+1. **Roles** — every Fluxer role with the same name as one of the Discord user's roles is added to the Fluxer member.
+2. **Identity mapping** — the two accounts are recorded as the same person for this server pair. Mappings are one-to-one: re-running the command for either account replaces that account's previous mapping. They are removed together with the server link.
+3. **Thread membership** — for every bridged thread pair (thread↔thread link) whose Discord thread the Discord user is a member of, the Fluxer member is added to the Fluxer thread. Adding someone to a public Fluxer thread requires the bot to be able to manage the parent channel; threads it could not add the member to are listed in the reply.
+
+### Pings
+
+- With a mapping, a `<@user>` mention written on one platform is relayed as a real mention of the mapped account on the other, and a reply-with-ping to a message that was written on the replier's own platform pings the author's mapped account on the other side.
+- Without a mapping, mentions are relayed as plaintext `@name` and nobody is pinged on the other side.
+- Replying with a ping to a *bridged copy* of a message (one the bridge posted on your platform) has always pinged the original author on their platform and still does, mapping or not.
+
+### Database migration
+
+Identity mappings ship as migration `00008-user-links`, which adds the `user_links` table (one row per mapped account pair, unique per server link on both the Discord and the Fluxer side). It runs automatically on startup; rolling it back drops the table.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -172,6 +195,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
+| `roles.copyAllowedRoleIds` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run `!b role`; see [Identity mapping](#identity-mapping). Quote the IDs, unquoted numbers lose precision. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:

@@ -129,7 +129,7 @@ const commandList: Command[] = [
         name: 'role',
         fluxer: {
             description:
-                'Copies roles from a Discord user to the mentioned Fluxer member: every Fluxer role with the same name as one of the Discord user’s roles is added. Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
+                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
             usageArgs: ['<@fluxerUser> <discordUserId>'],
         },
     },

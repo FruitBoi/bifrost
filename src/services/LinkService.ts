@@ -6,10 +6,12 @@ import {
 import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
 import { CategoryLinkRepository } from '../db/repositories/CategoryLinkRepository';
 import { VoiceLinkRepository } from '../db/repositories/VoiceLinkRepository';
+import { UserLinkRepository } from '../db/repositories/UserLinkRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
 import { CategoryLink } from '../db/entities/CategoryLink';
 import { MessagePlatform } from '../db/entities/MessageLink';
 import { VoiceLink } from '../db/entities/VoiceLink';
+import { UserLink } from '../db/entities/UserLink';
 
 /**
  * Notified after a voice link is created, enabled/disabled or removed, so the
@@ -19,13 +21,23 @@ export interface VoiceLinkListener {
     onVoiceLinkChanged(voiceLinkId: string, link: VoiceLink | null): void;
 }
 
+/** Outcome of {@link LinkService.setUserLink}. */
+export interface SetUserLinkResult {
+    link: UserLink;
+    /** True when this exact mapping already existed and nothing changed. */
+    unchanged: boolean;
+    /** Rows removed to keep the mapping one-to-one (at most two). */
+    replaced: UserLink[];
+}
+
 export class LinkService {
     constructor(
         private guildRepo: GuildLinkRepository,
         private channelRepo: ChannelLinkRepository,
         private messageRepo: MessageLinkRepository,
         private categoryRepo: CategoryLinkRepository,
-        private voiceRepo: VoiceLinkRepository
+        private voiceRepo: VoiceLinkRepository,
+        private userRepo: UserLinkRepository
     ) {}
 
     private voiceLinkListener: VoiceLinkListener | null = null;
@@ -80,6 +92,7 @@ export class LinkService {
         await this.categoryRepo.deleteByGuildLinkId(guildLinkId);
         const voiceLinks = await this.voiceRepo.findAllByGuild(guildLinkId);
         await this.voiceRepo.deleteByGuildLinkId(guildLinkId);
+        await this.userRepo.deleteByGuildLinkId(guildLinkId);
         await this.guildRepo.deleteById(guildLinkId);
         for (const voiceLink of voiceLinks) {
             this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
@@ -392,6 +405,71 @@ export class LinkService {
         }
         await this.voiceRepo.deleteById(link.id);
         this.voiceLinkListener?.onVoiceLinkChanged(link.id, null);
+        return link;
+    }
+
+    // ---------------------------------------------------------------------
+    // User links (Discord account <-> Fluxer account, per guild link)
+    // ---------------------------------------------------------------------
+
+    async getUserLinkForDiscordUser(
+        guildLinkId: string,
+        discordUserId: string
+    ) {
+        return this.userRepo.findByDiscordUser(guildLinkId, discordUserId);
+    }
+
+    async getUserLinkForFluxerUser(guildLinkId: string, fluxerUserId: string) {
+        return this.userRepo.findByFluxerUser(guildLinkId, fluxerUserId);
+    }
+
+    async getUserLinksForGuildLink(guildLinkId: string) {
+        return this.userRepo.findAllByGuild(guildLinkId);
+    }
+
+    async getUserLinksCount() {
+        return this.userRepo.getUserLinksCount();
+    }
+
+    /**
+     * Maps a Discord user to a Fluxer user inside a guild link. The mapping is
+     * one-to-one: any existing row for either user is removed first, and the
+     * removed rows are returned so the caller can report what was replaced.
+     */
+    async setUserLink(data: {
+        guildLinkId: string;
+        discordUserId: string;
+        fluxerUserId: string;
+    }): Promise<SetUserLinkResult> {
+        const byDiscord = await this.userRepo.findByDiscordUser(
+            data.guildLinkId,
+            data.discordUserId
+        );
+        if (byDiscord && byDiscord.fluxerUserId === data.fluxerUserId) {
+            return { link: byDiscord, unchanged: true, replaced: [] };
+        }
+        const byFluxer = await this.userRepo.findByFluxerUser(
+            data.guildLinkId,
+            data.fluxerUserId
+        );
+
+        const replaced: UserLink[] = [];
+        for (const stale of [byDiscord, byFluxer]) {
+            if (!stale || replaced.some((r) => r.id === stale.id)) continue;
+            await this.userRepo.deleteById(stale.id);
+            replaced.push(stale);
+        }
+
+        const link = await this.userRepo.create(data);
+        return { link, unchanged: false, replaced };
+    }
+
+    async removeUserLink(userLinkId: string): Promise<UserLink> {
+        const link = await this.userRepo.findById(userLinkId);
+        if (!link) {
+            throw new Error('User link not found');
+        }
+        await this.userRepo.deleteById(link.id);
         return link;
     }
 }

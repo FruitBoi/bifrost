@@ -7,7 +7,12 @@ import {
     MessagePlatform,
 } from '../../src/db/entities/MessageLink';
 import { VoiceLink } from '../../src/db/entities/VoiceLink';
-import { LinkService, VoiceLinkListener } from '../../src/services/LinkService';
+import { UserLink } from '../../src/db/entities/UserLink';
+import {
+    LinkService,
+    SetUserLinkResult,
+    VoiceLinkListener,
+} from '../../src/services/LinkService';
 import LinkProvisioner, {
     LinkTarget,
 } from '../../src/services/LinkProvisioner';
@@ -57,6 +62,17 @@ export function makeCategoryLink(
     };
 }
 
+export function makeUserLink(overrides: Partial<UserLink> = {}): UserLink {
+    return {
+        id: nextId('userlink'),
+        guildLinkId: guildLink.id,
+        discordUserId: 'duser',
+        fluxerUserId: 'fuser',
+        createdAt: new Date(),
+        ...overrides,
+    };
+}
+
 export function makeVoiceLink(overrides: Partial<VoiceLink> = {}): VoiceLink {
     return {
         id: nextId('voicelink'),
@@ -80,6 +96,7 @@ export class FakeLinkService {
     guildLinks: GuildLink[] = [guildLink];
     categoryLinks: CategoryLink[] = [];
     voiceLinks: VoiceLink[] = [];
+    userLinks: UserLink[] = [];
     voiceLinkListener: VoiceLinkListener | null = null;
 
     setVoiceLinkListener(listener: VoiceLinkListener | null) {
@@ -88,6 +105,20 @@ export class FakeLinkService {
 
     async getGuildLinkById(id: string) {
         return this.guildLinks.find((g) => g.id === id) ?? null;
+    }
+
+    async getGuildLinkForDiscordGuild(discordGuildId: string) {
+        return (
+            this.guildLinks.find((g) => g.discordGuildId === discordGuildId) ??
+            null
+        );
+    }
+
+    async getGuildLinkForFluxerGuild(fluxerGuildId: string) {
+        return (
+            this.guildLinks.find((g) => g.fluxerGuildId === fluxerGuildId) ??
+            null
+        );
     }
 
     async getChannelLinkById(id: string) {
@@ -188,7 +219,71 @@ export class FakeLinkService {
         for (const voiceLink of voiceLinks) {
             this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
         }
+        this.userLinks = this.userLinks.filter((u) => u.guildLinkId !== id);
         this.guildLinks = this.guildLinks.filter((g) => g.id !== id);
+    }
+
+    // User links
+
+    async getUserLinkForDiscordUser(
+        guildLinkId: string,
+        discordUserId: string
+    ) {
+        return (
+            this.userLinks.find(
+                (u) =>
+                    u.guildLinkId === guildLinkId &&
+                    u.discordUserId === discordUserId
+            ) ?? null
+        );
+    }
+
+    async getUserLinkForFluxerUser(guildLinkId: string, fluxerUserId: string) {
+        return (
+            this.userLinks.find(
+                (u) =>
+                    u.guildLinkId === guildLinkId &&
+                    u.fluxerUserId === fluxerUserId
+            ) ?? null
+        );
+    }
+
+    async getUserLinksForGuildLink(guildLinkId: string) {
+        return this.userLinks.filter((u) => u.guildLinkId === guildLinkId);
+    }
+
+    async setUserLink(data: {
+        guildLinkId: string;
+        discordUserId: string;
+        fluxerUserId: string;
+    }): Promise<SetUserLinkResult> {
+        const byDiscord = await this.getUserLinkForDiscordUser(
+            data.guildLinkId,
+            data.discordUserId
+        );
+        if (byDiscord && byDiscord.fluxerUserId === data.fluxerUserId) {
+            return { link: byDiscord, unchanged: true, replaced: [] };
+        }
+        const byFluxer = await this.getUserLinkForFluxerUser(
+            data.guildLinkId,
+            data.fluxerUserId
+        );
+        const replaced: UserLink[] = [];
+        for (const stale of [byDiscord, byFluxer]) {
+            if (!stale || replaced.some((r) => r.id === stale.id)) continue;
+            this.userLinks = this.userLinks.filter((u) => u.id !== stale.id);
+            replaced.push(stale);
+        }
+        const link = makeUserLink(data);
+        this.userLinks.push(link);
+        return { link, unchanged: false, replaced };
+    }
+
+    async removeUserLink(id: string) {
+        const link = this.userLinks.find((u) => u.id === id);
+        if (!link) throw new Error('User link not found');
+        this.userLinks = this.userLinks.filter((u) => u.id !== id);
+        return link;
     }
 
     // Category links

@@ -3,7 +3,7 @@ import DiscordMessageTransformer from '../../src/services/messageTransformer/Dis
 import FluxerMessageTransformer from '../../src/services/messageTransformer/FluxerMessageTransformer';
 import MentionBridgeService from '../../src/services/mentionBridge/MentionBridgeService';
 import { MessageLink } from '../../src/db/entities/MessageLink';
-import { FakeLinkService } from '../helpers/fakes';
+import { FakeLinkService, makeUserLink } from '../helpers/fakes';
 import logger from '../../src/utils/logging/logger';
 
 const ZWSP = '​';
@@ -67,12 +67,15 @@ function fakeDiscordMessage(
 function fakeDiscordReply({
     pings,
     content = 'hello',
+    guildId,
+    client = fakeDiscordClient([]),
 }: {
     pings: boolean;
     content?: string;
+    guildId?: string;
+    client?: ReturnType<typeof fakeDiscordClient>;
 }) {
     const webhookAuthor = fakeDiscordUser('dwebhook', 'Bifröst');
-    const client = fakeDiscordClient([]);
     const referenced = fakeDiscordMessage(
         {
             id: 'dmsg-bridged',
@@ -85,6 +88,7 @@ function fakeDiscordReply({
     return fakeDiscordMessage(
         {
             content,
+            ...(guildId ? { guildId } : {}),
             reference: { messageId: 'dmsg-bridged', channelId: 'dchan' },
             mentions: {
                 users: pings
@@ -137,12 +141,15 @@ function fakeFluxerMessage(
 function fakeFluxerReply({
     pings,
     content = 'hello',
+    guildId,
+    client = fakeFluxerClient([]),
 }: {
     pings: boolean;
     content?: string;
+    guildId?: string;
+    client?: ReturnType<typeof fakeFluxerClient>;
 }) {
     const webhookAuthor = fakeFluxerUser('fwebhook', 'Bifröst');
-    const client = fakeFluxerClient([]);
     const referenced = fakeFluxerMessage(
         {
             id: 'fmsg-bridged',
@@ -155,6 +162,7 @@ function fakeFluxerReply({
     return fakeFluxerMessage(
         {
             content,
+            ...(guildId ? { guildId } : {}),
             referencedMessage: referenced,
             mentions: pings ? [webhookAuthor] : [],
         },
@@ -244,20 +252,219 @@ describe('DiscordMessageTransformer reply pings', () => {
     it('logs direct user mentions that were flattened to plaintext', async () => {
         const client = fakeDiscordClient([fakeDiscordUser('42', 'alice')]);
         const transformer = new DiscordMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
         const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
 
         const result = await transformer.transformMessage(
             fakeDiscordMessage(
-                { content: 'hi <@42> and <@!99>' },
+                { content: 'hi <@42> and <@!99>', guildId: 'dguild' },
                 client
             ) as never
         );
 
         expect(result.content).toBe('hi @alice and @unknown-user');
+        expect('mentionUserIds' in result).toBe(false);
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({
+                platform: 'discord',
+                guildId: 'dguild',
+                mentions: [
+                    { id: '42', username: 'alice' },
+                    { id: '99', username: null },
+                ],
+            })
+        );
+        expect(resolve.mock.calls[0][0].isEdit).toBeFalsy();
         expect(log).toHaveBeenCalledWith('discord', [
             { id: '42', username: 'alice' },
             { id: '99', username: null },
         ]);
+    });
+
+    it('passes a null guild id to the bridge when the message has none', async () => {
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+
+        await transformer.transformMessage(
+            fakeDiscordMessage({ content: 'hi <@42>' }) as never
+        );
+
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ platform: 'discord', guildId: null })
+        );
+    });
+
+    it('does not ask the bridge about mentions when the content has none', async () => {
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+
+        const result = await transformer.transformMessage(
+            fakeDiscordMessage({ content: 'hi <@&1> <#2>' }) as never
+        );
+
+        expect(result.content).toBe('hi @unknown-role #unknown-channel');
+        expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('renders a mapped mention inline as the Fluxer counterpart and whitelists it', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const client = fakeDiscordClient([fakeDiscordUser('42', 'alice')]);
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+        const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
+
+        const result = await transformer.transformMessage(
+            fakeDiscordMessage(
+                { content: 'hi <@42> and <@99>', guildId: 'dguild' },
+                client
+            ) as never
+        );
+
+        expect(result.content).toBe('hi <@fluxer-42> and @unknown-user');
+        expect(result.mentionUserIds).toEqual(['fluxer-42']);
+        expect(log).toHaveBeenCalledWith('discord', [
+            { id: '99', username: null },
+        ]);
+    });
+
+    it('renders a <@!id> mapped mention inline too', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeDiscordMessage({
+                content: '<@!42> <@42>',
+                guildId: 'dguild',
+            }) as never
+        );
+
+        expect(result.content).toBe('<@fluxer-42> <@fluxer-42>');
+        expect(result.mentionUserIds).toEqual(['fluxer-42']);
+    });
+
+    it('keeps a mapped mention inline next to custom emojis', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeDiscordMessage({
+                content: '<@42> <:wave:123>',
+                guildId: 'dguild',
+            }) as never,
+            [{ name: 'wave', id: '999', animated: false }]
+        );
+
+        expect(result.content).toBe('<@fluxer-42> <:wave:999>');
+    });
+
+    it('prepends the reply ping and keeps the mapped mention inline', async () => {
+        links.messageLinks.push(
+            makeMessageLink({
+                sourcePlatform: 'fluxer',
+                sourceAuthorId: 'fuser-original',
+            })
+        );
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeDiscordReply({
+                pings: true,
+                content: 'hi <@42>',
+                guildId: 'dguild',
+            }) as never
+        );
+
+        expect(result.content).toBe('<@fuser-original> hi <@fluxer-42>');
+        expect(result.mentionUserIds).toEqual(['fluxer-42', 'fuser-original']);
+        expect(result.embeds?.length).toBe(1);
+    });
+
+    it('does not duplicate the ping when the reply target is also mentioned inline', async () => {
+        links.messageLinks.push(
+            makeMessageLink({
+                sourcePlatform: 'fluxer',
+                sourceAuthorId: 'fuser-original',
+            })
+        );
+        links.userLinks.push(
+            makeUserLink({
+                discordUserId: '42',
+                fluxerUserId: 'fuser-original',
+            })
+        );
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeDiscordReply({
+                pings: true,
+                content: 'hi <@42>',
+                guildId: 'dguild',
+            }) as never
+        );
+
+        expect(result.content).toBe('hi <@fuser-original>');
+        expect(result.mentionUserIds).toEqual(['fuser-original']);
+    });
+
+    it('drops mapped mentions from a poll message', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+        const message = Object.assign(
+            fakeDiscordMessage({ content: 'vote <@42>', guildId: 'dguild' }),
+            {
+                poll: {
+                    question: { text: 'Lunch?' },
+                    answers: [{ text: 'Pizza' }, { text: 'Sushi' }],
+                    expiresTimestamp: Date.now() + 60_000,
+                },
+            }
+        );
+
+        const result = await transformer.transformMessage(message as never);
+
+        expect(result.content).not.toContain('<@');
+        expect(result.content).not.toContain('bfmention');
+        expect('mentionUserIds' in result).toBe(false);
+    });
+
+    it('still resolves mapped mentions on edits, without logging', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: '42', fluxerUserId: 'fluxer-42' })
+        );
+        const client = fakeDiscordClient([fakeDiscordUser('42', 'alice')]);
+        const transformer = new DiscordMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+        const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
+        const info = vi.mocked(logger.info);
+        info.mockClear();
+
+        const result = await transformer.transformMessage(
+            fakeDiscordMessage(
+                { content: 'hi <@42> and <@99>', guildId: 'dguild' },
+                client
+            ) as never,
+            [],
+            { isEdit: true }
+        );
+
+        expect(result.content).toBe('hi <@fluxer-42> and @unknown-user');
+        expect(result.mentionUserIds).toEqual(['fluxer-42']);
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ isEdit: true })
+        );
+        expect(log).not.toHaveBeenCalled();
+        expect(info).not.toHaveBeenCalled();
     });
 
     it('does not prepend a mention when the reply is a forward', async () => {
@@ -310,15 +517,22 @@ describe('DiscordMessageTransformer reply pings', () => {
     it('does not re-log unresolved mentions when transforming an edit', async () => {
         const client = fakeDiscordClient([fakeDiscordUser('42', 'alice')]);
         const transformer = new DiscordMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
         const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
 
         const result = await transformer.transformMessage(
-            fakeDiscordMessage({ content: 'hi <@42>' }, client) as never,
+            fakeDiscordMessage(
+                { content: 'hi <@42>', guildId: 'dguild' },
+                client
+            ) as never,
             [],
             { isEdit: true }
         );
 
         expect(result.content).toBe('hi @alice');
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ isEdit: true })
+        );
         expect(log).not.toHaveBeenCalled();
     });
 
@@ -436,30 +650,213 @@ describe('FluxerMessageTransformer reply pings', () => {
     it('logs direct user mentions that were flattened to plaintext', async () => {
         const client = fakeFluxerClient([fakeFluxerUser('42', 'alice')]);
         const transformer = new FluxerMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
         const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
 
         const result = await transformer.transformMessage(
-            fakeFluxerMessage({ content: 'hi <@42>' }, client) as never
+            fakeFluxerMessage(
+                { content: 'hi <@42> and <@99>', guildId: 'fguild' },
+                client
+            ) as never
         );
 
-        expect(result.content).toBe(`hi @${ZWSP}alice`);
+        expect(result.content).toBe(
+            `hi @${ZWSP}alice and @${ZWSP}unknown-user`
+        );
+        expect('mentionUserIds' in result).toBe(false);
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({
+                platform: 'fluxer',
+                guildId: 'fguild',
+                mentions: [
+                    { id: '42', username: 'alice' },
+                    { id: '99', username: null },
+                ],
+            })
+        );
+        expect(resolve.mock.calls[0][0].isEdit).toBeFalsy();
         expect(log).toHaveBeenCalledWith('fluxer', [
             { id: '42', username: 'alice' },
+            { id: '99', username: null },
         ]);
     });
 
-    it('does not re-log unresolved mentions when transforming an edit', async () => {
+    it('passes a null guild id to the bridge when the message has none', async () => {
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+
+        await transformer.transformMessage(
+            fakeFluxerMessage({ content: 'hi <@42>' }) as never
+        );
+
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ platform: 'fluxer', guildId: null })
+        );
+    });
+
+    it('does not ask the bridge about mentions when the content has none', async () => {
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+
+        const result = await transformer.transformMessage(
+            fakeFluxerMessage({ content: 'hi @everyone' }) as never
+        );
+
+        expect(result.content).toBe(`hi @${ZWSP}everyone`);
+        expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('renders a mapped mention inline as the Discord counterpart, without a zero-width space', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: 'discord-42', fluxerUserId: '42' })
+        );
         const client = fakeFluxerClient([fakeFluxerUser('42', 'alice')]);
         const transformer = new FluxerMessageTransformer(mentionBridge);
         const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
 
         const result = await transformer.transformMessage(
-            fakeFluxerMessage({ content: 'hi <@42>' }, client) as never,
+            fakeFluxerMessage(
+                {
+                    content: 'hi <@42> and @everyone and <@99>',
+                    guildId: 'fguild',
+                },
+                client
+            ) as never
+        );
+
+        expect(result.content).toBe(
+            `hi <@discord-42> and @${ZWSP}everyone and @${ZWSP}unknown-user`
+        );
+        expect(result.content).toContain('<@discord-42>');
+        expect(result.content).not.toContain(`<@${ZWSP}discord-42>`);
+        expect(result.mentionUserIds).toEqual(['discord-42']);
+        expect(log).toHaveBeenCalledWith('fluxer', [
+            { id: '99', username: null },
+        ]);
+    });
+
+    it('keeps a mapped mention inline next to custom emojis', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: 'discord-42', fluxerUserId: '42' })
+        );
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeFluxerMessage({
+                content: '<@42> <:wave:123>',
+                guildId: 'fguild',
+            }) as never,
+            [{ name: 'wave', id: '999', animated: false }]
+        );
+
+        expect(result.content).toBe('<@discord-42> <:wave:999>');
+    });
+
+    it('prepends the reply ping and keeps the mapped mention inline', async () => {
+        links.messageLinks.push(
+            makeMessageLink({
+                sourcePlatform: 'discord',
+                sourceAuthorId: 'duser-original',
+            })
+        );
+        links.userLinks.push(
+            makeUserLink({ discordUserId: 'discord-42', fluxerUserId: '42' })
+        );
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeFluxerReply({
+                pings: true,
+                content: 'hi <@42> @here',
+                guildId: 'fguild',
+            }) as never
+        );
+
+        expect(result.content).toBe(
+            `<@duser-original> hi <@discord-42> @${ZWSP}here`
+        );
+        expect(result.mentionUserIds).toEqual(['discord-42', 'duser-original']);
+        expect(result.embeds?.length).toBe(1);
+    });
+
+    it('does not duplicate the ping when the reply target is also mentioned inline', async () => {
+        links.messageLinks.push(
+            makeMessageLink({
+                sourcePlatform: 'discord',
+                sourceAuthorId: 'duser-original',
+            })
+        );
+        links.userLinks.push(
+            makeUserLink({
+                discordUserId: 'duser-original',
+                fluxerUserId: '42',
+            })
+        );
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+
+        const result = await transformer.transformMessage(
+            fakeFluxerReply({
+                pings: true,
+                content: 'hi <@42>',
+                guildId: 'fguild',
+            }) as never
+        );
+
+        expect(result.content).toBe('hi <@duser-original>');
+        expect(result.mentionUserIds).toEqual(['duser-original']);
+    });
+
+    it('still resolves mapped mentions on edits, without logging', async () => {
+        links.userLinks.push(
+            makeUserLink({ discordUserId: 'discord-42', fluxerUserId: '42' })
+        );
+        const client = fakeFluxerClient([fakeFluxerUser('42', 'alice')]);
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+        const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
+        const info = vi.mocked(logger.info);
+        info.mockClear();
+
+        const result = await transformer.transformMessage(
+            fakeFluxerMessage(
+                { content: 'hi <@42> and <@99>', guildId: 'fguild' },
+                client
+            ) as never,
+            [],
+            { isEdit: true }
+        );
+
+        expect(result.content).toBe(
+            `hi <@discord-42> and @${ZWSP}unknown-user`
+        );
+        expect(result.mentionUserIds).toEqual(['discord-42']);
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ isEdit: true })
+        );
+        expect(log).not.toHaveBeenCalled();
+        expect(info).not.toHaveBeenCalled();
+    });
+
+    it('does not re-log unresolved mentions when transforming an edit', async () => {
+        const client = fakeFluxerClient([fakeFluxerUser('42', 'alice')]);
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+        const resolve = vi.spyOn(mentionBridge, 'resolveUserMentions');
+        const log = vi.spyOn(mentionBridge, 'logUnresolvedUserMentions');
+
+        const result = await transformer.transformMessage(
+            fakeFluxerMessage(
+                { content: 'hi <@42>', guildId: 'fguild' },
+                client
+            ) as never,
             [],
             { isEdit: true }
         );
 
         expect(result.content).toBe(`hi @${ZWSP}alice`);
+        expect(resolve).toHaveBeenCalledWith(
+            expect.objectContaining({ isEdit: true })
+        );
         expect(log).not.toHaveBeenCalled();
     });
 

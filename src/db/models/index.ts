@@ -4,6 +4,7 @@ import { CategoryLinkModel } from './CategoryLinkModel';
 import { MessageLinkModel } from './MessageLinkModel';
 import { QueuedMessageModel } from './QueuedMessageModel';
 import { VoiceLinkModel } from './VoiceLinkModel';
+import { UserLinkModel } from './UserLinkModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -66,6 +67,18 @@ VoiceLinkModel.belongsTo(GuildLinkModel, {
     as: 'guildLink',
 });
 
+// Guild -> UserLinks
+GuildLinkModel.hasMany(UserLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'userLinks',
+    onDelete: 'CASCADE',
+});
+
+UserLinkModel.belongsTo(GuildLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'guildLink',
+});
+
 export {
     GuildLinkModel,
     ChannelLinkModel,
@@ -73,4 +86,5 @@ export {
     MessageLinkModel,
     QueuedMessageModel,
     VoiceLinkModel,
+    UserLinkModel,
 };

@@ -11,7 +11,9 @@ import { buildDiscordStickerUrl } from '../../utils/buildStickerUrl';
 import { getPollMessage } from '../../utils/pollMessageFormatter';
 import WebhookEmbed, { WebhookEmbedFooter } from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
-import MentionBridgeService from '../mentionBridge/MentionBridgeService';
+import MentionBridgeService, {
+    ResolvedUserMention,
+} from '../mentionBridge/MentionBridgeService';
 
 type DiscordMessage = OmitPartialGroupDMChannel<Message<boolean>>;
 
@@ -67,9 +69,11 @@ export default class DiscordMessageTransformer extends MessageTransformer<
     }
 
     private sanitizeContent(
-        message: Pick<DiscordMessage, 'content' | 'client' | 'guild'>
+        message: Pick<DiscordMessage, 'content' | 'client' | 'guild'>,
+        renderUserMention?: (id: string) => string | null
     ): string {
         return sanitizeMentions(message.content, {
+            renderUserMention,
             resolveUser: (id) => {
                 const user = message.client.users.cache.get(id);
                 return user ? user.username : null;
@@ -113,22 +117,25 @@ export default class DiscordMessageTransformer extends MessageTransformer<
     }
 
     /**
-     * Reports `<@id>` user mentions in the raw content: they are relayed as
-     * plaintext because Discord users have no known Fluxer counterpart.
+     * Resolves the `<@id>` user mentions in the raw content to their mapped
+     * Fluxer users. Unmapped ones are logged and relayed as plaintext.
      */
-    private logUnresolvedUserMentions(
-        message: Pick<DiscordMessage, 'content' | 'client'>
-    ): void {
-        if (!this.mentionBridge) return;
+    private async resolveUserMentions(
+        message: Pick<DiscordMessage, 'content' | 'client' | 'guildId'>,
+        options: TransformOptions
+    ): Promise<ResolvedUserMention[]> {
+        if (!this.mentionBridge) return [];
         const ids = MentionBridgeService.extractUserMentionIds(message.content);
-        if (ids.length === 0) return;
-        this.mentionBridge.logUnresolvedUserMentions(
-            'discord',
-            ids.map((id) => ({
+        if (ids.length === 0) return [];
+        return this.mentionBridge.resolveUserMentions({
+            platform: 'discord',
+            guildId: message.guildId ?? null,
+            mentions: ids.map((id) => ({
                 id,
                 username: message.client.users.cache.get(id)?.username ?? null,
-            }))
-        );
+            })),
+            isEdit: options.isEdit,
+        });
     }
 
     /**
@@ -161,11 +168,17 @@ export default class DiscordMessageTransformer extends MessageTransformer<
 
     private buildResult(
         message: DiscordMessage,
-        content: string,
+        rawContent: string,
         attachments: WebhookAttachment[],
         embeds: WebhookEmbed[],
-        mentionUserIds: string[]
+        allMentionUserIds: string[]
     ): WebhookMessageData {
+        // Mapped direct mentions sit in the content as placeholders until now
+        // so that sanitising could not touch them; reply pings are prepended.
+        // A user can be both (reply target and mentioned inline).
+        const mentionUserIds = [...new Set(allMentionUserIds)];
+        const content =
+            MentionBridgeService.restoreMentionPlaceholders(rawContent);
         return {
             content:
                 mentionUserIds.length > 0
@@ -187,12 +200,20 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         fluxerEmojis: GeneralEmoji[] = [],
         options: TransformOptions = {}
     ): Promise<WebhookMessageData> {
-        const sanitizedContent = this.sanitizeContent(message);
+        const directMentions = await this.resolveUserMentions(message, options);
+        const counterpartByMentionId = new Map(
+            directMentions.map((m) => [m.id, m.counterpartId])
+        );
+        const sanitizedContent = this.sanitizeContent(message, (id) => {
+            const counterpartId = counterpartByMentionId.get(id);
+            return counterpartId
+                ? MentionBridgeService.mentionPlaceholder(counterpartId)
+                : null;
+        });
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
             fluxerEmojis
         );
-        if (!options.isEdit) this.logUnresolvedUserMentions(message);
 
         const attachments = this.buildAttachments(message);
 
@@ -213,7 +234,10 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             : emojiReplacedContent;
 
         const embeds: WebhookEmbed[] = this.buildRichEmbeds(message);
-        let mentionUserIds: string[] = [];
+        // Polls carry generated content; direct mentions are not part of it.
+        const mentionUserIds: string[] = isPollPresent
+            ? []
+            : directMentions.map((m) => m.counterpartId);
 
         if (message.reference) {
             const isForwarded = message.flags.has(MessageFlags.HasSnapshot);
@@ -226,15 +250,17 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                     messageContent,
                     attachments,
                     embeds,
-                    []
+                    mentionUserIds
                 );
             }
 
             // Polls carry generated content; never prepend a mention to them.
             if (!isForwarded && !isPollPresent) {
-                mentionUserIds = await this.resolveReplyMention(
-                    message,
-                    referencedMessage
+                mentionUserIds.push(
+                    ...(await this.resolveReplyMention(
+                        message,
+                        referencedMessage
+                    ))
                 );
             }
 

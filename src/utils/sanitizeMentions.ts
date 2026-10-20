@@ -2,6 +2,12 @@ type MentionResolver = {
     resolveUser: (id: string) => string | null;
     resolveRole: (id: string) => string | null;
     resolveChannel: (id: string) => string | null;
+    /**
+     * Optional: a verbatim replacement for a user mention, used instead of
+     * `@username` when it returns a string (for mentions that are kept as
+     * real pings; see MentionBridgeService.mentionPlaceholder).
+     */
+    renderUserMention?: (id: string) => string | null;
 };
 
 export function sanitizeMentions(
@@ -15,6 +21,8 @@ export function sanitizeMentions(
             !match.startsWith('<#')
         ) {
             const id = match.replace(/[<@!>]/g, '');
+            const rendered = resolver.renderUserMention?.(id) ?? null;
+            if (rendered !== null) return rendered;
             const username = resolver.resolveUser(id);
             return username ? `@${username}` : '@unknown-user';
         }

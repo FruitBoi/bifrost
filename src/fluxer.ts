@@ -51,6 +51,7 @@ import { DbStatsService } from './services/DbStatsService';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
+import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 import RoleFluxerCommandHandler from './commands/fluxer/handlers/RoleFluxerCommandHandler';
 import type { BotConfig } from './config/BotConfig';
@@ -66,6 +67,7 @@ const startFluxerClient = async ({
     fluxerEntityResolver,
     threadSyncService,
     categorySyncService,
+    threadMemberSyncService,
     metricsService,
     queueService,
     discordStatsService,
@@ -82,6 +84,7 @@ const startFluxerClient = async ({
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
     categorySyncService: CategorySyncService;
+    threadMemberSyncService: ThreadMemberSyncService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -198,6 +201,7 @@ const startFluxerClient = async ({
             client,
             linkService,
             discordEntityResolver,
+            threadMemberSyncService,
             botConfig.roles.copyAllowedRoleIds
         )
     );

@@ -5,27 +5,34 @@ import { breakMentions, sanitizeMentions } from '../../utils/sanitizeMentions';
 import { buildFluxerStickerUrl } from '../../utils/buildStickerUrl';
 import WebhookEmbed from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
-import MentionBridgeService from '../mentionBridge/MentionBridgeService';
+import MentionBridgeService, {
+    ResolvedUserMention,
+} from '../mentionBridge/MentionBridgeService';
 
 export default class FluxerMessageTransformer extends MessageTransformer<
     Message,
     WebhookMessageData
 > {
     /**
-     * Reports `<@id>` user mentions in the raw content: they are relayed as
-     * plaintext because Fluxer users have no known Discord counterpart.
+     * Resolves the `<@id>` user mentions in the raw content to their mapped
+     * Discord users. Unmapped ones are logged and relayed as plaintext.
      */
-    private logUnresolvedUserMentions(message: Message): void {
-        if (!this.mentionBridge) return;
+    private async resolveUserMentions(
+        message: Message,
+        options: TransformOptions
+    ): Promise<ResolvedUserMention[]> {
+        if (!this.mentionBridge) return [];
         const ids = MentionBridgeService.extractUserMentionIds(message.content);
-        if (ids.length === 0) return;
-        this.mentionBridge.logUnresolvedUserMentions(
-            'fluxer',
-            ids.map((id) => ({
+        if (ids.length === 0) return [];
+        return this.mentionBridge.resolveUserMentions({
+            platform: 'fluxer',
+            guildId: message.guildId ?? null,
+            mentions: ids.map((id) => ({
                 id,
                 username: message.client.users.get(id)?.username ?? null,
-            }))
-        );
+            })),
+            isEdit: options.isEdit,
+        });
     }
 
     /**
@@ -48,9 +55,13 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         return userId ? [userId] : [];
     }
 
-    private sanitizeContent(message: Message): string {
+    private sanitizeContent(
+        message: Message,
+        renderUserMention?: (id: string) => string | null
+    ): string {
         return breakMentions(
             sanitizeMentions(message.content, {
+                renderUserMention,
                 resolveUser: (id) => {
                     const user = message.client.users.get(id);
                     return user ? user.username : null;
@@ -73,12 +84,20 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         discordEmojis: GeneralEmoji[] = [],
         options: TransformOptions = {}
     ): Promise<WebhookMessageData> {
-        const sanitizedContent = this.sanitizeContent(message);
+        const directMentions = await this.resolveUserMentions(message, options);
+        const counterpartByMentionId = new Map(
+            directMentions.map((m) => [m.id, m.counterpartId])
+        );
+        const sanitizedContent = this.sanitizeContent(message, (id) => {
+            const counterpartId = counterpartByMentionId.get(id);
+            return counterpartId
+                ? MentionBridgeService.mentionPlaceholder(counterpartId)
+                : null;
+        });
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
             discordEmojis
         );
-        if (!options.isEdit) this.logUnresolvedUserMentions(message);
 
         const attachments = message.attachments
             .filter(
@@ -114,11 +133,13 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             WebhookEmbed.fromFluxerEmbed(embed)
         );
 
-        let mentionUserIds: string[] = [];
+        const allMentionUserIds = directMentions.map((m) => m.counterpartId);
         if (message.referencedMessage) {
-            mentionUserIds = await this.resolveReplyMention(
-                message,
-                message.referencedMessage
+            allMentionUserIds.push(
+                ...(await this.resolveReplyMention(
+                    message,
+                    message.referencedMessage
+                ))
             );
             const content = this.sanitizeContent(message.referencedMessage);
             embeds.unshift(
@@ -137,15 +158,22 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         }
 
         // Applied after breakMentions/sanitizeMentions/replaceEmojis so the
-        // injected `<@id>` reaches Discord intact.
+        // injected `<@id>` reaches Discord intact: mapped direct mentions were
+        // placeholders until now, reply pings are prepended.
+        // A user can be both (reply target and mentioned inline).
+        const mentionUserIds = [...new Set(allMentionUserIds)];
+        const content =
+            MentionBridgeService.restoreMentionPlaceholders(
+                emojiReplacedContent
+            );
         return {
             content:
                 mentionUserIds.length > 0
                     ? MentionBridgeService.applyMentions(
-                          emojiReplacedContent,
+                          content,
                           mentionUserIds
                       )
-                    : emojiReplacedContent,
+                    : content,
             username: message.author.username,
             avatarURL: message.author.avatarURL() || '',
             attachments: attachments,

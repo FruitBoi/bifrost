@@ -33,8 +33,11 @@ categories:
 roles:
     # Fluxer role IDs whose members may run `!b role <@user> <discordUserId>`,
     # which adds every Fluxer role named like one of that Discord user's roles
-    # to the mentioned Fluxer member. Quote the IDs: unquoted numbers lose
-    # precision when parsed. Defaults to the two IDs below.
+    # to the mentioned Fluxer member, maps the two accounts to each other so
+    # pings of either are bridged to the other (one mapping per account; a
+    # re-run replaces it), and adds the member to every bridged thread the
+    # Discord user is in. Quote the IDs: unquoted numbers lose precision when
+    # parsed. Defaults to the two IDs below.
     copyAllowedRoleIds:
         - "1561105750388908139"
         - "1561105750388908112"
