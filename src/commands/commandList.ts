@@ -53,12 +53,12 @@ const commandList: Command[] = [
         name: 'link',
         discord: {
             description:
-                'Links this server to a Fluxer guild (by guild ID), or links the channel or thread you run it in to a Fluxer channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. Run with `confirm` to proceed.',
+                'Links this server to a Fluxer guild (by guild ID), or links the channel or thread you run it in to a Fluxer channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately.',
             usageArgs: ['<fluxerGuildId | fluxerChannelId | fluxerThreadId>'],
         },
         fluxer: {
             description:
-                'Links this server to a Discord guild (by guild ID), or links the channel or thread you run it in to a Discord channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. Run with `confirm` to proceed.',
+                'Links this server to a Discord guild (by guild ID), or links the channel or thread you run it in to a Discord channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately.',
             usageArgs: [
                 '<discordGuildId | discordChannelId | discordThreadId>',
             ],
@@ -96,12 +96,12 @@ const commandList: Command[] = [
         name: 'category',
         discord: {
             description:
-                "Bridges every text channel of the current channel's category to threads in the given Fluxer channel (run inside a channel of the category). `unlink` removes the category link and its channel links; `confirm` executes the pending action.",
+                "Bridges every text channel of the current channel's category to threads in the given Fluxer channel, immediately (run inside a channel of the category). `unlink` removes the category link and its channel links after `confirm`.",
             usageArgs: ['<fluxerChannelId> | unlink | confirm'],
         },
         fluxer: {
             description:
-                'Bridges every text channel of the given Discord category to threads in the current Fluxer channel. `unlink <id>` removes the category link and its channel links; `confirm` executes the pending action.',
+                'Bridges every text channel of the given Discord category to threads in the current Fluxer channel, immediately. `unlink <id>` removes the category link and its channel links after `confirm`.',
             usageArgs: [
                 '<discordCategoryId> | unlink <discordCategoryId> | confirm',
             ],

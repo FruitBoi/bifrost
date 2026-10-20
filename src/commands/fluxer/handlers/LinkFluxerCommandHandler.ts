@@ -14,15 +14,6 @@ import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
 import { EmbedColors } from '../../../utils/embeds';
 
-type PendingLink =
-    | { type: 'guild'; discordGuildId: string; guildName: string }
-    | {
-          type: 'location';
-          guildLinkId: string;
-          discord: ResolvedLinkTarget;
-          fluxer: ResolvedLinkTarget;
-      };
-
 /** Human-readable label for a resolved link target. */
 export function describeTarget(target: ResolvedLinkTarget): string {
     if (target.kind === 'thread') {
@@ -33,11 +24,6 @@ export function describeTarget(target: ResolvedLinkTarget): string {
 }
 
 export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
-    private pending = new Map<
-        string,
-        { action: PendingLink; timer: NodeJS.Timeout }
-    >();
-
     constructor(
         client: Client,
         private readonly linkService: LinkService,
@@ -45,24 +31,6 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
         private readonly discordEntityResolver: DiscordEntityResolver
     ) {
         super(client);
-    }
-
-    private setPending(userId: string, action: PendingLink) {
-        const existing = this.pending.get(userId);
-        if (existing) clearTimeout(existing.timer);
-        const timer = setTimeout(
-            () => this.pending.delete(userId),
-            5 * 60 * 1000
-        );
-        this.pending.set(userId, { action, timer });
-    }
-
-    private takePending(userId: string): PendingLink | null {
-        const entry = this.pending.get(userId);
-        if (!entry) return null;
-        clearTimeout(entry.timer);
-        this.pending.delete(userId);
-        return entry.action;
     }
 
     private async replyError(
@@ -87,102 +55,29 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
     ): Promise<void> {
         const footer = this.footer(message);
 
-        // Confirm flow
+        // Legacy confirm step: links are now created immediately.
         if (args[0]?.toLowerCase() === 'confirm') {
-            const pending = this.takePending(message.author.id);
-            if (!pending) {
-                await this.replyError(
-                    message,
-                    `No pending link action. Run \`${COMMAND_PREFIX}link <id>\` first.`
-                );
-                return;
-            }
-
-            if (pending.type === 'guild') {
-                if (
-                    !(await this.requirePermission(
-                        message,
-                        PermissionsBitField.Flags.ManageGuild,
-                        'Manage Guild'
-                    ))
-                )
-                    return;
-                try {
-                    await this.linkService.createGuildLink(
-                        pending.discordGuildId,
-                        message.guildId!
-                    );
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setDescription(
-                                    `This Fluxer server is now bridged with Discord guild **${pending.guildName}**.\n` +
-                                        `Use \`${COMMAND_PREFIX}link <discord-channel-or-thread-id>\` in any channel or thread to start linking.`
-                                )
-                                .setColor(EmbedColors.Success)
-                                .setFooter(footer)
-                                .setTimestamp(),
-                        ],
-                    });
-                } catch (err: unknown) {
-                    await this.replyError(
-                        message,
-                        `Failed to link guild: ${(err as Error).message}`
-                    );
-                    logger.error('Link guild failed:', err);
-                }
-                return;
-            }
-
-            if (
-                !(await this.requirePermission(
-                    message,
-                    PermissionsBitField.Flags.ManageWebhooks,
-                    'Manage Webhooks'
-                ))
-            )
-                return;
-            try {
-                const guildLink = await this.linkService.getGuildLinkById(
-                    pending.guildLinkId
-                );
-                if (!guildLink) {
-                    throw new Error('this server is no longer linked');
-                }
-                await this.linkProvisioner.createLink({
-                    guildLink,
-                    discord: pending.discord,
-                    fluxer: pending.fluxer,
-                });
-                await message.reply({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setDescription(
-                                `Linked **${describeTarget(pending.fluxer)}** ↔ **${describeTarget(pending.discord)}** on Discord successfully.`
-                            )
-                            .setColor(EmbedColors.Success)
-                            .setFooter(footer)
-                            .setTimestamp(),
-                    ],
-                });
-            } catch (err: unknown) {
-                await this.replyError(
-                    message,
-                    `Failed to link: ${(err as Error).message}`
-                );
-                logger.error('Link failed:', err);
-            }
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Confirmation is no longer needed. Run \`${COMMAND_PREFIX}link <id>\` directly to create the link.`
+                        )
+                        .setColor(EmbedColors.Info)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
             return;
         }
 
-        // Detection phase
         const id = args[0];
         if (!id) {
             await this.replyError(
                 message,
                 `Usage: \`${COMMAND_PREFIX}link <id>\`\n` +
                     `> Provide a Discord guild ID to bridge servers, or a Discord channel or thread ID to bridge it with the channel or thread you are in.\n` +
-                    `> Then run \`${COMMAND_PREFIX}link confirm\` to proceed.`
+                    `> The link is created immediately.`
             );
             return;
         }
@@ -200,23 +95,27 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
                 ))
             )
                 return;
-            this.setPending(message.author.id, {
-                type: 'guild',
-                discordGuildId: id,
-                guildName: discordGuild.name,
-            });
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setDescription(
-                            `Found Discord guild **${discordGuild.name}**.\n` +
-                                `Run \`${COMMAND_PREFIX}link confirm\` to bridge this Fluxer server to it.`
-                        )
-                        .setColor(EmbedColors.Warning)
-                        .setFooter(footer)
-                        .setTimestamp(),
-                ],
-            });
+            try {
+                await this.linkService.createGuildLink(id, message.guildId!);
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setDescription(
+                                `This Fluxer server is now bridged with Discord guild **${discordGuild.name}**.\n` +
+                                    `Use \`${COMMAND_PREFIX}link <discord-channel-or-thread-id>\` in any channel or thread to start linking.`
+                            )
+                            .setColor(EmbedColors.Success)
+                            .setFooter(footer)
+                            .setTimestamp(),
+                    ],
+                });
+            } catch (err: unknown) {
+                await this.replyError(
+                    message,
+                    `Failed to link guild: ${(err as Error).message}`
+                );
+                logger.error('Link guild failed:', err);
+            }
             return;
         }
 
@@ -282,23 +181,29 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
             return;
         }
 
-        this.setPending(message.author.id, {
-            type: 'location',
-            guildLinkId: guildLink.id,
-            discord,
-            fluxer,
-        });
-        await message.reply({
-            embeds: [
-                new EmbedBuilder()
-                    .setDescription(
-                        `Found Discord ${discord.kind} **${describeTarget(discord)}**.\n` +
-                            `Run \`${COMMAND_PREFIX}link confirm\` to link **${describeTarget(fluxer)}** to it.`
-                    )
-                    .setColor(EmbedColors.Warning)
-                    .setFooter(footer)
-                    .setTimestamp(),
-            ],
-        });
+        try {
+            await this.linkProvisioner.createLink({
+                guildLink,
+                discord,
+                fluxer,
+            });
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Linked **${describeTarget(fluxer)}** ↔ **${describeTarget(discord)}** on Discord successfully.`
+                        )
+                        .setColor(EmbedColors.Success)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to link: ${(err as Error).message}`
+            );
+            logger.error('Link failed:', err);
+        }
     }
 }

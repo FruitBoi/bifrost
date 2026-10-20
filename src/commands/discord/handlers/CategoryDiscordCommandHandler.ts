@@ -16,20 +16,13 @@ import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
-type PendingCategoryAction =
-    | {
-          type: 'create';
-          guildLinkId: string;
-          discordCategoryId: string;
-          fluxerChannelId: string;
-      }
-    | { type: 'remove'; categoryLinkId: string };
+type PendingCategoryAction = { type: 'remove'; categoryLinkId: string };
 
 /**
  * `category <fluxerChannelId> | unlink | confirm` — bridges every text
  * channel of the current channel's category to threads inside one Fluxer
- * channel (or removes such a bridge). Actions are previewed first and
- * executed with `confirm`.
+ * channel (immediately), or removes such a bridge (`unlink`, executed with
+ * `confirm`).
  */
 export default class CategoryDiscordCommandHandler extends DiscordCommandHandler {
     private pending = new Map<
@@ -160,7 +153,7 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
             return;
         }
 
-        await this.handlePreview(message, categoryId, args[0]);
+        await this.handleCreate(message, categoryId, args[0]);
     }
 
     private async handleShow(
@@ -193,7 +186,7 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
         });
     }
 
-    private async handlePreview(
+    private async handleCreate(
         message: DiscordCommandHandlerMessage,
         categoryId: string,
         fluxerChannelId: string
@@ -209,43 +202,43 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
             return;
         }
 
-        let preview;
         try {
-            preview = await this.categorySyncService.preview(
-                guildLink,
-                categoryId,
-                fluxerChannelId
+            const { result } =
+                await this.categorySyncService.createCategoryLink(
+                    guildLink,
+                    categoryId,
+                    fluxerChannelId
+                );
+
+            const lines = [
+                `Bridged category <#${categoryId}>: ` +
+                    `**${result.linked.length}** linked, **${result.skipped.length}** skipped, **${result.failed.length}** failed.`,
+            ];
+            const section = (
+                title: string,
+                items: CategorySyncItem[],
+                render: (item: CategorySyncItem) => string
+            ) => {
+                if (items.length === 0) return;
+                lines.push(`\n**${title}**`);
+                lines.push(...items.map(render));
+            };
+            section('Linked', result.linked, (i) => `#${i.channelName}`);
+            section('Skipped', result.skipped, (i) => `#${i.channelName}`);
+            section(
+                'Failed',
+                result.failed,
+                (i) => `#${i.channelName}: ${i.reason ?? 'unknown error'}`
             );
+
+            await this.replyChunked(message, lines, EmbedColors.Success);
         } catch (err: unknown) {
             await this.replyError(
                 message,
-                `Cannot bridge this category: ${(err as Error).message}`
+                `Failed to bridge category: ${(err as Error).message}`
             );
-            return;
+            logger.error('Category link failed:', err);
         }
-
-        const lines = [
-            `Bridge category **${preview.discordCategoryName}** → **#${preview.fluxerChannelName}**:`,
-            ...preview.channels.map((channel) =>
-                channel.alreadyLinked
-                    ? `#${channel.name} (already linked, will be skipped)`
-                    : `#${channel.name}`
-            ),
-        ];
-        if (preview.channels.length === 0) {
-            lines.push('*(no text channels in this category yet)*');
-        }
-        lines.push(
-            `\nRun \`${COMMAND_PREFIX}category confirm\` to bridge them.`
-        );
-
-        this.setPending(message.author.id, {
-            type: 'create',
-            guildLinkId: guildLink.id,
-            discordCategoryId: categoryId,
-            fluxerChannelId,
-        });
-        await this.replyChunked(message, lines, EmbedColors.Warning);
     }
 
     private async handleUnlink(
@@ -289,86 +282,37 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
         if (!pending) {
             await this.replyError(
                 message,
-                `No pending category action. Run \`${COMMAND_PREFIX}category <fluxerChannelId>\` or \`${COMMAND_PREFIX}category unlink\` first.`
+                `No pending category action. Run \`${COMMAND_PREFIX}category unlink\` first.`
             );
-            return;
-        }
-
-        if (pending.type === 'remove') {
-            try {
-                const categoryLink = await this.linkService.getCategoryLinkById(
-                    pending.categoryLinkId
-                );
-                if (!categoryLink) {
-                    throw new Error('The category link no longer exists');
-                }
-                const { removedLinks } =
-                    await this.categorySyncService.removeCategoryLink(
-                        categoryLink
-                    );
-                await message.reply({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setDescription(
-                                `Removed the category link for <#${categoryLink.discordCategoryId}> and ${removedLinks} channel↔thread link${removedLinks === 1 ? '' : 's'}.`
-                            )
-                            .setColor(EmbedColors.Success)
-                            .setFooter(this.footer(message))
-                            .setTimestamp(),
-                    ],
-                });
-            } catch (err: unknown) {
-                await this.replyError(
-                    message,
-                    `Failed to remove category link: ${(err as Error).message}`
-                );
-                logger.error('Category unlink failed:', err);
-            }
             return;
         }
 
         try {
-            const guildLink = await this.linkService.getGuildLinkById(
-                pending.guildLinkId
+            const categoryLink = await this.linkService.getCategoryLinkById(
+                pending.categoryLinkId
             );
-            if (!guildLink) {
-                throw new Error('The guild link no longer exists');
+            if (!categoryLink) {
+                throw new Error('The category link no longer exists');
             }
-            const { result } =
-                await this.categorySyncService.createCategoryLink(
-                    guildLink,
-                    pending.discordCategoryId,
-                    pending.fluxerChannelId
-                );
-
-            const lines = [
-                `Bridged category <#${pending.discordCategoryId}>: ` +
-                    `**${result.linked.length}** linked, **${result.skipped.length}** skipped, **${result.failed.length}** failed.`,
-            ];
-            const section = (
-                title: string,
-                items: CategorySyncItem[],
-                render: (item: CategorySyncItem) => string
-            ) => {
-                if (items.length === 0) return;
-                lines.push(`\n**${title}**`);
-                lines.push(...items.map(render));
-            };
-            section('Linked', result.linked, (i) => `#${i.channelName}`);
-            section('Skipped', result.skipped, (i) => `#${i.channelName}`);
-            section(
-                'Failed',
-                result.failed,
-                (i) => `#${i.channelName}: ${i.reason ?? 'unknown error'}`
-            );
-
-            await this.replyChunked(message, lines, EmbedColors.Success);
+            const { removedLinks } =
+                await this.categorySyncService.removeCategoryLink(categoryLink);
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Removed the category link for <#${categoryLink.discordCategoryId}> and ${removedLinks} channel↔thread link${removedLinks === 1 ? '' : 's'}.`
+                        )
+                        .setColor(EmbedColors.Success)
+                        .setFooter(this.footer(message))
+                        .setTimestamp(),
+                ],
+            });
         } catch (err: unknown) {
             await this.replyError(
                 message,
-                `Failed to bridge category: ${(err as Error).message}`
+                `Failed to remove category link: ${(err as Error).message}`
             );
-            logger.error('Category link failed:', err);
+            logger.error('Category unlink failed:', err);
         }
     }
 }

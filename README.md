@@ -35,7 +35,7 @@ If the toggle is on and a message arrives in a thread that is not linked yet (fo
 
 With the toggle off, nothing is bridged until you link it. Linking a thread works exactly like linking a channel:
 
-- `!b link <id>` — run inside the channel *or thread* you want to bridge, passing the ID of a channel or thread on the other platform. Any combination is allowed (channel↔channel, thread↔thread, channel↔thread). Confirm with `!b link confirm`.
+- `!b link <id>` — run inside the channel *or thread* you want to bridge, passing the ID of a channel or thread on the other platform. Any combination is allowed (channel↔channel, thread↔thread, channel↔thread). The link is created immediately, no confirmation step.
 - `!b unlink <id>` — removes a link by the other platform's channel or thread ID. Confirm with `!b unlink confirm`.
 - `!b list` — lists every link in the server, one line per link, marking thread sides with 🧵.
 - In the web dashboard, the *Link* dialog offers both channels and active threads on each side, and every row has an unlink button.
@@ -51,14 +51,14 @@ A **category link** bridges a whole Discord category at once: every text channel
 
 Commands, from Discord (run inside any channel of the category):
 
-- `!b category <fluxerChannelId>` — shows a preview of the channels that would be bridged (and which are already linked elsewhere). Confirm with `!b category confirm`.
+- `!b category <fluxerChannelId>` — bridges every text channel of the category immediately and reports which channels were linked, which were skipped (already linked elsewhere) and which failed.
 - `!b category unlink` — removes the mapping and every link it created; the Fluxer threads are left in place. Confirm with `!b category confirm`.
 - `!b category` — shows the status of the category's link.
 
 From Fluxer (run inside the hosting channel):
 
-- `!b category <discordCategoryId>` — preview, then `!b category confirm`.
-- `!b category unlink <discordCategoryId>` — then `!b category confirm`.
+- `!b category <discordCategoryId>` — bridges immediately, same report.
+- `!b category unlink <discordCategoryId>` — removes the mapping and every link it created. Confirm with `!b category confirm`.
 
 In the web dashboard, the *Link category* dialog creates a category link and the *Categories* block lists existing ones with an unlink button; rows created by a category link carry a *category* badge. `!b list` shows category links first, followed by the individual links. The command requires **Manage Webhooks**, and the bot needs the thread permissions listed under [Permissions](#permissions).
 

@@ -14,14 +14,7 @@ import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
-type PendingCategoryAction =
-    | {
-          type: 'create';
-          guildLinkId: string;
-          discordCategoryId: string;
-          fluxerChannelId: string;
-      }
-    | { type: 'remove'; categoryLinkId: string };
+type PendingCategoryAction = { type: 'remove'; categoryLinkId: string };
 
 export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
     private pending = new Map<
@@ -129,63 +122,6 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                     message,
                     `No pending category action. Run \`${COMMAND_PREFIX}category <discord-category-id>\` or \`${COMMAND_PREFIX}category unlink <discord-category-id>\` first.`
                 );
-                return;
-            }
-
-            if (pending.type === 'create') {
-                try {
-                    const guildLink = await this.linkService.getGuildLinkById(
-                        pending.guildLinkId
-                    );
-                    if (!guildLink) {
-                        throw new Error('this server is no longer linked');
-                    }
-                    const { result } =
-                        await this.categorySyncService.createCategoryLink(
-                            guildLink,
-                            pending.discordCategoryId,
-                            pending.fluxerChannelId
-                        );
-
-                    const lines: string[] = [
-                        `Linked Discord category \`${pending.discordCategoryId}\` → <#${pending.fluxerChannelId}>.\n` +
-                            `**${result.linked.length}** linked · **${result.skipped.length}** skipped · **${result.failed.length}** failed`,
-                    ];
-                    if (result.linked.length > 0) {
-                        lines.push(
-                            `**Linked**\n${this.formatItems(result.linked).join('\n')}`
-                        );
-                    }
-                    if (result.skipped.length > 0) {
-                        lines.push(
-                            `**Skipped**\n${this.formatItems(result.skipped, true).join('\n')}`
-                        );
-                    }
-                    if (result.failed.length > 0) {
-                        lines.push(
-                            `**Failed**\n${this.formatItems(result.failed, true).join('\n')}`
-                        );
-                    }
-
-                    const chunks = chunkDescriptionLines(lines);
-                    const embeds = chunks.map((chunk) =>
-                        new EmbedBuilder()
-                            .setDescription(chunk.join('\n\n'))
-                            .setColor(
-                                result.failed.length > 0
-                                    ? EmbedColors.Warning
-                                    : EmbedColors.Success
-                            )
-                    );
-                    embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-                    await message.reply({ embeds });
-                } catch (err: unknown) {
-                    await this.replyError(
-                        message,
-                        `Failed to link category: ${(err as Error).message}`
-                    );
-                    logger.error('Category link failed:', err);
-                }
                 return;
             }
 
@@ -321,57 +257,55 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
         }
 
         // ------------------------------------------------------------------
-        // <discordCategoryId>: preview
+        // <discordCategoryId>: bridge the category immediately
         // ------------------------------------------------------------------
         const discordCategoryId = args[0];
         try {
-            const preview = await this.categorySyncService.preview(
-                guildLink,
-                discordCategoryId,
-                hostChannelId
-            );
+            const { result } =
+                await this.categorySyncService.createCategoryLink(
+                    guildLink,
+                    discordCategoryId,
+                    hostChannelId
+                );
 
-            const channelLines = preview.channels.map((channel) =>
-                channel.alreadyLinked
-                    ? `~~#${channel.name}~~ (already linked, skipped)`
-                    : `#${channel.name}`
-            );
-            const toLink = preview.channels.filter(
-                (c) => !c.alreadyLinked
-            ).length;
-            const header =
-                `Found Discord category **${preview.discordCategoryName}** with ${preview.channels.length} text channel(s).\n` +
-                `Each one will get a thread inside **#${preview.fluxerChannelName}** (**${toLink}** to bridge).`;
-            const trailer = `Run \`${COMMAND_PREFIX}category confirm\` to proceed.`;
-
-            const lines = [
-                header,
-                ...(channelLines.length > 0
-                    ? [channelLines.join('\n')]
-                    : ['*(no text channels)*']),
-                trailer,
+            const lines: string[] = [
+                `Linked Discord category \`${discordCategoryId}\` → <#${hostChannelId}>.\n` +
+                    `**${result.linked.length}** linked · **${result.skipped.length}** skipped · **${result.failed.length}** failed`,
             ];
+            if (result.linked.length > 0) {
+                lines.push(
+                    `**Linked**\n${this.formatItems(result.linked).join('\n')}`
+                );
+            }
+            if (result.skipped.length > 0) {
+                lines.push(
+                    `**Skipped**\n${this.formatItems(result.skipped, true).join('\n')}`
+                );
+            }
+            if (result.failed.length > 0) {
+                lines.push(
+                    `**Failed**\n${this.formatItems(result.failed, true).join('\n')}`
+                );
+            }
+
             const chunks = chunkDescriptionLines(lines);
             const embeds = chunks.map((chunk) =>
                 new EmbedBuilder()
                     .setDescription(chunk.join('\n\n'))
-                    .setColor(EmbedColors.Warning)
+                    .setColor(
+                        result.failed.length > 0
+                            ? EmbedColors.Warning
+                            : EmbedColors.Success
+                    )
             );
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
-
-            this.setPending(message.author.id, {
-                type: 'create',
-                guildLinkId: guildLink.id,
-                discordCategoryId,
-                fluxerChannelId: hostChannelId,
-            });
             await message.reply({ embeds });
         } catch (err: unknown) {
             await this.replyError(
                 message,
-                `Cannot link category \`${discordCategoryId}\`: ${(err as Error).message}`
+                `Failed to link category \`${discordCategoryId}\`: ${(err as Error).message}`
             );
-            logger.error('Category preview failed:', err);
+            logger.error('Category link failed:', err);
         }
     }
 }
