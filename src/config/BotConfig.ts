@@ -54,6 +54,21 @@ export interface BotConfig {
          */
         enabled: boolean;
     };
+    reminders: {
+        /**
+         * Enable the YAGPDB-style `remindme` / `reminder` commands (issue #9).
+         * See `services/reminders/ReminderService.ts`.
+         */
+        enabled: boolean;
+        /**
+         * Prefixes that trigger the reminder commands directly, without the
+         * bot prefix: with the defaults `?remindme 1h30m text` and
+         * `!remindme 1h30m text` both work (so do `?reminders`,
+         * `?reminder delete 3`, ...). `BF_COMMAND_PREFIX` keeps working too
+         * (`!b remindme ...`). An empty list disables the shortcuts.
+         */
+        triggerPrefixes: string[];
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -64,6 +79,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         copyAllowedRoleIds: ['1561105750388908139', '1561105750388908112'],
     },
     meow: { enabled: true },
+    reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
 };
 
 export const CONFIG_FILE_CANDIDATES = [

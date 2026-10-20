@@ -142,6 +142,32 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'remindme',
+        discord: {
+            description:
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` and the alias `remind`.',
+            usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
+        },
+        fluxer: {
+            description:
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` and the alias `remind`.',
+            usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
+        },
+    },
+    {
+        name: 'reminder',
+        discord: {
+            description:
+                "Manages your reminders: `list` shows your reminders in this server, `channel` shows every reminder set for the current channel (needs Manage Channels), `delete <id>` deletes one of yours (or someone else's with Manage Channels in its channel), `delete -a` deletes all of yours. Aliases: `reminders`, `creminders`, `delreminder`. Also triggered by `?reminder` / `!reminder`.",
+            usageArgs: ['list | channel | delete <id> | delete -a'],
+        },
+        fluxer: {
+            description:
+                "Manages your reminders: `list` shows your reminders in this server, `channel` shows every reminder set for the current channel (needs Manage Channels), `delete <id>` deletes one of yours (or someone else's with Manage Channels in its channel), `delete -a` deletes all of yours. Aliases: `reminders`, `creminders`, `delreminder`. Also triggered by `?reminder` / `!reminder`.",
+            usageArgs: ['list | channel | delete <id> | delete -a'],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:

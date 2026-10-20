@@ -131,6 +131,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             meow: DEFAULT_BOT_CONFIG.meow,
+            reminders: DEFAULT_BOT_CONFIG.reminders,
         });
     });
 
@@ -155,6 +156,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             meow: DEFAULT_BOT_CONFIG.meow,
+            reminders: DEFAULT_BOT_CONFIG.reminders,
         });
     });
 
@@ -359,5 +361,49 @@ describe('roles.copyAllowedRoleIds', () => {
         expect(() =>
             mergeBotConfig({ roles: { copyAllowedRoleIds: 'abc' } })
         ).toThrow(BotConfigError);
+    });
+});
+
+describe('reminders', () => {
+    it('defaults to enabled with the ? and ! trigger prefixes', () => {
+        expect(DEFAULT_BOT_CONFIG.reminders).toEqual({
+            enabled: true,
+            triggerPrefixes: ['?', '!'],
+        });
+    });
+
+    it('merges the reminders section from a YAML file', () => {
+        write(
+            'config.yml',
+            'reminders: { enabled: false, triggerPrefixes: ["?"] }\n'
+        );
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            reminders: { enabled: false, triggerPrefixes: ['?'] },
+        });
+    });
+
+    it('accepts an empty trigger prefix list', () => {
+        const { config } = mergeBotConfig({
+            reminders: { triggerPrefixes: [] },
+        });
+
+        expect(config.reminders).toEqual({
+            enabled: true,
+            triggerPrefixes: [],
+        });
+    });
+
+    it('rejects non-string trigger prefixes', () => {
+        const attempt = () =>
+            mergeBotConfig({ reminders: { triggerPrefixes: [1] } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('reminders.triggerPrefixes');
+        expect(attempt).toThrow('list of strings');
     });
 });

@@ -42,6 +42,12 @@ import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryDiscordCommandHandler from './commands/discord/handlers/CategoryDiscordCommandHandler';
 import VoiceDiscordCommandHandler from './commands/discord/handlers/VoiceDiscordCommandHandler';
+import RemindMeDiscordCommandHandler from './commands/discord/handlers/RemindMeDiscordCommandHandler';
+import ReminderDiscordCommandHandler from './commands/discord/handlers/ReminderDiscordCommandHandler';
+import ReminderService from './services/reminders/ReminderService';
+import DiscordReminderDeliverer from './services/reminders/DiscordReminderDeliverer';
+import { parseReminderTrigger } from './commands/reminderTrigger';
+import { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
     linkService,
@@ -57,6 +63,8 @@ const startDiscordClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
+    reminderService,
+    botConfig,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
@@ -71,6 +79,8 @@ const startDiscordClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
+    reminderService: ReminderService;
+    botConfig: BotConfig;
 }): Promise<Client> => {
     const client = new Client({
         intents: [
@@ -168,8 +178,41 @@ const startDiscordClient = async ({
         )
     );
 
+    const remindersEnabled = botConfig.reminders.enabled;
+    if (remindersEnabled) {
+        const triggerPrefixes = botConfig.reminders.triggerPrefixes;
+        const remindMeHandler = new RemindMeDiscordCommandHandler(
+            client,
+            reminderService,
+            triggerPrefixes
+        );
+        for (const name of ['remindme', 'remind']) {
+            commandRegistry.registerCommand(name, remindMeHandler);
+        }
+        const reminderHandler = new ReminderDiscordCommandHandler(
+            client,
+            reminderService,
+            triggerPrefixes
+        );
+        for (const name of [
+            'reminder',
+            'reminders',
+            'creminders',
+            'channelreminders',
+            'delreminder',
+            'rmreminder',
+        ]) {
+            commandRegistry.registerCommand(name, reminderHandler);
+        }
+    }
+
     client.once(Events.ClientReady, () => {
         logger.info(`💬 Discord bot logged in as ${client.user?.tag}`);
+
+        reminderService.setDeliverer(
+            'discord',
+            new DiscordReminderDeliverer(client)
+        );
 
         if (queueService) {
             queueService
@@ -363,10 +406,45 @@ const startDiscordClient = async ({
             if (link && link.discordWebhookId === message.webhookId) return;
         }
 
-        if (
-            isCommandString(message.content, COMMAND_PREFIX) &&
-            !message.author.bot
-        ) {
+        const isBotCommand = isCommandString(message.content, COMMAND_PREFIX);
+        // Short reminder triggers (`?remindme ...`); a bot-prefix message is
+        // never one, so `!b remindme` and `!remindme` take different paths.
+        const reminderTrigger =
+            remindersEnabled && !isBotCommand
+                ? parseReminderTrigger(
+                      message.content,
+                      botConfig.reminders.triggerPrefixes
+                  )
+                : null;
+        const isReminderInvocation = reminderTrigger !== null;
+
+        const runCommand = async (
+            handler: DiscordCommandHandler,
+            command: string,
+            args: string[]
+        ) => {
+            try {
+                await handler.handleCommand(message, command, ...args);
+            } catch (error) {
+                logger.error(
+                    `❌ Error executing discord command "${command}":`,
+                    error
+                );
+            }
+
+            if (DELETE_INVOCATION && message.inGuild()) {
+                message
+                    .delete()
+                    .catch((err) =>
+                        logger.error(
+                            '❌ Failed to delete invocation message:',
+                            err
+                        )
+                    );
+            }
+        };
+
+        if (isBotCommand && !message.author.bot) {
             const { command, args } = parseCommandString(
                 message.content,
                 COMMAND_PREFIX
@@ -390,24 +468,17 @@ const startDiscordClient = async ({
                 return;
             }
 
-            try {
-                await handler.handleCommand(message, command, ...args);
-            } catch (error) {
-                logger.error(
-                    `❌ Error executing discord command "${command}":`,
-                    error
+            await runCommand(handler, command, args);
+        } else if (reminderTrigger && !message.author.bot) {
+            const handler = commandRegistry.getCommandHandler(
+                reminderTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    reminderTrigger.command,
+                    reminderTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
-            }
-
-            if (DELETE_INVOCATION && message.inGuild()) {
-                message
-                    .delete()
-                    .catch((err) =>
-                        logger.error(
-                            '❌ Failed to delete invocation message:',
-                            err
-                        )
-                    );
             }
         }
 
@@ -415,7 +486,8 @@ const startDiscordClient = async ({
             message.inGuild() &&
             (message.channel instanceof TextChannel ||
                 message.channel.isThread()) &&
-            !isCommandString(message.content, COMMAND_PREFIX)
+            !isBotCommand &&
+            !isReminderInvocation
         ) {
             await messageRelay.relayMessage(message);
         }

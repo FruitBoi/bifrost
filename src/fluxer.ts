@@ -58,6 +58,11 @@ import MapFluxerCommandHandler from './commands/fluxer/handlers/MapFluxerCommand
 import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
+import ReminderService from './services/reminders/ReminderService';
+import FluxerReminderDeliverer from './services/reminders/FluxerReminderDeliverer';
+import RemindMeFluxerCommandHandler from './commands/fluxer/handlers/RemindMeFluxerCommandHandler';
+import ReminderFluxerCommandHandler from './commands/fluxer/handlers/ReminderFluxerCommandHandler';
+import { parseReminderTrigger } from './commands/reminderTrigger';
 
 const startFluxerClient = async ({
     linkService,
@@ -75,6 +80,7 @@ const startFluxerClient = async ({
     fluxerStatsService,
     dbStatsService,
     botConfig,
+    reminderService,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -92,6 +98,7 @@ const startFluxerClient = async ({
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
     botConfig: BotConfig;
+    reminderService: ReminderService;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -224,10 +231,46 @@ const startFluxerClient = async ({
             discordEntityResolver
         )
     );
+    if (botConfig.reminders.enabled) {
+        const triggerPrefixes = botConfig.reminders.triggerPrefixes;
+        const remindMeHandler = new RemindMeFluxerCommandHandler(
+            client,
+            reminderService,
+            fluxerEntityResolver,
+            triggerPrefixes
+        );
+        const reminderHandler = new ReminderFluxerCommandHandler(
+            client,
+            reminderService,
+            fluxerEntityResolver,
+            triggerPrefixes
+        );
+        for (const name of ['remindme', 'remind']) {
+            commandRegistry.registerCommand(name, remindMeHandler);
+        }
+        for (const name of [
+            'reminder',
+            'reminders',
+            'creminders',
+            'channelreminders',
+            'delreminder',
+            'rmreminder',
+        ]) {
+            commandRegistry.registerCommand(name, reminderHandler);
+        }
+    }
 
     client.once(Events.Ready, () => {
         logger.info('🌊 Fluxer bot is ready!');
         healthCheckService.pushFluxerHealthStatus();
+        // The Fluxer client is re-created on restart; registering the
+        // deliverer on every Ready replaces the one bound to the old client.
+        if (botConfig.reminders.enabled) {
+            reminderService.setDeliverer(
+                'fluxer',
+                new FluxerReminderDeliverer(client)
+            );
+        }
     });
 
     client.on(Events.Error, (error) => {
@@ -391,7 +434,50 @@ const startFluxerClient = async ({
             if (link && link.fluxerWebhookId === message.webhookId) return;
         }
 
-        if (isCommandString(message.content, COMMAND_PREFIX)) {
+        // Runs a command handler and, when configured, deletes the
+        // invoking message. Shared by the `!b` path and the reminder
+        // short triggers (`?remindme ...`).
+        const runCommand = async (
+            handler: FluxerCommandHandler,
+            command: string,
+            args: string[]
+        ) => {
+            try {
+                await handler.handleCommand(message, command, ...args);
+            } catch (error) {
+                logger.error(
+                    `❌ Error executing fluxer command "${command}":`,
+                    error
+                );
+            }
+
+            if (DELETE_INVOCATION && message.guildId) {
+                message
+                    .delete()
+                    .catch((err: unknown) =>
+                        logger.error(
+                            '❌ Failed to delete invocation message:',
+                            err
+                        )
+                    );
+            }
+        };
+
+        const isBotCommand = isCommandString(message.content, COMMAND_PREFIX);
+        // `?remindme ...` / `!remindme ...` (issue #9). `!b remindme` is a
+        // regular bot command and is never treated as a short trigger. Like
+        // `!b` messages, a trigger-shaped message is never relayed, whoever
+        // wrote it; only people (not bots or webhooks) get it executed.
+        const reminderTrigger =
+            !isBotCommand && botConfig.reminders.enabled
+                ? parseReminderTrigger(
+                      message.content,
+                      botConfig.reminders.triggerPrefixes
+                  )
+                : null;
+        const isReminderInvocation = reminderTrigger !== null;
+
+        if (isBotCommand) {
             const { command, args } = parseCommandString(
                 message.content,
                 COMMAND_PREFIX
@@ -422,31 +508,25 @@ const startFluxerClient = async ({
                 return;
             }
 
-            try {
-                await handler.handleCommand(message, command, ...args);
-            } catch (error) {
-                logger.error(
-                    `❌ Error executing fluxer command "${command}":`,
-                    error
+            await runCommand(handler, command, args);
+        } else if (
+            reminderTrigger &&
+            !message.author.bot &&
+            !message.webhookId
+        ) {
+            const handler = commandRegistry.getCommandHandler(
+                reminderTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    reminderTrigger.command,
+                    reminderTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
-            }
-
-            if (DELETE_INVOCATION && message.guildId) {
-                message
-                    .delete()
-                    .catch((err: unknown) =>
-                        logger.error(
-                            '❌ Failed to delete invocation message:',
-                            err
-                        )
-                    );
             }
         }
 
-        if (
-            message.guildId &&
-            !isCommandString(message.content, COMMAND_PREFIX)
-        ) {
+        if (message.guildId && !isBotCommand && !isReminderInvocation) {
             // Thread channels are often not cached until first seen; resolve
             // once so threads are relayed just like text channels.
             const channel =
@@ -466,6 +546,7 @@ const startFluxerClient = async ({
             message.guildId &&
             !message.author.bot &&
             !message.webhookId &&
+            !isReminderInvocation &&
             meowService.shouldReply(message.content, message.channelId)
         ) {
             try {

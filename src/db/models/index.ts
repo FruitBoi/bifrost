@@ -5,6 +5,7 @@ import { MessageLinkModel } from './MessageLinkModel';
 import { QueuedMessageModel } from './QueuedMessageModel';
 import { VoiceLinkModel } from './VoiceLinkModel';
 import { UserLinkModel } from './UserLinkModel';
+import { ReminderModel } from './ReminderModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -87,4 +88,5 @@ export {
     QueuedMessageModel,
     VoiceLinkModel,
     UserLinkModel,
+    ReminderModel,
 };

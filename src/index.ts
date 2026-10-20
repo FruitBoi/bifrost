@@ -9,6 +9,7 @@ import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMes
 import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import { SequelizeUserLinkRepository } from './db/sequelizerepos/SequelizeUserLinkRepository';
+import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeReminderRepository';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -24,6 +25,7 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
+import ReminderService from './services/reminders/ReminderService';
 import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
@@ -150,6 +152,15 @@ const main = async () => {
         cachedChannelLinkRepo,
         cachedMessageLinkRepo
     );
+    // Reminders (issue #9): one service for both platforms; each client
+    // registers its own deliverer once it is ready, and the service starts
+    // polling for due reminders after both clients have been started.
+    const reminderService = new ReminderService(
+        new SequelizeReminderRepository()
+    );
+    if (!botConfig.reminders.enabled) {
+        logger.info('Config: reminders are disabled (reminders.enabled=false)');
+    }
 
     const FLUXER_DOWN_THRESHOLD = 5; // 5 × 30s = 2.5 min before restart
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
@@ -230,6 +241,7 @@ const main = async () => {
         fluxerStatsService,
         dbStatsService,
         botConfig,
+        reminderService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
@@ -349,6 +361,8 @@ const main = async () => {
             discordStatsService,
             fluxerStatsService,
             dbStatsService,
+            botConfig,
+            reminderService,
         }),
         connectFluxer(),
     ]);
@@ -360,6 +374,11 @@ const main = async () => {
     logger.info(
         '🚀 Both Discord and Fluxer clients have started successfully.'
     );
+
+    if (botConfig.reminders.enabled) {
+        reminderService.start();
+        logger.info('⏰ Reminder scheduler started');
+    }
 
     if (voice) {
         discordVoiceTransport = new voice.DiscordVoiceTransport(discordClient);

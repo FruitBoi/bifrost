@@ -51,3 +51,19 @@ meow:
     # bridged messages are ignored. In a linked channel the reply is bridged
     # like any other message.
     enabled: true
+
+reminders:
+    # YAGPDB-style reminders: `remindme <time> <message>` pings you back in the
+    # channel after the given time (at most 10 years ahead, 25 reminders per
+    # user), and `reminder list | channel | delete <id> | delete -a` manages
+    # them. Works on both Discord and Fluxer; reminders are not bridged.
+    enabled: true
+    # Prefixes that trigger the reminder commands without the bot prefix, so
+    # `?remindme 1h30min take the pizza out` and `!remindme ...` work (same for
+    # `?reminders`, `?reminder delete 3`, ...). The bot prefix form
+    # `!b remindme ...` always works while reminders are enabled. An empty list
+    # ([]) disables the shortcuts. `!` is a common prefix for other bots, so
+    # you may want to keep only "?" if they would answer too. Quote them.
+    triggerPrefixes:
+        - "?"
+        - "!"

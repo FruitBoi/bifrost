@@ -16,6 +16,7 @@
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides (see [Identity mapping](#identity-mapping))
+- Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
 
@@ -155,6 +156,60 @@ The `role` command does three things at once and reports the outcome of each:
 
 Identity mappings ship as migration `00008-user-links`, which adds the `user_links` table (one row per mapped account pair, unique per server link on both the Discord and the Fluxer side). It runs automatically on startup; rolling it back drops the table.
 
+## Reminders
+
+Bifröst has a reminder command modelled on [YAGPDB's `remindme`](https://help.yagpdb.xyz/docs/core/all-commands/#remindme): tell it how long to wait and what to say, and when the time is up it pings you in the channel you set it in. It works the same on Discord and on Fluxer.
+
+There are three ways to run the commands:
+
+- `?remindme 1h30min take the pizza out`
+- `!remindme 1h30min take the pizza out`
+- `!b remindme 1h30min take the pizza out` (the normal bot prefix, always available)
+
+The short `?` and `!` forms work for every reminder command and alias below (`?reminders`, `!reminder delete 3`, …). They are set by `reminders.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form, and `reminders.enabled: false` switches reminders off entirely. Like other commands, these messages are not bridged to the other platform and are deleted when `BF_DELETE_INVOCATION` is on.
+
+### Commands
+
+- `remindme <time> <message>` (alias `remind`) — schedules a reminder in the current channel. Add `-channel <channel>` (a channel mention or ID, before the time or at the very end) to have it delivered in another text channel or thread of the same server instead; you need permission to view and send messages there. Example: `?remindme -channel #general 2d book the venue`.
+- `reminder list` (alias `reminders`) — lists your reminders in this server with their IDs, a preview of the message and when they are due.
+- `reminder channel` (aliases `creminders`, `channelreminders`) — lists every reminder set for the current channel, by anyone. Requires **Manage Channels**.
+- `reminder delete <id>` (aliases `delreminder`, `rmreminder`) — deletes a reminder. You can always delete your own; deleting someone else's requires **Manage Channels** in the reminder's channel (or in the server, if that channel no longer exists).
+- `reminder delete -a` — deletes all of your reminders.
+
+### Duration syntax
+
+The time is parsed like YAGPDB does it: a sequence of `<number><unit>` parts written together, such as `90`, `45s`, `10m`, `1h30min`, `1day3h`, `2w`, `1mo` or `1y`. Units are matched by their first letters:
+
+| Unit | Meaning |
+| --- | --- |
+| `s`, `sec`, `seconds` | seconds |
+| `m`, `min`, `minutes` | minutes |
+| `h`, `hours` | hours |
+| `d`, `days` | days |
+| `w`, `weeks` | weeks |
+| `mo`, `months` | months (30 days) |
+| `y`, `years` | years (365 days) |
+| *(none)* | minutes, so `90` means 90 minutes |
+
+The time must start with a number and is a **single word**: in `?remindme 1h 30m stretch` the reminder fires after one hour and its message is `30m stretch`. Write `1h30m` instead.
+
+### Limits
+
+- A reminder can be set at most **10 years** ahead (`10y` is fine, `10y1d` is not) and at least 1 second ahead.
+- Each user can have **25** reminders at a time (counted across all servers on that platform).
+- The message can be up to 2000 characters.
+- Bots cannot set reminders, and the commands only work in servers, not in DMs.
+
+### Delivery
+
+When a reminder is due, Bifröst posts `**Reminder** for @you` in the channel it was set for, with the message in an embed. Only you are pinged: mentions of other people, roles or `@everyone` in the message are not. Reminders belong to the platform they were created on: one set on Discord is delivered on Discord and is not bridged to Fluxer, and vice versa. Reminder IDs come from one sequence shared by both platforms, so the IDs you see may skip numbers; you can only see and delete reminders from the platform you are on.
+
+If the bot was offline when a reminder came due, it is delivered shortly after the bot starts again. A reminder whose channel no longer exists (or that the bot can no longer post in) is dropped, and so is one that still fails after several delivery attempts.
+
+### Database migration
+
+Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted). It runs automatically on startup.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -199,6 +254,8 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
 | `roles.copyAllowedRoleIds` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run `!b role`; see [Identity mapping](#identity-mapping). Quote the IDs, unquoted numbers lose precision. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
+| `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
+| `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:
 

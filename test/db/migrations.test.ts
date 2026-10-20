@@ -11,10 +11,12 @@ import * as categoryLinks from '../../src/db/migrations/00005-category-links';
 import * as voiceLinks from '../../src/db/migrations/00006-voice-links';
 import * as messageLinkAuthors from '../../src/db/migrations/00007-message-link-authors';
 import * as userLinks from '../../src/db/migrations/00008-user-links';
+import * as reminders from '../../src/db/migrations/00009-reminders';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
+import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
 import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeVoiceLinkRepository } from '../../src/db/sequelizerepos/SequelizeVoiceLinkRepository';
 
@@ -57,6 +59,11 @@ const umzug = new Umzug({
             name: '00008-user-links.js',
             up: userLinks.up,
             down: userLinks.down,
+        },
+        {
+            name: '00009-reminders.js',
+            up: reminders.up,
+            down: reminders.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -929,5 +936,183 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(await qi.tableExists('category_links')).toBe(true);
         expect(await qi.tableExists('voice_links')).toBe(true);
         expect(await qi.tableExists('user_links')).toBe(true);
+    });
+});
+
+describe('migration 00009-reminders', () => {
+    it('adds reminders with its indexes, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00009-reminders.js');
+        expect(await qi.tableExists('reminders')).toBe(true);
+
+        const cols = await qi.describeTable('reminders');
+        expect(cols.id).toMatchObject({ primaryKey: true, type: 'INTEGER' });
+        expect(cols.platform).toMatchObject({ allowNull: false });
+        expect(cols.userId).toMatchObject({ allowNull: false });
+        expect(cols.guildId).toMatchObject({ allowNull: false });
+        expect(cols.channelId).toMatchObject({ allowNull: false });
+        expect(cols.message).toMatchObject({ allowNull: false });
+        expect(cols.dueAt).toMatchObject({ allowNull: false });
+        expect(cols.attempts).toMatchObject({ allowNull: false });
+        expect(Number(cols.attempts.defaultValue)).toBe(0);
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('reminders');
+        const byName = (name: string) => indexes.find((i) => i.name === name);
+        expect(byName('reminders_due_at')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'dueAt' }],
+        });
+        expect(byName('reminders_platform_user')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'platform' }, { attribute: 'userId' }],
+        });
+        expect(byName('reminders_platform_channel')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'platform' }, { attribute: 'channelId' }],
+        });
+
+        // The repository works against the new schema: ids are small
+        // auto-incremented integers shared by both platforms.
+        const repo = new SequelizeReminderRepository();
+        expect(await repo.count()).toBe(0);
+        const base = Date.now() - (Date.now() % 1000);
+        const first = await repo.create({
+            platform: 'discord',
+            userId: 'u1',
+            guildId: 'g1',
+            channelId: 'c1',
+            message: 'first',
+            dueAt: new Date(base + 60_000),
+        });
+        const second = await repo.create({
+            platform: 'fluxer',
+            userId: 'u1',
+            guildId: 'fg1',
+            channelId: 'fc1',
+            message: 'second',
+            dueAt: new Date(base - 60_000),
+        });
+        const third = await repo.create({
+            platform: 'discord',
+            userId: 'u1',
+            guildId: 'g2',
+            channelId: 'c2',
+            message: 'third',
+            dueAt: new Date(base - 1000),
+        });
+        const other = await repo.create({
+            platform: 'discord',
+            userId: 'u2',
+            guildId: 'g1',
+            channelId: 'c1',
+            message: 'someone else',
+            dueAt: new Date(base + 120_000),
+        });
+        expect(Number.isInteger(first.id)).toBe(true);
+        expect(first.id).toBe(1);
+        expect(second.id).toBe(first.id + 1);
+        expect(third.id).toBe(second.id + 1);
+        expect(other.id).toBe(third.id + 1);
+        expect(first).toMatchObject({
+            platform: 'discord',
+            userId: 'u1',
+            guildId: 'g1',
+            channelId: 'c1',
+            message: 'first',
+            attempts: 0,
+        });
+        expect(first.dueAt).toBeInstanceOf(Date);
+        expect(first.dueAt.getTime()).toBe(base + 60_000);
+        expect(first.createdAt).toBeInstanceOf(Date);
+        expect(await repo.count()).toBe(4);
+
+        const found = await repo.findById(first.id);
+        expect(found).toMatchObject({ id: first.id, message: 'first' });
+        expect(found?.dueAt).toBeInstanceOf(Date);
+        expect(found?.dueAt.getTime()).toBe(base + 60_000);
+        expect(await repo.findById(9999)).toBeNull();
+
+        // findByUser: scoped by platform (and guild when given), soonest first.
+        expect(
+            (await repo.findByUser('discord', 'u1')).map((r) => r.id)
+        ).toEqual([third.id, first.id]);
+        expect(
+            (await repo.findByUser('discord', 'u1', 'g1')).map((r) => r.id)
+        ).toEqual([first.id]);
+        expect(
+            (await repo.findByUser('fluxer', 'u1')).map((r) => r.id)
+        ).toEqual([second.id]);
+        expect(await repo.findByUser('fluxer', 'u1', 'g1')).toEqual([]);
+        expect(await repo.countByUser('discord', 'u1')).toBe(2);
+        expect(await repo.countByUser('fluxer', 'u1')).toBe(1);
+        expect(await repo.countByUser('discord', 'nobody')).toBe(0);
+
+        // findByChannel: every user's reminders in the channel.
+        expect(
+            (await repo.findByChannel('discord', 'c1')).map((r) => r.id)
+        ).toEqual([first.id, other.id]);
+        expect(await repo.findByChannel('fluxer', 'c1')).toEqual([]);
+
+        // findDue: dueAt <= before, soonest first, limited.
+        expect((await repo.findDue(new Date(base))).map((r) => r.id)).toEqual([
+            second.id,
+            third.id,
+        ]);
+        expect(
+            (await repo.findDue(new Date(base), 1)).map((r) => r.id)
+        ).toEqual([second.id]);
+        expect(
+            (await repo.findDue(new Date(base - 1000))).map((r) => r.id)
+        ).toEqual([second.id, third.id]);
+        expect(
+            (await repo.findDue(new Date(base - 1001))).map((r) => r.id)
+        ).toEqual([second.id]);
+        expect(
+            (await repo.findDue(new Date(base + 120_000))).map((r) => r.id)
+        ).toEqual([second.id, third.id, first.id, other.id]);
+
+        // incrementAttempts only touches that row.
+        await repo.incrementAttempts(second.id);
+        await repo.incrementAttempts(second.id);
+        expect((await repo.findById(second.id))?.attempts).toBe(2);
+        expect((await repo.findById(first.id))?.attempts).toBe(0);
+
+        // deleteById reports whether something was removed.
+        expect(await repo.deleteById(third.id)).toBe(true);
+        expect(await repo.deleteById(third.id)).toBe(false);
+        expect(await repo.findById(third.id)).toBeNull();
+        expect(await repo.count()).toBe(3);
+
+        // deleteByUser is scoped by platform and user.
+        expect(await repo.deleteByUser('fluxer', 'u2')).toBe(0);
+        expect(await repo.deleteByUser('discord', 'u1')).toBe(1);
+        expect(await repo.findByUser('discord', 'u1')).toEqual([]);
+        expect(await repo.findById(second.id)).toMatchObject({
+            platform: 'fluxer',
+        });
+        expect(await repo.findById(other.id)).toMatchObject({ userId: 'u2' });
+        expect(await repo.count()).toBe(2);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00009-reminders.js' });
+        expect(await executed()).toEqual([
+            '00001-baseline.js',
+            '00002-add-channel-link-indexes.js',
+            '00003-add-thread-links.js',
+            '00004-location-links.js',
+            '00005-category-links.js',
+            '00006-voice-links.js',
+            '00007-message-link-authors.js',
+            '00008-user-links.js',
+        ]);
+        expect(await qi.tableExists('reminders')).toBe(false);
+        expect(await qi.tableExists('user_links')).toBe(true);
+        expect(await qi.tableExists('message_links')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00009-reminders.js');
+        expect(await qi.tableExists('reminders')).toBe(true);
+        expect(await repo.count()).toBe(0);
     });
 });
