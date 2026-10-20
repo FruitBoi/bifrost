@@ -99,7 +99,7 @@ Two constraints follow from how both platforms work:
 
 From either platform (the first ID is a voice channel on the platform you run the command on, the second one is on the other platform):
 
-- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — shows a preview with both channel names. Confirm with `!b voice confirm`.
+- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — links the two voice channels immediately, no confirmation step.
 - `!b voice unlink <voiceChannelId>` — removes the link. Confirm with `!b voice confirm`.
 - `!b voice on <voiceChannelId>` / `!b voice off <voiceChannelId>` — enables or disables a link without removing it.
 - `!b voice` — lists the server's voice links and whether they are enabled. `!b list` shows them too, marked with 🔊.

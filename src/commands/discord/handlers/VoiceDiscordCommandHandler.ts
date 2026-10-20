@@ -11,20 +11,13 @@ import { COMMAND_PREFIX, ENABLE_VOICE_BRIDGE } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
-type PendingVoiceAction =
-    | {
-          type: 'create';
-          guildLink: GuildLink;
-          discordChannelId: string;
-          fluxerChannelId: string;
-      }
-    | { type: 'remove'; voiceLinkId: string };
+type PendingVoiceAction = { type: 'remove'; voiceLinkId: string };
 
 /**
  * `voice <discordVoiceChannelId> <fluxerVoiceChannelId> | unlink <id> |
  * on <id> | off <id> | confirm` — pairs a Discord voice channel with a
- * Fluxer voice channel. Creating and removing a voice link shows a preview
- * and is executed with `confirm`; `on`/`off` toggle a link without removing
+ * Fluxer voice channel. Linking happens immediately; `unlink` shows a preview
+ * and is executed with `confirm`. `on`/`off` toggle a link without removing
  * it, and with no arguments the server's voice links are listed.
  */
 export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
@@ -283,25 +276,23 @@ export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
                 return;
             }
 
-            this.setPending(message.author.id, {
-                type: 'create',
+            const voiceLink = await this.linkProvisioner.createVoiceLink(
                 guildLink,
-                discordChannelId: discord.id,
-                fluxerChannelId: fluxer.id,
-            });
+                discord.id,
+                fluxer.id
+            );
             await this.replyEmbed(
                 message,
-                `This links voice channel 🔊 <#${discord.id}> with Fluxer voice channel 🔊 **${fluxer.name}** (\`${fluxer.id}\`).\n` +
-                    `Only one voice link per server pair can be live at a time; the bridge joins whichever linked channel gets visitors first.\n` +
-                    `Run \`${COMMAND_PREFIX}voice confirm\` to proceed.`,
-                EmbedColors.Warning
+                `Linked voice channel 🔊 <#${voiceLink.discordChannelId}> with Fluxer voice channel 🔊 **${fluxer.name}** (\`${voiceLink.fluxerChannelId}\`).\n` +
+                    `Only one voice link per server pair can be live at a time; the bridge joins whichever linked channel gets visitors first.`,
+                EmbedColors.Success
             );
         } catch (err: unknown) {
             await this.replyError(
                 message,
-                `Failed to prepare voice link: ${(err as Error).message}`
+                `Failed to create voice link: ${(err as Error).message}`
             );
-            logger.error('Voice link preview failed:', err);
+            logger.error('Voice link failed:', err);
         }
     }
 
@@ -383,34 +374,8 @@ export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
         if (!pending) {
             await this.replyError(
                 message,
-                `No pending voice action. Run \`${COMMAND_PREFIX}voice <discordVoiceChannelId> <fluxerVoiceChannelId>\` or \`${COMMAND_PREFIX}voice unlink <discordVoiceChannelId>\` first.`
+                `No pending voice unlink. Run \`${COMMAND_PREFIX}voice unlink <discordVoiceChannelId>\` first.`
             );
-            return;
-        }
-
-        if (pending.type === 'create') {
-            try {
-                const voiceLink = await this.linkProvisioner.createVoiceLink(
-                    pending.guildLink,
-                    pending.discordChannelId,
-                    pending.fluxerChannelId
-                );
-                const fluxerName = await this.fluxerName(
-                    pending.guildLink,
-                    voiceLink.fluxerChannelId
-                );
-                await this.replyEmbed(
-                    message,
-                    `Linked voice channel 🔊 <#${voiceLink.discordChannelId}> with Fluxer voice channel 🔊 **${fluxerName}** (\`${voiceLink.fluxerChannelId}\`).`,
-                    EmbedColors.Success
-                );
-            } catch (err: unknown) {
-                await this.replyError(
-                    message,
-                    `Failed to create voice link: ${(err as Error).message}`
-                );
-                logger.error('Voice link failed:', err);
-            }
             return;
         }
 
