@@ -4,13 +4,16 @@ import {
     CreateChannelLinkData,
 } from '../db/repositories/ChannelLinkRepository';
 import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
+import { CategoryLinkRepository } from '../db/repositories/CategoryLinkRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
+import { CategoryLink } from '../db/entities/CategoryLink';
 
 export class LinkService {
     constructor(
         private guildRepo: GuildLinkRepository,
         private channelRepo: ChannelLinkRepository,
-        private messageRepo: MessageLinkRepository
+        private messageRepo: MessageLinkRepository,
+        private categoryRepo: CategoryLinkRepository
     ) {}
 
     // ---------------------------------------------------------------------
@@ -56,6 +59,7 @@ export class LinkService {
     async removeGuildLink(guildLinkId: string) {
         await this.messageRepo.deleteByGuildLinkId(guildLinkId);
         await this.channelRepo.deleteByGuildLinkId(guildLinkId);
+        await this.categoryRepo.deleteByGuildLinkId(guildLinkId);
         await this.guildRepo.deleteById(guildLinkId);
     }
 
@@ -108,6 +112,7 @@ export class LinkService {
             ...data,
             discordThreadId: data.discordThreadId ?? null,
             fluxerThreadId: data.fluxerThreadId ?? null,
+            categoryLinkId: data.categoryLinkId ?? null,
         });
     }
 
@@ -177,6 +182,60 @@ export class LinkService {
     /** Channel row plus thread rows whose Fluxer parent is this channel. */
     async getChannelLinksForFluxerChannel(fluxerChannelId: string) {
         return this.channelRepo.findAllByFluxerChannel(fluxerChannelId);
+    }
+
+    /** Links created on behalf of a category link. */
+    async getChannelLinksForCategoryLink(categoryLinkId: string) {
+        return this.channelRepo.findAllByCategoryLink(categoryLinkId);
+    }
+
+    // ---------------------------------------------------------------------
+    // Category links (Discord category -> threads in one Fluxer channel)
+    // ---------------------------------------------------------------------
+
+    async getCategoryLinkById(id: string) {
+        return this.categoryRepo.findById(id);
+    }
+
+    async getCategoryLinkByDiscordCategoryId(discordCategoryId: string) {
+        return this.categoryRepo.findByDiscordCategoryId(discordCategoryId);
+    }
+
+    async getCategoryLinksForFluxerChannel(fluxerChannelId: string) {
+        return this.categoryRepo.findAllByFluxerChannelId(fluxerChannelId);
+    }
+
+    async getCategoryLinksForGuildLink(guildLinkId: string) {
+        return this.categoryRepo.findAllByGuild(guildLinkId);
+    }
+
+    /**
+     * Persists a category link. Prefer CategorySyncService.createCategoryLink,
+     * which validates both sides and bridges the existing channels.
+     */
+    async createCategoryLink(data: {
+        guildLinkId: string;
+        discordCategoryId: string;
+        fluxerChannelId: string;
+    }): Promise<CategoryLink> {
+        if (
+            await this.categoryRepo.findByDiscordCategoryId(
+                data.discordCategoryId
+            )
+        ) {
+            throw new Error('Discord category already linked');
+        }
+        return this.categoryRepo.create(data);
+    }
+
+    /** Removes the mapping row only; the caller decides what happens to its links. */
+    async removeCategoryLink(id: string): Promise<CategoryLink> {
+        const categoryLink = await this.categoryRepo.findById(id);
+        if (!categoryLink) {
+            throw new Error('Category link not found');
+        }
+        await this.categoryRepo.deleteById(id);
+        return categoryLink;
     }
 
     async countLinksUsingDiscordWebhook(discordWebhookId: string) {

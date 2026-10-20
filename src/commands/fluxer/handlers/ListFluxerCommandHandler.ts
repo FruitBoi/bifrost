@@ -11,6 +11,7 @@ import {
     fluxerLocationId,
     isChannelPairLink,
 } from '../../../db/entities/ChannelLink';
+import { GuildLink } from '../../../db/entities/GuildLink';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import DiscordEntityResolver from '../../../services/entityResolver/DiscordEntityResolver';
 import logger from '../../../utils/logging/logger';
@@ -66,6 +67,33 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                         : '';
                 // Fluxer on left, Discord on right (viewing from Fluxer)
                 return `${fluxerIcon}<#${fluxerLocationId(link)}> ←→ ${discordLabel}${suffix}${autoThreads}\n  └ \`${fluxerLocationId(link)}\` · \`${discordLocationId(link)}\``;
+            })
+        );
+    }
+
+    /** One line per category link of the guild, listed before the channel links. */
+    private async buildCategoryLines(guildLink: GuildLink): Promise<string[]> {
+        const categoryLinks = await this.linkService
+            .getCategoryLinksForGuildLink(guildLink.id)
+            .catch(() => []);
+        return Promise.all(
+            categoryLinks.map(async (categoryLink) => {
+                const [category, links] = await Promise.all([
+                    this.discordEntityResolver
+                        .fetchChannel(
+                            guildLink.discordGuildId,
+                            categoryLink.discordCategoryId
+                        )
+                        .catch(() => null),
+                    this.linkService
+                        .getChannelLinksForCategoryLink(categoryLink.id)
+                        .catch(() => []),
+                ]);
+                const name =
+                    (category as { name?: string } | null)?.name ??
+                    categoryLink.discordCategoryId;
+                const url = `https://discord.com/channels/${guildLink.discordGuildId}/${categoryLink.discordCategoryId}`;
+                return `📁 [${name}](${url}) → <#${categoryLink.fluxerChannelId}> · ${links.length} channel(s)`;
             })
         );
     }
@@ -136,7 +164,13 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                         guildLink.fluxerGuildId;
                     const title = `Fluxer: ${fluxerGuildName} (${guildLink.fluxerGuildId}) | Discord: ${discordGuildName} (${guildLink.discordGuildId})`;
 
-                    if (channelLinks.length === 0) {
+                    const categoryLines =
+                        await this.buildCategoryLines(guildLink);
+
+                    if (
+                        channelLinks.length === 0 &&
+                        categoryLines.length === 0
+                    ) {
                         embeds.push(
                             new EmbedBuilder()
                                 .setTitle(title)
@@ -144,11 +178,14 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                                 .setColor(EmbedColors.Info)
                         );
                     } else {
-                        const lines = await this.buildChannelLines(
-                            channelLinks,
-                            guildLink.discordGuildId,
-                            true
-                        );
+                        const lines = [
+                            ...categoryLines,
+                            ...(await this.buildChannelLines(
+                                channelLinks,
+                                guildLink.discordGuildId,
+                                true
+                            )),
+                        ];
                         const chunks = chunkDescriptionLines(lines);
                         chunks.forEach((chunk, i) => {
                             embeds.push(
@@ -267,7 +304,13 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                         guildLink.fluxerGuildId;
                     const title = `Fluxer: ${fluxerGuildName} (${guildLink.fluxerGuildId}) | Discord: ${discordGuildName} (${guildLink.discordGuildId})`;
 
-                    if (channelLinks.length === 0) {
+                    const categoryLines =
+                        await this.buildCategoryLines(guildLink);
+
+                    if (
+                        channelLinks.length === 0 &&
+                        categoryLines.length === 0
+                    ) {
                         await message.reply({
                             embeds: [
                                 new EmbedBuilder()
@@ -281,11 +324,14 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                         return;
                     }
 
-                    const lines = await this.buildChannelLines(
-                        channelLinks,
-                        guildLink.discordGuildId,
-                        true
-                    );
+                    const lines = [
+                        ...categoryLines,
+                        ...(await this.buildChannelLines(
+                            channelLinks,
+                            guildLink.discordGuildId,
+                            true
+                        )),
+                    ];
                     const chunks = chunkDescriptionLines(lines);
                     const embeds = chunks.map((chunk, i) =>
                         new EmbedBuilder()
@@ -391,7 +437,9 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                     message.guildId!
                 );
 
-            if (channelLinks.length === 0) {
+            const categoryLines = await this.buildCategoryLines(guildLink);
+
+            if (channelLinks.length === 0 && categoryLines.length === 0) {
                 await message.reply({
                     embeds: [
                         new EmbedBuilder()
@@ -406,10 +454,13 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                 return;
             }
 
-            const lines = await this.buildChannelLines(
-                channelLinks,
-                guildLink.discordGuildId
-            );
+            const lines = [
+                ...categoryLines,
+                ...(await this.buildChannelLines(
+                    channelLinks,
+                    guildLink.discordGuildId
+                )),
+            ];
             const chunks = chunkDescriptionLines(lines);
             const embeds = chunks.map((chunk, i) =>
                 new EmbedBuilder()

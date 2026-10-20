@@ -136,10 +136,13 @@ export default class LinkProvisioner {
         guildLink,
         discord,
         fluxer,
+        categoryLinkId = null,
     }: {
         guildLink: GuildLink;
         discord: LinkTarget;
         fluxer: LinkTarget;
+        /** Set when the link is created on behalf of a category link. */
+        categoryLinkId?: string | null;
     }): Promise<ChannelLink> {
         const discordLocation = discord.threadId ?? discord.channelId;
         const fluxerLocation = fluxer.threadId ?? fluxer.channelId;
@@ -187,6 +190,7 @@ export default class LinkProvisioner {
                 discordWebhookToken: discordWebhook.token,
                 fluxerWebhookId: fluxerWebhook.id,
                 fluxerWebhookToken: fluxerWebhook.token,
+                categoryLinkId,
             });
         } catch (err) {
             await this.discardIfCreated('discord', discordWebhook);

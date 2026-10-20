@@ -59,6 +59,11 @@ ChannelLinkModel.init(
             allowNull: false,
         },
 
+        categoryLinkId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+        },
+
         autoSyncThreads: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -88,6 +93,7 @@ ChannelLinkModel.init(
             { fields: ['discordChannelId'] },
             { fields: ['fluxerChannelId'] },
             { fields: ['guildLinkId'] },
+            { fields: ['categoryLinkId'] },
         ],
     }
 );

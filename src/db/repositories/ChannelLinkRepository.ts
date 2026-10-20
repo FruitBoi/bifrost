@@ -12,6 +12,8 @@ export interface CreateChannelLinkData {
     discordWebhookToken: string;
     fluxerWebhookId: string;
     fluxerWebhookToken: string;
+    /** Set when the link is created on behalf of a category link. */
+    categoryLinkId?: string | null;
 }
 
 export interface ChannelLinkRepository {
@@ -41,6 +43,9 @@ export interface ChannelLinkRepository {
 
     /** All rows whose Fluxer webhook channel is this channel (the channel row and its thread rows). */
     findAllByFluxerChannel(fluxerChannelId: string): Promise<ChannelLink[]>;
+
+    /** All links created by a category link. */
+    findAllByCategoryLink(categoryLinkId: string): Promise<ChannelLink[]>;
 
     /** Number of rows sharing this Discord webhook (webhooks are shared between a channel and its threads). */
     countByDiscordWebhookId(discordWebhookId: string): Promise<number>;

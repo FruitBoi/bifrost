@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { CategoryLink } from '../../src/db/entities/CategoryLink';
 import { ChannelLink } from '../../src/db/entities/ChannelLink';
 import { GuildLink } from '../../src/db/entities/GuildLink';
 import { MessageLink } from '../../src/db/entities/MessageLink';
@@ -32,20 +33,36 @@ export function makeChannelLink(
         fluxerWebhookId: 'fwh',
         fluxerWebhookToken: 'fwt',
         linkId: nextId('lnk'),
+        categoryLinkId: null,
         autoSyncThreads: false,
         createdAt: new Date(),
         ...overrides,
     };
 }
 
+export function makeCategoryLink(
+    overrides: Partial<CategoryLink> = {}
+): CategoryLink {
+    return {
+        id: nextId('catlink'),
+        guildLinkId: guildLink.id,
+        discordCategoryId: 'dcat',
+        fluxerChannelId: 'fhost',
+        createdAt: new Date(),
+        ...overrides,
+    };
+}
+
 /**
- * In-memory stand-in for the subset of LinkService used by ThreadSyncService
- * and LinkProvisioner. Everything is synchronous data behind async methods.
+ * In-memory stand-in for the subset of LinkService used by ThreadSyncService,
+ * CategorySyncService and LinkProvisioner. Everything is synchronous data
+ * behind async methods.
  */
 export class FakeLinkService {
     links: ChannelLink[] = [];
     messageLinks: MessageLink[] = [];
     guildLinks: GuildLink[] = [guildLink];
+    categoryLinks: CategoryLink[] = [];
 
     async getGuildLinkById(id: string) {
         return this.guildLinks.find((g) => g.id === id) ?? null;
@@ -87,6 +104,10 @@ export class FakeLinkService {
         return this.links.filter((l) => l.guildLinkId === id);
     }
 
+    async getChannelLinksForCategoryLink(categoryLinkId: string) {
+        return this.links.filter((l) => l.categoryLinkId === categoryLinkId);
+    }
+
     async countLinksUsingDiscordWebhook(id: string) {
         return this.links.filter((l) => l.discordWebhookId === id).length;
     }
@@ -105,6 +126,7 @@ export class FakeLinkService {
         discordWebhookToken: string;
         fluxerWebhookId: string;
         fluxerWebhookToken: string;
+        categoryLinkId?: string | null;
     }) {
         const discordLocation = data.discordThreadId ?? data.discordChannelId;
         const fluxerLocation = data.fluxerThreadId ?? data.fluxerChannelId;
@@ -118,6 +140,7 @@ export class FakeLinkService {
             ...data,
             discordThreadId: data.discordThreadId ?? null,
             fluxerThreadId: data.fluxerThreadId ?? null,
+            categoryLinkId: data.categoryLinkId ?? null,
         });
         this.links.push(link);
         return link;
@@ -135,7 +158,54 @@ export class FakeLinkService {
 
     async removeGuildLink(id: string) {
         this.links = this.links.filter((l) => l.guildLinkId !== id);
+        this.categoryLinks = this.categoryLinks.filter(
+            (c) => c.guildLinkId !== id
+        );
         this.guildLinks = this.guildLinks.filter((g) => g.id !== id);
+    }
+
+    // Category links
+
+    async getCategoryLinkById(id: string) {
+        return this.categoryLinks.find((c) => c.id === id) ?? null;
+    }
+
+    async getCategoryLinkByDiscordCategoryId(discordCategoryId: string) {
+        return (
+            this.categoryLinks.find(
+                (c) => c.discordCategoryId === discordCategoryId
+            ) ?? null
+        );
+    }
+
+    async getCategoryLinksForFluxerChannel(fluxerChannelId: string) {
+        return this.categoryLinks.filter(
+            (c) => c.fluxerChannelId === fluxerChannelId
+        );
+    }
+
+    async getCategoryLinksForGuildLink(guildLinkId: string) {
+        return this.categoryLinks.filter((c) => c.guildLinkId === guildLinkId);
+    }
+
+    async createCategoryLink(data: {
+        guildLinkId: string;
+        discordCategoryId: string;
+        fluxerChannelId: string;
+    }) {
+        if (await this.getCategoryLinkByDiscordCategoryId(data.discordCategoryId)) {
+            throw new Error('Discord category already linked');
+        }
+        const categoryLink = makeCategoryLink(data);
+        this.categoryLinks.push(categoryLink);
+        return categoryLink;
+    }
+
+    async removeCategoryLink(id: string) {
+        const categoryLink = await this.getCategoryLinkById(id);
+        if (!categoryLink) throw new Error('Category link not found');
+        this.categoryLinks = this.categoryLinks.filter((c) => c.id !== id);
+        return categoryLink;
     }
 
     async getMessageLinkByDiscordMessageId(id: string) {
@@ -157,6 +227,7 @@ export class FakeLinkProvisioner {
         guildLink: GuildLink;
         discord: LinkTarget;
         fluxer: LinkTarget;
+        categoryLinkId?: string | null;
     }[] = [];
     removed: ChannelLink[] = [];
     failCreate: Error | null = null;
@@ -167,6 +238,7 @@ export class FakeLinkProvisioner {
         guildLink: GuildLink;
         discord: LinkTarget;
         fluxer: LinkTarget;
+        categoryLinkId?: string | null;
     }) {
         this.created.push(args);
         if (this.failCreate) throw this.failCreate;
@@ -180,6 +252,7 @@ export class FakeLinkProvisioner {
             discordWebhookToken: 'dwt',
             fluxerWebhookId: 'fwh',
             fluxerWebhookToken: 'fwt',
+            categoryLinkId: args.categoryLinkId ?? null,
         });
     }
 

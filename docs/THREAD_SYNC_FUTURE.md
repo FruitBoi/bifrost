@@ -2,14 +2,15 @@
 
 Bifröst currently bridges threads in a deliberately narrow way:
 
-- **What is synced:** messages inside a link (send, edit, delete) for any combination of channel and thread sides, and the thread name when both sides are threads.
+- **What is synced:** messages inside a link (send, edit, delete) for any combination of channel and thread sides, the thread name when both sides are threads, and (for links created by a category link) the Discord channel name onto the Fluxer thread.
 - **What is not synced:** everything else. This document lists the features that could be added later, with the reasoning for leaving them out so far and the main thing to watch when implementing them.
 
 ## Current limitations
 
 - Only threads whose parent is a **plain text channel** are bridged. Threads under forum, media and announcement channels are ignored.
 - Counterpart threads created by auto-sync are created **by the bot**, so their owner on the other platform is the bot, not the user who started the original thread.
-- Auto-sync only exists on channel↔channel links and only produces thread↔thread links under them. Channel↔thread links are manual only.
+- Auto-sync only exists on channel↔channel links and only produces thread↔thread links under them. Channel↔thread links are created manually or by a category link.
+- Category links only work in one direction: Discord category → threads in one Fluxer channel. A thread created in the hosting Fluxer channel is not turned into a Discord channel, thread renames are not mirrored back to the channel, and deleting a bridged Discord channel only drops its link (the Fluxer thread stays).
 - A channel and every thread link under it share **one webhook per platform** on the (parent) channel. That webhook is deleted together with the last link that uses it, so nothing is left behind, but it also means all bridged traffic for a channel and its threads goes through a single webhook's rate limit.
 - A location (channel or thread) is linked at most once; after a link is removed it has to be linked again manually.
 - Thread links are not distinguished in the stats command, metrics or the admin dashboard counters (they count as channel links).
@@ -23,8 +24,8 @@ Bifröst currently bridges threads in a deliberately narrow way:
 
 ### Rename mirroring for channel↔thread links
 
-*Rationale:* Names are only mirrored when both sides are threads. For a channel↔thread link, a thread rename could be mirrored onto the channel name (or the channel rename onto the thread).
-*Consideration:* Channel names have stricter rules than thread names (lowercase, no spaces on Discord) and renaming a channel needs Manage Channels, which the bot does not request today. Deliberately left out until there is a clear use case.
+*Rationale:* Names are only mirrored when both sides are threads, plus channel → thread for links created by a category link. For a manually created channel↔thread link, a thread rename could be mirrored onto the channel name (or the channel rename onto the thread).
+*Consideration:* Channel names have stricter rules than thread names (lowercase, no spaces on Discord) and renaming a channel needs Manage Channels, which the bot does not request today. The channel → thread half could reuse the category-link rename path; the thread → channel half has the same echo problem described under category links below. Deliberately left out until there is a clear use case.
 
 ### Mirror thread deletion
 
@@ -75,6 +76,26 @@ Bifröst currently bridges threads in a deliberately narrow way:
 
 *Rationale:* Servers with many channels have to switch the toggle on per channel link.
 *Consideration:* A `guild_links.autoSyncThreadsDefault` column applied at channel-link creation time (and an `autolink` option) would cover this without changing per-link semantics.
+
+### Category links: reverse direction (Fluxer thread → Discord channel)
+
+*Rationale:* A category link only flows from Discord to Fluxer: channels created in the category get a thread, but a thread started in the hosting Fluxer channel gets nothing on Discord. Servers that mostly live on Fluxer would want a new thread there to appear as a channel in the category.
+*Consideration:* Creating channels needs Manage Channels, which the bot does not request today, and Discord caps a category at 50 channels, so the handler needs a clear failure mode once the category is full. Threads created by the bridge itself (the ones a category link makes for Discord channels) must be excluded by owner, as thread auto-sync already does, or every bridged channel would get a second, reverse-created channel. Threads are also far cheaper to create than channels, so this should probably be opt-in per category link, and an archived or deleted thread should not leave a dangling channel behind.
+
+### Category links: mirror thread renames back to the channel
+
+*Rationale:* Channel renames are mirrored onto the Fluxer thread, but renaming the thread does nothing on Discord, so the two drift apart as soon as someone renames the thread.
+*Consideration:* Discord normalises channel names (lowercase, spaces and most punctuation become hyphens), so a naive mirror renames the thread again with the normalised name and the two sides ping-pong. The handler would have to apply the same normalisation before comparing (treat "Bug Reports" and "bug-reports" as equal), only rename the channel when the normalised names differ, and accept that the thread name ends up normalised too. Renaming a channel needs Manage Channels. Keeping the Discord side authoritative is simpler and is what the one-way mirror does today.
+
+### Category links: mirror channel deletion to thread archival
+
+*Rationale:* Deleting a bridged Discord channel (or moving it out of the category) only removes its link, leaving an active Fluxer thread that looks bridged but no longer is. Archiving the thread would signal that the channel is gone without destroying its history.
+*Consideration:* Archival is reversible, so it is safer than deleting the thread, but it still needs Manage Threads and must not fire when the bot merely lost access to the channel. A moved channel is a weaker signal than a deleted one (it may come back, in which case the bridge would create a second thread rather than reuse the archived one), so the two cases probably want different handling. This overlaps with the archive/unarchive mirroring candidate above.
+
+### Category links: per-category naming templates
+
+*Rationale:* Threads are named exactly after the channel, so a Fluxer channel that hosts several categories, or one that also has its own threads, has no way to tell them apart.
+*Consideration:* A `category_links.threadNameTemplate` (for example `{category}/{channel}` or a fixed prefix) applied when the thread is created and when a channel rename is mirrored. The rename path compares the thread's current name with the normalised channel name to skip no-op edits, so the comparison must go through the same template, and changing the template later should either re-render every thread name or only apply to new threads. Thread names are limited to 100 characters, so long prefixes need truncation.
 
 ### Stats and metrics for thread links
 

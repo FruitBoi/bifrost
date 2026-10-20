@@ -188,6 +188,13 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
         return result;
     }
 
+    /** Category operations are rare; no caching. */
+    async findAllByCategoryLink(
+        categoryLinkId: string
+    ): Promise<ChannelLink[]> {
+        return this.repository.findAllByCategoryLink(categoryLinkId);
+    }
+
     async countByDiscordWebhookId(discordWebhookId: string): Promise<number> {
         return this.repository.countByDiscordWebhookId(discordWebhookId);
     }

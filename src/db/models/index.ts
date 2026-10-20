@@ -1,5 +1,6 @@
 import { GuildLinkModel } from './GuildLinkModel';
 import { ChannelLinkModel } from './ChannelLinkModel';
+import { CategoryLinkModel } from './CategoryLinkModel';
 import { MessageLinkModel } from './MessageLinkModel';
 import { QueuedMessageModel } from './QueuedMessageModel';
 
@@ -39,9 +40,23 @@ MessageLinkModel.belongsTo(ChannelLinkModel, {
     as: 'channelLink',
 });
 
+// Category -> channel/thread links it created
+CategoryLinkModel.hasMany(ChannelLinkModel, {
+    foreignKey: 'categoryLinkId',
+    as: 'channelLinks',
+    constraints: false,
+});
+
+ChannelLinkModel.belongsTo(CategoryLinkModel, {
+    foreignKey: 'categoryLinkId',
+    as: 'categoryLink',
+    constraints: false,
+});
+
 export {
     GuildLinkModel,
     ChannelLinkModel,
+    CategoryLinkModel,
     MessageLinkModel,
     QueuedMessageModel,
 };

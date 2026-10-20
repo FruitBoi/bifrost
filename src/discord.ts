@@ -38,6 +38,8 @@ import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscord
 import { DbStatsService } from './services/DbStatsService';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
+import CategorySyncService from './services/categorySync/CategorySyncService';
+import CategoryDiscordCommandHandler from './commands/discord/handlers/CategoryDiscordCommandHandler';
 
 const startDiscordClient = async ({
     linkService,
@@ -47,6 +49,7 @@ const startDiscordClient = async ({
     discordEntityResolver,
     fluxerEntityResolver,
     threadSyncService,
+    categorySyncService,
     metricsService,
     queueService,
     discordStatsService,
@@ -60,6 +63,7 @@ const startDiscordClient = async ({
     discordEntityResolver: DiscordEntityResolver;
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
+    categorySyncService: CategorySyncService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -88,6 +92,7 @@ const startDiscordClient = async ({
     healthCheckService.setDiscordClient(client);
     discordEntityResolver.setDiscordClient(client);
     threadSyncService.setDiscordClient(client);
+    categorySyncService.setDiscordClient(client);
     discordStatsService.setClient(client);
 
     const messageTransformer = new DiscordMessageTransformer();
@@ -137,6 +142,14 @@ const startDiscordClient = async ({
         new ThreadsDiscordCommandHandler(client, linkService)
     );
     commandRegistry.registerCommand(
+        'category',
+        new CategoryDiscordCommandHandler(
+            client,
+            linkService,
+            categorySyncService
+        )
+    );
+    commandRegistry.registerCommand(
         'autolink',
         new AutolinkDiscordCommandHandler(
             client,
@@ -166,6 +179,35 @@ const startDiscordClient = async ({
 
     client.on(Events.Error, (error) => {
         logger.error('Discord client error:', error);
+    });
+
+    client.on(Events.ChannelCreate, async (channel) => {
+        if (isFluxerApiBlocked()) return;
+        try {
+            await categorySyncService.handleDiscordChannelCreate(channel);
+        } catch (error) {
+            logger.error('Error handling Discord channel creation:', error);
+        }
+    });
+
+    client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
+        if (isFluxerApiBlocked()) return;
+        try {
+            await categorySyncService.handleDiscordChannelUpdate(
+                oldChannel,
+                newChannel
+            );
+        } catch (error) {
+            logger.error('Error handling Discord channel update:', error);
+        }
+    });
+
+    client.on(Events.ChannelDelete, async (channel) => {
+        try {
+            await categorySyncService.handleDiscordChannelDelete(channel);
+        } catch (error) {
+            logger.error('Error handling Discord channel deletion:', error);
+        }
     });
 
     client.on(Events.ThreadCreate, async (thread, newlyCreated) => {

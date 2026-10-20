@@ -1,5 +1,6 @@
 import { Router, Request } from 'express';
 import {
+    CategoryChannel as DiscordCategoryChannel,
     ChannelType as DiscordChannelType,
     TextChannel as DiscordTextChannel,
 } from 'discord.js';
@@ -13,6 +14,7 @@ import {
 import { GuildLink } from '../../db/entities/GuildLink';
 import { LinkService } from '../../services/LinkService';
 import LinkProvisioner from '../../services/LinkProvisioner';
+import type CategorySyncService from '../../services/categorySync/CategorySyncService';
 import { matchChannels } from '../../utils/channelMatcher';
 import logger from '../../utils/logging/logger';
 import type { FluxerClientRef } from '../clientRefs';
@@ -26,8 +28,11 @@ import type {
     AutolinkPreviewResponse,
     AutolinkResponse,
     AutolinkResultItem,
+    CategoryLinkResultResponse,
+    CategoryLinkSummary,
     ChannelLinkSummary,
     ChannelSummary,
+    CreateCategoryLinkBody,
     CreateChannelLinkBody,
     GuildChannelsResponse,
     UnlinkedChannelSummary,
@@ -39,11 +44,13 @@ import { ChannelType as FluxerChannelType } from '@fluxerjs/core';
 export function createChannelsRouter({
     linkService,
     linkProvisioner,
+    categorySyncService,
     discordClient,
     fluxerClientRef,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
+    categorySyncService: CategorySyncService;
     discordClient: DiscordClient;
     fluxerClientRef: FluxerClientRef;
 }): Router {
@@ -253,8 +260,66 @@ export function createChannelsRouter({
         const linkedDiscordIds = new Set(channelLinks.map(discordLocationId));
         const linkedFluxerIds = new Set(channelLinks.map(fluxerLocationId));
 
+        const categoryLinks = await linkService.getCategoryLinksForGuildLink(
+            link.id
+        );
+        const categoryLinkCounts = new Map<string, number>();
+        for (const l of channelLinks) {
+            if (!l.categoryLinkId) continue;
+            categoryLinkCounts.set(
+                l.categoryLinkId,
+                (categoryLinkCounts.get(l.categoryLinkId) ?? 0) + 1
+            );
+        }
+        const discordCategoryNames = new Map<string, string>();
+        if (discordGuild) {
+            for (const c of discordGuild.channels.cache.values()) {
+                if (c.type === DiscordChannelType.GuildCategory) {
+                    discordCategoryNames.set(c.id, c.name);
+                }
+            }
+        }
+        const categoryLinkSummaries: CategoryLinkSummary[] = categoryLinks.map(
+            (cl) => ({
+                id: cl.id,
+                discordCategory: {
+                    id: cl.discordCategoryId,
+                    name:
+                        discordCategoryNames.get(cl.discordCategoryId) ??
+                        cl.discordCategoryId,
+                },
+                fluxerChannel: {
+                    id: cl.fluxerChannelId,
+                    name:
+                        fluxerChannelNames.get(cl.fluxerChannelId) ??
+                        cl.fluxerChannelId,
+                },
+                channelCount: categoryLinkCounts.get(cl.id) ?? 0,
+            })
+        );
+
+        const linkedCategoryIds = new Set(
+            categoryLinks.map((cl) => cl.discordCategoryId)
+        );
+        const categoriesWithText = new Set(
+            discordChannels.flatMap((c) => (c.categoryId ? [c.categoryId] : []))
+        );
+        const unlinkedDiscordCategories: ChannelSummary[] = discordGuild
+            ? [...discordGuild.channels.cache.values()]
+                  .filter(
+                      (c): c is DiscordCategoryChannel =>
+                          c.type === DiscordChannelType.GuildCategory &&
+                          !linkedCategoryIds.has(c.id) &&
+                          categoriesWithText.has(c.id)
+                  )
+                  .sort((a, b) => a.position - b.position)
+                  .map((c) => ({ id: c.id, name: c.name }))
+            : [];
+
         return {
             channelLinks,
+            categoryLinks: categoryLinkSummaries,
+            unlinkedDiscordCategories,
             discordChannelNames,
             fluxerChannelNames,
             unlinkedDiscordChannels: discordChannels.filter(
@@ -291,6 +356,8 @@ export function createChannelsRouter({
 
         const {
             channelLinks,
+            categoryLinks,
+            unlinkedDiscordCategories,
             discordChannelNames,
             fluxerChannelNames,
             unlinkedDiscordChannels,
@@ -330,12 +397,15 @@ export function createChannelsRouter({
                     discordThread,
                     fluxerThread,
                     autoSyncThreads: l.autoSyncThreads,
+                    categoryLinkId: l.categoryLinkId,
                 };
             })
         );
 
         const response: GuildChannelsResponse = {
             linked,
+            categoryLinks,
+            unlinkedDiscordCategories,
             unlinkedDiscordChannels,
             unlinkedFluxerChannels,
             unlinkedDiscordThreads,
@@ -542,6 +612,89 @@ export function createChannelsRouter({
             await linkProvisioner.removeLink(loaded.channelLink);
             res.status(204).end();
         } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    router.post('/category-links', async (req, res) => {
+        const { guildLinkId, discordCategoryId, fluxerChannelId } =
+            req.body as Partial<CreateCategoryLinkBody>;
+        if (!guildLinkId || !discordCategoryId || !fluxerChannelId) {
+            res.status(400).json({
+                error: 'guildLinkId, discordCategoryId and fluxerChannelId are required',
+            });
+            return;
+        }
+
+        const link = await linkService.getGuildLinkById(guildLinkId);
+        if (!link) {
+            res.status(404).json({ error: 'Guild link not found' });
+            return;
+        }
+
+        const permError = assertChannelPermission(
+            req,
+            link.discordGuildId,
+            link.fluxerGuildId
+        );
+        if (permError) {
+            res.status(403).json({ error: permError });
+            return;
+        }
+
+        try {
+            const { categoryLink, result } =
+                await categorySyncService.createCategoryLink(
+                    link,
+                    discordCategoryId,
+                    fluxerChannelId
+                );
+            const response: CategoryLinkResultResponse = {
+                id: categoryLink.id,
+                linked: result.linked.length,
+                skipped: result.skipped.length,
+                failed: result.failed.map((f) => ({
+                    channelName: f.channelName,
+                    reason: f.reason ?? 'Unknown error',
+                })),
+            };
+            res.status(201).json(response);
+        } catch (err) {
+            logger.error('Failed to create category link via dashboard:', err);
+            res.status(400).json({ error: (err as Error).message });
+        }
+    });
+
+    router.delete('/category-links/:id', async (req, res) => {
+        const categoryLink = await linkService.getCategoryLinkById(
+            req.params.id
+        );
+        if (!categoryLink) {
+            res.status(404).json({ error: 'Category link not found' });
+            return;
+        }
+        const guildLink = await linkService.getGuildLinkById(
+            categoryLink.guildLinkId
+        );
+        if (!guildLink) {
+            res.status(404).json({ error: 'Guild link not found' });
+            return;
+        }
+        const permError = assertChannelPermission(
+            req,
+            guildLink.discordGuildId,
+            guildLink.fluxerGuildId
+        );
+        if (permError) {
+            res.status(403).json({ error: permError });
+            return;
+        }
+
+        try {
+            await categorySyncService.removeCategoryLink(categoryLink);
+            res.status(204).end();
+        } catch (err) {
+            logger.error('Failed to remove category link via dashboard:', err);
             res.status(500).json({ error: (err as Error).message });
         }
     });

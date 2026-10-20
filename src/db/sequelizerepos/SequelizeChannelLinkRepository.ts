@@ -112,6 +112,16 @@ export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
         return models.map((m) => m.toJSON() as ChannelLink);
     }
 
+    async findAllByCategoryLink(
+        categoryLinkId: string
+    ): Promise<ChannelLink[]> {
+        const models = await ChannelLinkModel.findAll({
+            where: { categoryLinkId },
+            order: [['createdAt', 'ASC']],
+        });
+        return models.map((m) => m.toJSON() as ChannelLink);
+    }
+
     async countByDiscordWebhookId(discordWebhookId: string): Promise<number> {
         return await ChannelLinkModel.count({ where: { discordWebhookId } });
     }

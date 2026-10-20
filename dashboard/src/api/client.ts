@@ -4,7 +4,9 @@ import type {
     AdminStatsResponse,
     AutolinkPreviewResponse,
     AutolinkResponse,
+    CategoryLinkResultResponse,
     ChannelLinkSummary,
+    CreateCategoryLinkBody,
     CreateChannelLinkBody,
     CreateGuildLinkBody,
     GuildChannelsResponse,
@@ -126,6 +128,35 @@ export function useUpdateChannelLink(guildLinkId: string | undefined) {
                 `/channel-links/${channelLinkId}`,
                 { method: 'PATCH', body: JSON.stringify(body) }
             ),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['guild-channels', guildLinkId],
+            }),
+    });
+}
+
+export function useCreateCategoryLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (body: Omit<CreateCategoryLinkBody, 'guildLinkId'>) =>
+            apiFetch<CategoryLinkResultResponse>('/category-links', {
+                method: 'POST',
+                body: JSON.stringify({ ...body, guildLinkId }),
+            }),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['guild-channels', guildLinkId],
+            }),
+    });
+}
+
+export function useDeleteCategoryLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (categoryLinkId: string) =>
+            apiFetch<void>(`/category-links/${categoryLinkId}`, {
+                method: 'DELETE',
+            }),
         onSuccess: () =>
             queryClient.invalidateQueries({
                 queryKey: ['guild-channels', guildLinkId],

@@ -40,6 +40,28 @@ With the toggle off, nothing is bridged until you link it. Linking a thread work
 - `!b list` — lists every link in the server, one line per link, marking thread sides with 🧵.
 - In the web dashboard, the *Link* dialog offers both channels and active threads on each side, and every row has an unlink button.
 
+### Category links
+
+A **category link** bridges a whole Discord category at once: every text channel in the category becomes a thread inside one Fluxer channel. The bridge creates a Fluxer thread named after each channel and links the two as an ordinary channel↔thread link, tagged with the category link so it can be managed (and removed) together with it. The mapping is kept current afterwards:
+
+- A text channel created in or moved into the category is bridged automatically.
+- A channel moved out of the category loses its link; the Fluxer thread stays.
+- Renaming a channel renames its thread. Thread renames are **not** mirrored back (Discord normalises channel names to lowercase-with-hyphens, so the echo would rename the thread again).
+- Deleting the category removes only the mapping; the links it created keep working on their own. Deleting a bridged Discord channel removes its link. Deleting the hosting Fluxer channel removes its own link and every category link targeting it (the threads died with the channel).
+
+Commands, from Discord (run inside any channel of the category):
+
+- `!b category <fluxerChannelId>` — shows a preview of the channels that would be bridged (and which are already linked elsewhere). Confirm with `!b category confirm`.
+- `!b category unlink` — removes the mapping and every link it created; the Fluxer threads are left in place. Confirm with `!b category confirm`.
+- `!b category` — shows the status of the category's link.
+
+From Fluxer (run inside the hosting channel):
+
+- `!b category <discordCategoryId>` — preview, then `!b category confirm`.
+- `!b category unlink <discordCategoryId>` — then `!b category confirm`.
+
+In the web dashboard, the *Link category* dialog creates a category link and the *Categories* block lists existing ones with an unlink button; rows created by a category link carry a *category* badge. `!b list` shows category links first, followed by the individual links. The command requires **Manage Webhooks**, and the bot needs the thread permissions listed under [Permissions](#permissions).
+
 ### How it works
 
 - Webhooks only exist on channels, never on threads, so every link posts through a webhook on its (parent) channel, with the thread as target (`thread_id` on both Discord and Fluxer). A channel and all thread links under it **share one webhook per platform**; it is created with the first link that needs it and deleted with the last one. That also keeps well clear of Discord's per-channel webhook limit.
@@ -54,7 +76,7 @@ Besides the permissions the bot already needs for channel bridging, thread bridg
 
 ### Database migration
 
-Thread bridging ships as two migrations. `00003-add-thread-links` adds `channel_links.autoSyncThreads` and a `thread_links` table (the first iteration of the feature). `00004-location-links` adds the nullable `channel_links.discordThreadId` / `fluxerThreadId` columns, replaces the unique indexes on the channel ID columns with partial ones (a channel can be linked once as a channel and still own any number of thread links), converts any existing `thread_links` rows into links of their own (inheriting the parent link's webhooks and keeping their message links), and drops `thread_links`. Migrations run automatically on startup, so existing databases need no manual steps; existing channel links are unchanged and simply start with the toggle off.
+Thread bridging ships as three migrations. `00003-add-thread-links` adds `channel_links.autoSyncThreads` and a `thread_links` table (the first iteration of the feature). `00004-location-links` adds the nullable `channel_links.discordThreadId` / `fluxerThreadId` columns, replaces the unique indexes on the channel ID columns with partial ones (a channel can be linked once as a channel and still own any number of thread links), converts any existing `thread_links` rows into links of their own (inheriting the parent link's webhooks and keeping their message links), and drops `thread_links`. `00005-category-links` adds the `category_links` table (one row per linked Discord category) and the nullable `channel_links.categoryLinkId` column that tags the links a category link creates. Migrations run automatically on startup, so existing databases need no manual steps; existing channel links are unchanged and simply start with the toggle off.
 
 ## Community
 

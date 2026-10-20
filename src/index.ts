@@ -5,6 +5,7 @@ import { initDatabase } from './db/migrator';
 import { SequelizeChannelLinkRepository } from './db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeGuildLinkRepository } from './db/sequelizerepos/SequelizeGuildLinkRepository';
 import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMessageLinkRepository';
+import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCategoryLinkRepository';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -18,6 +19,7 @@ import { LinkService } from './services/LinkService';
 import { WebhookService } from './services/WebhookService';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
+import CategorySyncService from './services/categorySync/CategorySyncService';
 import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
@@ -65,6 +67,7 @@ const main = async () => {
     const guildLinkRepo = new SequelizeGuildLinkRepository();
     const channelLinkRepo = new SequelizeChannelLinkRepository();
     const messageLinkRepo = new SequelizeMessageLinkRepository();
+    const categoryLinkRepo = new SequelizeCategoryLinkRepository();
 
     const cachedGuildLinkRepo = new CachedGuildLinkRepository(guildLinkRepo, 0);
     const cachedChannelLinkRepo = new CachedChannelLinkRepository(
@@ -79,7 +82,8 @@ const main = async () => {
     const linkService = new LinkService(
         cachedGuildLinkRepo,
         cachedChannelLinkRepo,
-        cachedMessageLinkRepo
+        cachedMessageLinkRepo,
+        categoryLinkRepo
     );
     const webhookService = new WebhookService();
     const discordEntityResolver = new DiscordEntityResolver();
@@ -91,6 +95,12 @@ const main = async () => {
         fluxerEntityResolver
     );
     const threadSyncService = new ThreadSyncService(
+        linkService,
+        linkProvisioner,
+        discordEntityResolver,
+        fluxerEntityResolver
+    );
+    const categorySyncService = new CategorySyncService(
         linkService,
         linkProvisioner,
         discordEntityResolver,
@@ -115,6 +125,7 @@ const main = async () => {
         discordEntityResolver,
         fluxerEntityResolver,
         threadSyncService,
+        categorySyncService,
         metricsService,
         queueService,
         discordStatsService,
@@ -228,6 +239,7 @@ const main = async () => {
             discordEntityResolver,
             fluxerEntityResolver,
             threadSyncService,
+            categorySyncService,
             metricsService,
             queueService,
             discordStatsService,
@@ -247,6 +259,7 @@ const main = async () => {
         const webApp = createWebApp({
             linkService,
             linkProvisioner,
+            categorySyncService,
             webhookService,
             discordClient,
             fluxerClientRef,

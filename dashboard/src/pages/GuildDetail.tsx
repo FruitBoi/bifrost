@@ -1,9 +1,17 @@
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, MessageSquareText, PackageOpen, Trash } from 'lucide-react';
+import {
+    ArrowLeft,
+    FolderOpen,
+    MessageSquareText,
+    PackageOpen,
+    Trash,
+} from 'lucide-react';
 import type {
+    CategoryLinkSummary,
     ChannelLinkSummary,
     ChannelSummary,
 } from '../../../src/web/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -17,6 +25,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { toastManager } from '@/components/ui/toast';
 import {
+    useDeleteCategoryLink,
     useDeleteChannelLink,
     useGuildChannels,
     useUpdateChannelLink,
@@ -32,6 +41,7 @@ import {
 } from '../components/ui/empty';
 import { CreateChannelLinkDialog } from '../components/CreateChannelLinkDialog';
 import { AutolinkDialog } from '../components/AutolinkDialog';
+import { LinkCategoryDialog } from '../components/LinkCategoryDialog';
 
 /** `#channel` for a channel side, or a thread icon with `#parent › thread`. */
 function LocationCell({
@@ -64,6 +74,74 @@ function describeLink(link: ChannelLinkSummary): string {
     return `${discord} ↔ ${fluxer}`;
 }
 
+function describeCategoryLink(link: CategoryLinkSummary): string {
+    return `${link.discordCategory.name} → #${link.fluxerChannel.name}`;
+}
+
+/** One row per category link: category → Fluxer channel, with an unlink button. */
+function CategoryLinksBlock({
+    categoryLinks,
+    guildLinkId,
+}: {
+    categoryLinks: CategoryLinkSummary[];
+    guildLinkId: string | undefined;
+}) {
+    const deleteCategoryLink = useDeleteCategoryLink(guildLinkId);
+
+    return (
+        <section className="flex flex-col gap-2">
+            <h2 className="text-muted-foreground text-sm font-medium">
+                Categories
+            </h2>
+            <ul className="divide-border divide-y rounded-lg border">
+                {categoryLinks.map((link) => (
+                    <li
+                        key={link.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2"
+                    >
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+                            <span className="inline-flex items-center gap-1.5">
+                                <FolderOpen
+                                    aria-hidden="true"
+                                    className="text-muted-foreground size-3.5 shrink-0"
+                                />
+                                <span>#{link.discordCategory.name}</span>
+                            </span>
+                            <span className="text-muted-foreground">→</span>
+                            <span>#{link.fluxerChannel.name}</span>
+                            <span className="text-muted-foreground">
+                                · {link.channelCount} channel
+                                {link.channelCount === 1 ? '' : 's'}
+                            </span>
+                        </div>
+                        <Button
+                            aria-label={`Unlink category ${describeCategoryLink(link)}`}
+                            variant="destructive-outline"
+                            size="icon-sm"
+                            loading={
+                                deleteCategoryLink.isPending &&
+                                deleteCategoryLink.variables === link.id
+                            }
+                            onClick={() =>
+                                deleteCategoryLink.mutate(link.id, {
+                                    onError: (err) =>
+                                        toastManager.add({
+                                            type: 'error',
+                                            title: 'Could not unlink category',
+                                            description: err.message,
+                                        }),
+                                })
+                            }
+                        >
+                            <Trash aria-hidden="true" />
+                        </Button>
+                    </li>
+                ))}
+            </ul>
+        </section>
+    );
+}
+
 export function GuildDetail() {
     const { guildLinkId } = useParams<{ guildLinkId: string }>();
     const { data, isLoading } = useGuildChannels(guildLinkId);
@@ -71,11 +149,20 @@ export function GuildDetail() {
     const updateChannelLink = useUpdateChannelLink(guildLinkId);
 
     const dialogs = data && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
             <AutolinkDialog
                 guildLinkId={guildLinkId!}
                 disabled={
                     data.unlinkedDiscordChannels.length === 0 ||
+                    data.unlinkedFluxerChannels.length === 0
+                }
+            />
+            <LinkCategoryDialog
+                guildLinkId={guildLinkId!}
+                categories={data.unlinkedDiscordCategories}
+                fluxerChannels={data.unlinkedFluxerChannels}
+                disabled={
+                    data.unlinkedDiscordCategories.length === 0 ||
                     data.unlinkedFluxerChannels.length === 0
                 }
             />
@@ -104,13 +191,20 @@ export function GuildDetail() {
 
     const content = (
         <div className="flex flex-col gap-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-2">
                 <Button render={<Link to="/" />} variant="ghost" size="sm">
                     <ArrowLeft aria-hidden="true" />
                     Back
                 </Button>
                 {dialogs}
             </div>
+
+            {data && data.categoryLinks.length > 0 && (
+                <CategoryLinksBlock
+                    categoryLinks={data.categoryLinks}
+                    guildLinkId={guildLinkId}
+                />
+            )}
 
             {isLoading || !data ? (
                 <Table>
@@ -158,10 +252,20 @@ export function GuildDetail() {
                             return (
                                 <TableRow key={link.id}>
                                     <TableCell className="whitespace-nowrap">
-                                        <LocationCell
-                                            channel={link.discordChannel}
-                                            thread={link.discordThread}
-                                        />
+                                        <span className="inline-flex items-center gap-2">
+                                            <LocationCell
+                                                channel={link.discordChannel}
+                                                thread={link.discordThread}
+                                            />
+                                            {link.categoryLinkId && (
+                                                <Badge
+                                                    variant="secondary"
+                                                    size="sm"
+                                                >
+                                                    category
+                                                </Badge>
+                                            )}
+                                        </span>
                                     </TableCell>
                                     <TableCell className="whitespace-nowrap">
                                         <LocationCell

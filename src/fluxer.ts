@@ -49,6 +49,8 @@ import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
+import CategorySyncService from './services/categorySync/CategorySyncService';
+import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 
 const startFluxerClient = async ({
     linkService,
@@ -58,6 +60,7 @@ const startFluxerClient = async ({
     discordEntityResolver,
     fluxerEntityResolver,
     threadSyncService,
+    categorySyncService,
     metricsService,
     queueService,
     discordStatsService,
@@ -71,6 +74,7 @@ const startFluxerClient = async ({
     discordEntityResolver: DiscordEntityResolver;
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
+    categorySyncService: CategorySyncService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -108,6 +112,7 @@ const startFluxerClient = async ({
     healthCheckService.setFluxerClient(client);
     fluxerEntityResolver.setFluxerClient(client);
     threadSyncService.setFluxerClient(client);
+    categorySyncService.setFluxerClient(client);
     fluxerStatsService.setClient(client);
 
     const messageTransformer = new FluxerMessageTransformer();
@@ -157,6 +162,14 @@ const startFluxerClient = async ({
         new ThreadsFluxerCommandHandler(client, linkService)
     );
     commandRegistry.registerCommand(
+        'category',
+        new CategoryFluxerCommandHandler(
+            client,
+            linkService,
+            categorySyncService
+        )
+    );
+    commandRegistry.registerCommand(
         'autolink',
         new AutolinkFluxerCommandHandler(
             client,
@@ -173,6 +186,15 @@ const startFluxerClient = async ({
 
     client.on(Events.Error, (error) => {
         logger.error('Fluxer client error:', error);
+    });
+
+    client.on(Events.ChannelDelete, async (channel) => {
+        if (channel.isThread()) return; // handled by ThreadDelete
+        try {
+            await categorySyncService.handleFluxerChannelDelete(channel.id);
+        } catch (error) {
+            logger.error('Error handling Fluxer channel deletion:', error);
+        }
     });
 
     client.on(Events.ThreadCreate, async (thread) => {

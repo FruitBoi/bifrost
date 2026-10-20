@@ -27,6 +27,9 @@ export interface ChannelLink {
 
     linkId: string;
 
+    /** Set when this link was created by a category link (see CategoryLink). */
+    categoryLinkId: string | null;
+
     /**
      * Only meaningful for channel↔channel links: when true, new threads in
      * either channel get a counterpart thread and a link of their own.

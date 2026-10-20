@@ -93,6 +93,21 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'category',
+        discord: {
+            description:
+                "Bridges every text channel of the current channel's category to threads in the given Fluxer channel (run inside a channel of the category). `unlink` removes the category link and its channel links; `confirm` executes the pending action.",
+            usageArgs: ['<fluxerChannelId> | unlink | confirm'],
+        },
+        fluxer: {
+            description:
+                'Bridges every text channel of the given Discord category to threads in the current Fluxer channel. `unlink <id>` removes the category link and its channel links; `confirm` executes the pending action.',
+            usageArgs: [
+                '<discordCategoryId> | unlink <discordCategoryId> | confirm',
+            ],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description: 'Lists all channel and thread links in this server.',

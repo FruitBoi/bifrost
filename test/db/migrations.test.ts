@@ -7,7 +7,9 @@ import * as baseline from '../../src/db/migrations/00001-baseline';
 import * as indexes from '../../src/db/migrations/00002-add-channel-link-indexes';
 import * as threadLinks from '../../src/db/migrations/00003-add-thread-links';
 import * as locationLinks from '../../src/db/migrations/00004-location-links';
+import * as categoryLinks from '../../src/db/migrations/00005-category-links';
 import { MessageLinkModel } from '../../src/db/models';
+import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 
@@ -31,6 +33,11 @@ const umzug = new Umzug({
             up: locationLinks.up,
             down: locationLinks.down,
         },
+        {
+            name: '00005-category-links.js',
+            up: categoryLinks.up,
+            down: categoryLinks.down,
+        },
     ],
     context: sequelize.getQueryInterface(),
     storage: new SequelizeStorage({ sequelize }),
@@ -39,6 +46,14 @@ const umzug = new Umzug({
 
 const qi = sequelize.getQueryInterface();
 const executed = async () => (await umzug.executed()).map((m) => m.name);
+// Sequelize v6 types showIndex() as Promise<object>; this is its real shape.
+interface IndexInfo {
+    name: string;
+    unique: boolean;
+    fields: { attribute: string }[];
+}
+const showIndexes = async (table: string) =>
+    (await qi.showIndex(table)) as IndexInfo[];
 const now = new Date();
 const select = async <T>(sql: string) => (await sequelize.query(sql))[0] as T[];
 
@@ -137,6 +152,8 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
             },
         ]);
 
+        // Runs through 00005 as well: the models (and so the repositories
+        // used below) describe the current schema, including categoryLinkId.
         await umzug.up();
         expect(await executed()).toContain('00004-location-links.js');
 
@@ -306,8 +323,148 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect((await repo.findById('c1'))?.autoSyncThreads).toBe(true);
     });
 
+    it('00005 adds category_links and channel_links.categoryLinkId, and rolls back cleanly', async () => {
+        const CHANNEL_LINK_INDEXES = [
+            'channel_links_discord_channel_id',
+            'channel_links_fluxer_channel_id',
+            'channel_links_discord_thread_id',
+            'channel_links_fluxer_thread_id',
+            'channel_links_discord_parent_channel_id',
+            'channel_links_fluxer_parent_channel_id',
+            'channel_links_guild_link_id',
+        ];
+        const indexNames = async (table: string) =>
+            (await showIndexes(table)).map((i) => i.name);
+
+        expect(await executed()).toContain('00005-category-links.js');
+
+        expect(await qi.tableExists('category_links')).toBe(true);
+        const categoryIndexes = await showIndexes('category_links');
+        const unique = categoryIndexes.find(
+            (i) => i.name === 'category_links_discord_category_id'
+        );
+        expect(unique).toBeDefined();
+        expect(unique!.unique).toBe(true);
+        expect(unique!.fields.map((f) => f.attribute)).toEqual([
+            'discordCategoryId',
+        ]);
+        expect(
+            (await qi.describeTable('channel_links')).categoryLinkId
+        ).toMatchObject({ allowNull: true });
+        expect(await indexNames('channel_links')).toContain(
+            'channel_links_category_link_id'
+        );
+
+        // Repositories work against the new schema.
+        const categories = new SequelizeCategoryLinkRepository();
+        const created = await categories.create({
+            guildLinkId: 'g1',
+            discordCategoryId: 'dcat',
+            fluxerChannelId: 'fhost',
+        });
+        expect(created).toMatchObject({
+            guildLinkId: 'g1',
+            discordCategoryId: 'dcat',
+            fluxerChannelId: 'fhost',
+        });
+        expect(created.id).toBeTruthy();
+        expect(await categories.findByDiscordCategoryId('dcat')).toMatchObject(
+            { id: created.id }
+        );
+        expect(await categories.findById(created.id)).toMatchObject({
+            discordCategoryId: 'dcat',
+        });
+        expect(
+            (await categories.findAllByGuild('g1')).map((c) => c.id)
+        ).toEqual([created.id]);
+        expect(
+            (await categories.findAllByFluxerChannelId('fhost')).map(
+                (c) => c.id
+            )
+        ).toEqual([created.id]);
+        expect(await categories.getCategoryLinksCount()).toBe(1);
+        await expect(
+            categories.create({
+                guildLinkId: 'g1',
+                discordCategoryId: 'dcat',
+                fluxerChannelId: 'fhost-2',
+            })
+        ).rejects.toThrow();
+
+        const channels = new SequelizeChannelLinkRepository();
+        const bridged = await channels.create({
+            guildLinkId: 'g1',
+            discordChannelId: 'dc-cat',
+            discordThreadId: null,
+            fluxerChannelId: 'fhost',
+            fluxerThreadId: 'ft-cat',
+            discordWebhookId: 'dw-cat',
+            discordWebhookToken: 't',
+            fluxerWebhookId: 'fw-cat',
+            fluxerWebhookToken: 't',
+            categoryLinkId: created.id,
+        });
+        expect(bridged.categoryLinkId).toBe(created.id);
+        expect(
+            (await channels.findAllByCategoryLink(created.id)).map(
+                (l) => l.id
+            )
+        ).toEqual([bridged.id]);
+        expect(await channels.findAllByCategoryLink('nope')).toEqual([]);
+        // Rows from before the migration have a null categoryLinkId.
+        expect((await channels.findById('c1'))?.categoryLinkId).toBeNull();
+
+        await channels.deleteById(bridged.id);
+        await categories.deleteById(created.id);
+        expect(await categories.getCategoryLinksCount()).toBe(0);
+
+        // Roll back: column and table gone, every 00004 index still present.
+        await umzug.down({ to: '00005-category-links.js' });
+        expect(await executed()).toEqual([
+            '00001-baseline.js',
+            '00002-add-channel-link-indexes.js',
+            '00003-add-thread-links.js',
+            '00004-location-links.js',
+        ]);
+        expect(
+            (await qi.describeTable('channel_links')).categoryLinkId
+        ).toBeUndefined();
+        expect(await qi.tableExists('category_links')).toBe(false);
+        const after = await indexNames('channel_links');
+        expect(after).toEqual(expect.arrayContaining(CHANNEL_LINK_INDEXES));
+        expect(after).not.toContain('channel_links_category_link_id');
+        await expect(
+            qi.bulkInsert('channel_links', [
+                {
+                    id: 'c-dup-5',
+                    guildLinkId: 'g1',
+                    discordChannelId: 'dc',
+                    fluxerChannelId: 'fc-y',
+                    discordWebhookId: 'dw',
+                    discordWebhookToken: 't',
+                    fluxerWebhookId: 'fw',
+                    fluxerWebhookToken: 't',
+                    linkId: 'dup5',
+                    createdAt: now,
+                },
+            ])
+        ).rejects.toThrow();
+        // Existing rows survived the SQLite table rebuild.
+        expect(
+            (await select<{ id: string }>('SELECT id FROM channel_links'))
+                .length
+        ).toBe(4);
+
+        await umzug.up();
+        expect(await executed()).toContain('00005-category-links.js');
+        expect(await qi.tableExists('category_links')).toBe(true);
+        expect(
+            (await qi.describeTable('channel_links')).categoryLinkId
+        ).toBeDefined();
+    });
+
     it('rolls 00004 back to the thread_links schema and re-applies', async () => {
-        await umzug.down();
+        await umzug.down({ to: '00004-location-links.js' });
         expect(await executed()).toEqual([
             '00001-baseline.js',
             '00002-add-channel-link-indexes.js',
@@ -370,6 +527,7 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
 
         await umzug.up();
         expect(await executed()).toContain('00004-location-links.js');
+        expect(await executed()).toContain('00005-category-links.js');
         expect(
             (
                 await new SequelizeChannelLinkRepository().findByDiscordLocation(
@@ -377,5 +535,6 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
                 )
             )?.fluxerThreadId
         ).toBe('ft0');
+        expect(await qi.tableExists('category_links')).toBe(true);
     });
 });

@@ -61,6 +61,20 @@ export interface ChannelLinkSummary {
     fluxerThread: ChannelSummary | null;
     /** Only meaningful for channel↔channel links. */
     autoSyncThreads: boolean;
+    /** Set when this link was created on behalf of a category link. */
+    categoryLinkId: string | null;
+}
+
+/**
+ * A Discord category whose text channels are each bridged to a thread inside
+ * one Fluxer channel.
+ */
+export interface CategoryLinkSummary {
+    id: string;
+    discordCategory: ChannelSummary;
+    fluxerChannel: ChannelSummary;
+    /** Number of channel links created on behalf of this category link. */
+    channelCount: number;
 }
 
 export interface UpdateChannelLinkBody {
@@ -69,6 +83,9 @@ export interface UpdateChannelLinkBody {
 
 export interface GuildChannelsResponse {
     linked: ChannelLinkSummary[];
+    categoryLinks: CategoryLinkSummary[];
+    /** Discord categories without a category link that contain at least one text channel. */
+    unlinkedDiscordCategories: ChannelSummary[];
     unlinkedDiscordChannels: UnlinkedChannelSummary[];
     unlinkedFluxerChannels: UnlinkedChannelSummary[];
     unlinkedDiscordThreads: UnlinkedThreadSummary[];
@@ -86,6 +103,19 @@ export interface CreateChannelLinkBody {
     discordTargetId: string;
     /** A Fluxer text channel ID or a thread ID. */
     fluxerTargetId: string;
+}
+
+export interface CreateCategoryLinkBody {
+    guildLinkId: string;
+    discordCategoryId: string;
+    fluxerChannelId: string;
+}
+
+export interface CategoryLinkResultResponse {
+    id: string;
+    linked: number;
+    skipped: number;
+    failed: { channelName: string; reason: string }[];
 }
 
 export interface InviteLinkResponse {
