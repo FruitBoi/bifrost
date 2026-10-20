@@ -55,7 +55,8 @@ export default class RoleFluxerCommandHandler extends FluxerCommandHandler {
             return;
         }
 
-        const guild = message.guild ?? (await message.resolveGuild());
+        const guild =
+            message.guild ?? (await message.resolveGuild().catch(() => null));
         if (!guild) {
             await this.reply(
                 message,
