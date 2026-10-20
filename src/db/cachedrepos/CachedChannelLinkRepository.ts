@@ -1,6 +1,13 @@
 import NodeCache from 'node-cache';
-import { ChannelLink } from '../entities/ChannelLink';
-import { ChannelLinkRepository } from '../repositories/ChannelLinkRepository';
+import {
+    ChannelLink,
+    discordLocationId,
+    fluxerLocationId,
+} from '../entities/ChannelLink';
+import {
+    ChannelLinkRepository,
+    CreateChannelLinkData,
+} from '../repositories/ChannelLinkRepository';
 
 export class CachedChannelLinkRepository implements ChannelLinkRepository {
     private cache: NodeCache;
@@ -12,6 +19,18 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
         this.cache = new NodeCache({ stdTTL: ttlSeconds });
     }
 
+    private idKey(id: string) {
+        return `id:${id}`;
+    }
+
+    private discordLocKey(discordLocation: string) {
+        return `discordLoc:${discordLocation}`;
+    }
+
+    private fluxerLocKey(fluxerLocation: string) {
+        return `fluxerLoc:${fluxerLocation}`;
+    }
+
     private guildKey(guildLinkId: string, linkId: string) {
         return `guild:${guildLinkId}:link:${linkId}`;
     }
@@ -20,38 +39,47 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
         return `guild:${guildLinkId}:all`;
     }
 
-    private discordKey(discordChannelId: string) {
-        return `discord:${discordChannelId}`;
+    private discordChannelAllKey(discordChannelId: string) {
+        return `dchan:${discordChannelId}:all`;
     }
 
-    private fluxerKey(fluxerChannelId: string) {
-        return `fluxer:${fluxerChannelId}`;
+    private fluxerChannelAllKey(fluxerChannelId: string) {
+        return `fchan:${fluxerChannelId}:all`;
     }
 
     private countKey() {
         return 'channel_links:count';
     }
 
-    async create(data: {
-        guildLinkId: string;
-        discordChannelId: string;
-        fluxerChannelId: string;
-        discordWebhookId: string;
-        discordWebhookToken: string;
-        fluxerWebhookId: string;
-        fluxerWebhookToken: string;
-    }): Promise<ChannelLink> {
+    private primeCache(entity: ChannelLink) {
+        this.cache.set(this.idKey(entity.id), entity);
+        this.cache.set(this.discordLocKey(discordLocationId(entity)), entity);
+        this.cache.set(this.fluxerLocKey(fluxerLocationId(entity)), entity);
+        this.cache.set(
+            this.guildKey(entity.guildLinkId, entity.linkId),
+            entity
+        );
+    }
+
+    private evictEntity(entity: ChannelLink) {
+        this.cache.del(this.idKey(entity.id));
+        this.cache.del(this.discordLocKey(discordLocationId(entity)));
+        this.cache.del(this.fluxerLocKey(fluxerLocationId(entity)));
+        this.cache.del(this.guildKey(entity.guildLinkId, entity.linkId));
+    }
+
+    private invalidateLists(entity: ChannelLink) {
+        this.cache.del(this.guildAllKey(entity.guildLinkId));
+        this.cache.del(this.discordChannelAllKey(entity.discordChannelId));
+        this.cache.del(this.fluxerChannelAllKey(entity.fluxerChannelId));
+        this.cache.del(this.countKey());
+    }
+
+    async create(data: CreateChannelLinkData): Promise<ChannelLink> {
         const created = await this.repository.create(data);
 
-        this.cache.set(
-            this.guildKey(created.guildLinkId, created.linkId),
-            created
-        );
-        this.cache.set(this.discordKey(created.discordChannelId), created);
-        this.cache.set(this.fluxerKey(created.fluxerChannelId), created);
-
-        this.cache.del(this.guildAllKey(created.guildLinkId));
-        this.cache.del(this.countKey());
+        this.primeCache(created);
+        this.invalidateLists(created);
 
         return created;
     }
@@ -70,9 +98,7 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
             linkId
         );
 
-        if (result) {
-            this.cache.set(key, result);
-        }
+        if (result) this.primeCache(result);
 
         return result;
     }
@@ -91,50 +117,83 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
     }
 
     async findById(id: string): Promise<ChannelLink | null> {
-        const cached = this.cache.get<ChannelLink>(id);
+        const key = this.idKey(id);
+
+        const cached = this.cache.get<ChannelLink>(key);
         if (cached) return cached;
 
         const result = await this.repository.findById(id);
-        if (result) {
-            this.cache.set(id, result);
-        }
+        if (result) this.primeCache(result);
+
         return result;
     }
 
-    async findByDiscordChannelId(
+    async findByDiscordLocation(
+        locationId: string
+    ): Promise<ChannelLink | null> {
+        const key = this.discordLocKey(locationId);
+
+        const cached = this.cache.get<ChannelLink>(key);
+        if (cached) return cached;
+
+        const result = await this.repository.findByDiscordLocation(locationId);
+        if (result) this.primeCache(result);
+
+        return result;
+    }
+
+    async findByFluxerLocation(
+        locationId: string
+    ): Promise<ChannelLink | null> {
+        const key = this.fluxerLocKey(locationId);
+
+        const cached = this.cache.get<ChannelLink>(key);
+        if (cached) return cached;
+
+        const result = await this.repository.findByFluxerLocation(locationId);
+        if (result) this.primeCache(result);
+
+        return result;
+    }
+
+    async findAllByDiscordChannel(
         discordChannelId: string
-    ): Promise<ChannelLink | null> {
-        const key = this.discordKey(discordChannelId);
+    ): Promise<ChannelLink[]> {
+        const key = this.discordChannelAllKey(discordChannelId);
 
-        const cached = this.cache.get<ChannelLink>(key);
+        const cached = this.cache.get<ChannelLink[]>(key);
         if (cached) return cached;
 
         const result =
-            await this.repository.findByDiscordChannelId(discordChannelId);
+            await this.repository.findAllByDiscordChannel(discordChannelId);
 
-        if (result) {
-            this.cache.set(key, result);
-        }
+        this.cache.set(key, result);
 
         return result;
     }
 
-    async findByFluxerChannelId(
+    async findAllByFluxerChannel(
         fluxerChannelId: string
-    ): Promise<ChannelLink | null> {
-        const key = this.fluxerKey(fluxerChannelId);
+    ): Promise<ChannelLink[]> {
+        const key = this.fluxerChannelAllKey(fluxerChannelId);
 
-        const cached = this.cache.get<ChannelLink>(key);
+        const cached = this.cache.get<ChannelLink[]>(key);
         if (cached) return cached;
 
         const result =
-            await this.repository.findByFluxerChannelId(fluxerChannelId);
+            await this.repository.findAllByFluxerChannel(fluxerChannelId);
 
-        if (result) {
-            this.cache.set(key, result);
-        }
+        this.cache.set(key, result);
 
         return result;
+    }
+
+    async countByDiscordWebhookId(discordWebhookId: string): Promise<number> {
+        return this.repository.countByDiscordWebhookId(discordWebhookId);
+    }
+
+    async countByFluxerWebhookId(fluxerWebhookId: string): Promise<number> {
+        return this.repository.countByFluxerWebhookId(fluxerWebhookId);
     }
 
     async setAutoSyncThreads(
@@ -143,14 +202,8 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
     ): Promise<ChannelLink> {
         const updated = await this.repository.setAutoSyncThreads(id, enabled);
 
-        this.cache.set(updated.id, updated);
-        this.cache.set(
-            this.guildKey(updated.guildLinkId, updated.linkId),
-            updated
-        );
-        this.cache.set(this.discordKey(updated.discordChannelId), updated);
-        this.cache.set(this.fluxerKey(updated.fluxerChannelId), updated);
-        this.cache.del(this.guildAllKey(updated.guildLinkId));
+        this.primeCache(updated);
+        this.invalidateLists(updated);
 
         return updated;
     }
@@ -161,11 +214,8 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
 
         await this.repository.deleteById(id);
 
-        this.cache.del(this.guildKey(existing.guildLinkId, existing.linkId));
-        this.cache.del(this.discordKey(existing.discordChannelId));
-        this.cache.del(this.fluxerKey(existing.fluxerChannelId));
-        this.cache.del(this.guildAllKey(existing.guildLinkId));
-        this.cache.del(this.countKey());
+        this.evictEntity(existing);
+        this.invalidateLists(existing);
     }
 
     async deleteByGuildLinkId(guildLinkId: string): Promise<void> {
@@ -174,9 +224,8 @@ export class CachedChannelLinkRepository implements ChannelLinkRepository {
         await this.repository.deleteByGuildLinkId(guildLinkId);
 
         existingLinks.forEach((link) => {
-            this.cache.del(this.guildKey(link.guildLinkId, link.linkId));
-            this.cache.del(this.discordKey(link.discordChannelId));
-            this.cache.del(this.fluxerKey(link.fluxerChannelId));
+            this.evictEntity(link);
+            this.invalidateLists(link);
         });
         this.cache.del(this.guildAllKey(guildLinkId));
         this.cache.del(this.countKey());

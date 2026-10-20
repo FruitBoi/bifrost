@@ -1,5 +1,6 @@
 import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
+import { isChannelPairLink } from '../../../db/entities/ChannelLink';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -57,10 +58,22 @@ export default class ThreadsDiscordCommandHandler extends DiscordCommandHandler 
             return;
         }
 
-        const context = await this.linkService
-            .resolveDiscordContext(message.channelId)
+        // The toggle lives on the channel↔channel link. From inside a thread
+        // (or when the current location's own link is not a channel pair),
+        // fall back to the parent channel's link.
+        let channelLink = await this.linkService
+            .getChannelLinkByDiscordLocation(message.channelId)
             .catch(() => null);
-        if (!context) {
+        if (
+            (!channelLink || !isChannelPairLink(channelLink)) &&
+            message.channel.isThread() &&
+            message.channel.parentId
+        ) {
+            channelLink = await this.linkService
+                .getChannelLinkByDiscordLocation(message.channel.parentId)
+                .catch(() => null);
+        }
+        if (!channelLink) {
             await message.reply({
                 embeds: [
                     new EmbedBuilder()
@@ -75,8 +88,22 @@ export default class ThreadsDiscordCommandHandler extends DiscordCommandHandler 
             });
             return;
         }
+        if (!isChannelPairLink(channelLink)) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `Automatic thread bridging only applies to channel ↔ channel links. ` +
+                                `This location is linked to a thread, so there is nothing to toggle here.`
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
 
-        const { channelLink } = context;
         const channelMention = `<#${channelLink.discordChannelId}>`;
 
         if (arg === undefined) {
@@ -89,7 +116,7 @@ export default class ThreadsDiscordCommandHandler extends DiscordCommandHandler 
                         .setDescription(
                             `Automatic thread bridging for ${channelMention} is ${state}.\n` +
                                 `> Use \`${COMMAND_PREFIX}threads on\` or \`${COMMAND_PREFIX}threads off\` to change it.\n` +
-                                `> Threads can always be linked manually with \`${COMMAND_PREFIX}link <fluxer-thread-id>\` from inside a thread.`
+                                `> Threads can always be linked manually with \`${COMMAND_PREFIX}link <fluxer-channel-or-thread-id>\` from inside a thread.`
                         )
                         .setColor(EmbedColors.Info)
                         .setFooter(footer)

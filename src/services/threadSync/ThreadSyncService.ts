@@ -10,11 +10,11 @@ import {
     ThreadAutoArchiveDuration as FluxerThreadAutoArchiveDuration,
     ThreadChannel as FluxerThreadChannel,
 } from '@fluxerjs/core';
-import { ChannelLink } from '../../db/entities/ChannelLink';
-import { ThreadLink } from '../../db/entities/ThreadLink';
+import { ChannelLink, isChannelPairLink } from '../../db/entities/ChannelLink';
 import DiscordEntityResolver from '../entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from '../entityResolver/FluxerEntityResolver';
-import { LinkContext, LinkService } from '../LinkService';
+import LinkProvisioner from '../LinkProvisioner';
+import { LinkService } from '../LinkService';
 import logger from '../../utils/logging/logger';
 import {
     isFluxerApiBlockError,
@@ -26,24 +26,24 @@ const VALID_AUTO_ARCHIVE_MINUTES = new Set([60, 1440, 4320, 10080]);
 
 /**
  * Controls whether a counterpart thread is created when none is linked yet.
- * - `auto`: only when the parent channel link has `autoSyncThreads` enabled
+ * - `auto`: only when the parent channel↔channel link has `autoSyncThreads`
  * - `never`: lookup only
  */
 export type ThreadAutoCreate = 'auto' | 'never';
 
 /**
- * Keeps Discord threads and Fluxer threads paired.
+ * Automatic thread bridging for channel↔channel links with `autoSyncThreads`
+ * enabled, plus rename/delete mirroring for any link whose sides are threads.
  *
- * Both platforms post into threads through the *parent channel's* webhook with
- * a thread target, so a thread link needs no webhooks of its own; it is just
- * the pair of thread IDs under an existing channel link.
+ * A bridged thread pair is an ordinary link row with both thread IDs set; it
+ * shares the parent channels' webhooks (see LinkProvisioner).
  */
 export default class ThreadSyncService {
     private discordClient: DiscordClient | null = null;
     private fluxerClient: FluxerClient | null = null;
 
     /** De-duplicates concurrent creation attempts for the same source thread. */
-    private readonly inFlight = new Map<string, Promise<ThreadLink | null>>();
+    private readonly inFlight = new Map<string, Promise<ChannelLink | null>>();
 
     /**
      * Threads this bridge created itself. Thread-create events for these must
@@ -53,6 +53,7 @@ export default class ThreadSyncService {
 
     constructor(
         private readonly linkService: LinkService,
+        private readonly linkProvisioner: LinkProvisioner,
         private readonly discordEntityResolver: DiscordEntityResolver,
         private readonly fluxerEntityResolver: FluxerEntityResolver
     ) {}
@@ -95,8 +96,8 @@ export default class ThreadSyncService {
 
     private async dedupe(
         key: string,
-        factory: () => Promise<ThreadLink | null>
-    ): Promise<ThreadLink | null> {
+        factory: () => Promise<ChannelLink | null>
+    ): Promise<ChannelLink | null> {
         const existing = this.inFlight.get(key);
         if (existing) return existing;
 
@@ -110,23 +111,19 @@ export default class ThreadSyncService {
     // ---------------------------------------------------------------------
 
     /**
-     * Resolves the bridge context for a Discord thread. When no link exists and
-     * the parent channel link auto-syncs threads, the Fluxer counterpart is
-     * created on the fly. Threads the bridge created itself are never mirrored.
+     * Returns the link for a Discord thread. When none exists and the thread's
+     * parent channel has a channel↔channel link with auto-sync on, a Fluxer
+     * counterpart is created and linked. Threads the bridge created itself are
+     * never mirrored.
      */
     async resolveDiscordThread(
         thread: DiscordThreadChannel,
         autoCreate: ThreadAutoCreate = 'auto'
-    ): Promise<LinkContext | null> {
-        const existing = await this.linkService.getThreadLinkByDiscordThreadId(
+    ): Promise<ChannelLink | null> {
+        const existing = await this.linkService.getChannelLinkByDiscordLocation(
             thread.id
         );
-        if (existing) {
-            const channelLink = await this.linkService.getChannelLinkById(
-                existing.channelLinkId
-            );
-            return channelLink ? { channelLink, threadLink: existing } : null;
-        }
+        if (existing) return existing;
 
         if (autoCreate === 'never') return null;
         if (!thread.parentId) return null;
@@ -135,35 +132,32 @@ export default class ThreadSyncService {
             return null;
         }
 
-        const channelLink =
-            await this.linkService.getChannelLinkByDiscordChannelId(
+        const parentLink =
+            await this.linkService.getChannelLinkByDiscordLocation(
                 thread.parentId
             );
-        if (!channelLink || !channelLink.autoSyncThreads) return null;
+        if (
+            !parentLink ||
+            !isChannelPairLink(parentLink) ||
+            !parentLink.autoSyncThreads
+        ) {
+            return null;
+        }
 
-        const threadLink = await this.dedupe(`discord:${thread.id}`, () =>
-            this.createCounterpartForDiscordThread(thread, channelLink)
+        return this.dedupe(`discord:${thread.id}`, () =>
+            this.createCounterpartForDiscordThread(thread, parentLink)
         );
-        return threadLink ? { channelLink, threadLink } : null;
     }
 
-    /**
-     * Resolves the bridge context for a Fluxer thread. Mirror of
-     * {@link resolveDiscordThread}.
-     */
+    /** Mirror of {@link resolveDiscordThread}. */
     async resolveFluxerThread(
         thread: FluxerThreadChannel,
         autoCreate: ThreadAutoCreate = 'auto'
-    ): Promise<LinkContext | null> {
-        const existing = await this.linkService.getThreadLinkByFluxerThreadId(
+    ): Promise<ChannelLink | null> {
+        const existing = await this.linkService.getChannelLinkByFluxerLocation(
             thread.id
         );
-        if (existing) {
-            const channelLink = await this.linkService.getChannelLinkById(
-                existing.channelLinkId
-            );
-            return channelLink ? { channelLink, threadLink: existing } : null;
-        }
+        if (existing) return existing;
 
         if (autoCreate === 'never') return null;
         if (!thread.parentId) return null;
@@ -172,16 +166,21 @@ export default class ThreadSyncService {
             return null;
         }
 
-        const channelLink =
-            await this.linkService.getChannelLinkByFluxerChannelId(
+        const parentLink =
+            await this.linkService.getChannelLinkByFluxerLocation(
                 thread.parentId
             );
-        if (!channelLink || !channelLink.autoSyncThreads) return null;
+        if (
+            !parentLink ||
+            !isChannelPairLink(parentLink) ||
+            !parentLink.autoSyncThreads
+        ) {
+            return null;
+        }
 
-        const threadLink = await this.dedupe(`fluxer:${thread.id}`, () =>
-            this.createCounterpartForFluxerThread(thread, channelLink)
+        return this.dedupe(`fluxer:${thread.id}`, () =>
+            this.createCounterpartForFluxerThread(thread, parentLink)
         );
-        return threadLink ? { channelLink, threadLink } : null;
     }
 
     // ---------------------------------------------------------------------
@@ -190,8 +189,8 @@ export default class ThreadSyncService {
 
     private async createCounterpartForDiscordThread(
         thread: DiscordThreadChannel,
-        channelLink: ChannelLink
-    ): Promise<ThreadLink | null> {
+        parentLink: ChannelLink
+    ): Promise<ChannelLink | null> {
         const name = ThreadSyncService.normalizeThreadName(thread.name);
         const autoArchiveDuration = ThreadSyncService.autoArchiveMinutes(
             thread.autoArchiveDuration
@@ -201,7 +200,7 @@ export default class ThreadSyncService {
         try {
             fluxerThread = await this.startFluxerThread(
                 thread.id,
-                channelLink,
+                parentLink,
                 name,
                 autoArchiveDuration
             );
@@ -220,13 +219,13 @@ export default class ThreadSyncService {
             fluxerThread.join().catch(() => undefined),
         ]);
 
-        return this.persistThreadLink(channelLink, thread.id, fluxerThread.id);
+        return this.persistThreadLink(parentLink, thread.id, fluxerThread.id);
     }
 
     private async createCounterpartForFluxerThread(
         thread: FluxerThreadChannel,
-        channelLink: ChannelLink
-    ): Promise<ThreadLink | null> {
+        parentLink: ChannelLink
+    ): Promise<ChannelLink | null> {
         const name = ThreadSyncService.normalizeThreadName(thread.name);
         const autoArchiveDuration = ThreadSyncService.autoArchiveMinutes(
             thread.autoArchiveDuration
@@ -236,7 +235,7 @@ export default class ThreadSyncService {
         try {
             discordThread = await this.startDiscordThread(
                 thread.id,
-                channelLink,
+                parentLink,
                 name,
                 autoArchiveDuration
             );
@@ -254,7 +253,7 @@ export default class ThreadSyncService {
             thread.join().catch(() => undefined),
         ]);
 
-        return this.persistThreadLink(channelLink, discordThread.id, thread.id);
+        return this.persistThreadLink(parentLink, discordThread.id, thread.id);
     }
 
     /**
@@ -265,7 +264,7 @@ export default class ThreadSyncService {
      */
     private async startFluxerThread(
         discordThreadId: string,
-        channelLink: ChannelLink,
+        parentLink: ChannelLink,
         name: string,
         autoArchiveDuration: FluxerThreadAutoArchiveDuration | undefined
     ): Promise<FluxerThreadChannel> {
@@ -276,14 +275,10 @@ export default class ThreadSyncService {
             await this.linkService.getMessageLinkByDiscordMessageId(
                 discordThreadId
             );
-        if (
-            starterLink &&
-            starterLink.channelLinkId === channelLink.id &&
-            !starterLink.threadLinkId
-        ) {
+        if (starterLink && starterLink.channelLinkId === parentLink.id) {
             try {
                 const starter = await client.channels.fetchMessage(
-                    channelLink.fluxerChannelId,
+                    parentLink.fluxerChannelId,
                     starterLink.fluxerMessageId
                 );
                 return await starter.startThread({ name, autoArchiveDuration });
@@ -295,12 +290,10 @@ export default class ThreadSyncService {
             }
         }
 
-        const channel = await client.channels.fetch(
-            channelLink.fluxerChannelId
-        );
+        const channel = await client.channels.fetch(parentLink.fluxerChannelId);
         if (!channel.isText()) {
             throw new Error(
-                `Fluxer channel ${channelLink.fluxerChannelId} does not support threads`
+                `Fluxer channel ${parentLink.fluxerChannelId} does not support threads`
             );
         }
         return channel.threads.create({
@@ -313,13 +306,13 @@ export default class ThreadSyncService {
     /** Mirror of {@link startFluxerThread}. */
     private async startDiscordThread(
         fluxerThreadId: string,
-        channelLink: ChannelLink,
+        parentLink: ChannelLink,
         name: string,
         autoArchiveDuration: DiscordThreadAutoArchiveDuration | undefined
     ): Promise<DiscordThreadChannel> {
         const client = this.ensureDiscordClient();
         const guildLink = await this.linkService.getGuildLinkById(
-            channelLink.guildLinkId
+            parentLink.guildLinkId
         );
 
         const starterLink =
@@ -329,13 +322,12 @@ export default class ThreadSyncService {
         if (
             guildLink &&
             starterLink &&
-            starterLink.channelLinkId === channelLink.id &&
-            !starterLink.threadLinkId
+            starterLink.channelLinkId === parentLink.id
         ) {
             try {
                 const starter = await this.discordEntityResolver.fetchMessage(
                     guildLink.discordGuildId,
-                    channelLink.discordChannelId,
+                    parentLink.discordChannelId,
                     starterLink.discordMessageId
                 );
                 if (!starter.hasThread) {
@@ -354,11 +346,11 @@ export default class ThreadSyncService {
         }
 
         const channel = await client.channels.fetch(
-            channelLink.discordChannelId
+            parentLink.discordChannelId
         );
         if (!channel || !(channel instanceof DiscordTextChannel)) {
             throw new Error(
-                `Discord channel ${channelLink.discordChannelId} does not support threads`
+                `Discord channel ${parentLink.discordChannelId} does not support threads`
             );
         }
         return channel.threads.create({
@@ -369,27 +361,38 @@ export default class ThreadSyncService {
     }
 
     private async persistThreadLink(
-        channelLink: ChannelLink,
+        parentLink: ChannelLink,
         discordThreadId: string,
         fluxerThreadId: string
-    ): Promise<ThreadLink | null> {
+    ): Promise<ChannelLink | null> {
+        const guildLink = await this.linkService.getGuildLinkById(
+            parentLink.guildLinkId
+        );
+        if (!guildLink) return null;
+
         try {
-            const link = await this.linkService.createThreadLink({
-                channelLinkId: channelLink.id,
-                discordThreadId,
-                fluxerThreadId,
+            const link = await this.linkProvisioner.createLink({
+                guildLink,
+                discord: {
+                    channelId: parentLink.discordChannelId,
+                    threadId: discordThreadId,
+                },
+                fluxer: {
+                    channelId: parentLink.fluxerChannelId,
+                    threadId: fluxerThreadId,
+                },
             });
             logger.info(
-                `Bridged thread: discord=${discordThreadId} ↔ fluxer=${fluxerThreadId} (channel link ${channelLink.linkId})`
+                `Bridged thread: discord=${discordThreadId} ↔ fluxer=${fluxerThreadId} (under channel link ${parentLink.linkId})`
             );
             return link;
         } catch (err) {
             // Most likely a race where the other side already persisted it.
             const existing =
-                (await this.linkService.getThreadLinkByDiscordThreadId(
+                (await this.linkService.getChannelLinkByDiscordLocation(
                     discordThreadId
                 )) ??
-                (await this.linkService.getThreadLinkByFluxerThreadId(
+                (await this.linkService.getChannelLinkByFluxerLocation(
                     fluxerThreadId
                 ));
             if (existing) return existing;
@@ -399,82 +402,28 @@ export default class ThreadSyncService {
     }
 
     // ---------------------------------------------------------------------
-    // Manual linking
-    // ---------------------------------------------------------------------
-
-    /**
-     * Links two existing threads. Both must be children of the two channels of
-     * the given channel link.
-     */
-    async linkExistingThreads({
-        channelLink,
-        discordThreadId,
-        fluxerThreadId,
-    }: {
-        channelLink: ChannelLink;
-        discordThreadId: string;
-        fluxerThreadId: string;
-    }): Promise<ThreadLink> {
-        const [discordThread, fluxerThread] = await Promise.all([
-            this.discordEntityResolver.fetchThread(discordThreadId),
-            this.fluxerEntityResolver.fetchThread(fluxerThreadId),
-        ]);
-
-        if (!discordThread) {
-            throw new Error('Discord thread not found');
-        }
-        if (discordThread.parentId !== channelLink.discordChannelId) {
-            throw new Error(
-                'Discord thread does not belong to the linked Discord channel'
-            );
-        }
-        if (!fluxerThread) {
-            throw new Error('Fluxer thread not found');
-        }
-        if (fluxerThread.parentId !== channelLink.fluxerChannelId) {
-            throw new Error(
-                'Fluxer thread does not belong to the linked Fluxer channel'
-            );
-        }
-
-        const link = await this.linkService.createThreadLink({
-            channelLinkId: channelLink.id,
-            discordThreadId,
-            fluxerThreadId,
-        });
-
-        await Promise.all([
-            discordThread.join().catch(() => undefined),
-            fluxerThread.join().catch(() => undefined),
-        ]);
-
-        return link;
-    }
-
-    async unlinkThread(threadLinkId: string): Promise<ThreadLink> {
-        const removed = await this.linkService.removeThreadLink(threadLinkId);
-        this.bridgeCreated.delete(`discord:${removed.discordThreadId}`);
-        this.bridgeCreated.delete(`fluxer:${removed.fluxerThreadId}`);
-        return removed;
-    }
-
-    // ---------------------------------------------------------------------
     // Event handlers
     // ---------------------------------------------------------------------
 
-    /** Mirrors a Discord thread rename to its Fluxer counterpart. */
+    /** Mirrors a Discord thread rename to a Fluxer thread linked to it. */
     async handleDiscordThreadUpdate(
         oldThread: DiscordThreadChannel,
         newThread: DiscordThreadChannel
     ): Promise<void> {
         if (oldThread.name === newThread.name) return;
 
-        const threadLink =
-            await this.linkService.getThreadLinkByDiscordThreadId(newThread.id);
-        if (!threadLink) return;
+        const link = await this.linkService.getChannelLinkByDiscordLocation(
+            newThread.id
+        );
+        if (
+            !link ||
+            link.discordThreadId !== newThread.id ||
+            !link.fluxerThreadId
+        )
+            return;
 
         const fluxerThread = await this.fluxerEntityResolver.fetchThread(
-            threadLink.fluxerThreadId
+            link.fluxerThreadId
         );
         if (!fluxerThread) return;
 
@@ -487,13 +436,13 @@ export default class ThreadSyncService {
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.error(
-                `Failed to rename Fluxer thread ${threadLink.fluxerThreadId}:`,
+                `Failed to rename Fluxer thread ${link.fluxerThreadId}:`,
                 err
             );
         }
     }
 
-    /** Mirrors a Fluxer thread rename to its Discord counterpart. */
+    /** Mirrors a Fluxer thread rename to a Discord thread linked to it. */
     async handleFluxerThreadUpdate(
         oldThread: FluxerChannel,
         newThread: FluxerThreadChannel
@@ -501,13 +450,18 @@ export default class ThreadSyncService {
         const oldName = (oldThread as { name?: string | null }).name ?? null;
         if (oldName === newThread.name) return;
 
-        const threadLink = await this.linkService.getThreadLinkByFluxerThreadId(
+        const link = await this.linkService.getChannelLinkByFluxerLocation(
             newThread.id
         );
-        if (!threadLink) return;
+        if (
+            !link ||
+            link.fluxerThreadId !== newThread.id ||
+            !link.discordThreadId
+        )
+            return;
 
         const discordThread = await this.discordEntityResolver.fetchThread(
-            threadLink.discordThreadId
+            link.discordThreadId
         );
         if (!discordThread) return;
 
@@ -518,39 +472,50 @@ export default class ThreadSyncService {
             await discordThread.setName(name, 'Renamed on Fluxer');
         } catch (err) {
             logger.error(
-                `Failed to rename Discord thread ${threadLink.discordThreadId}:`,
+                `Failed to rename Discord thread ${link.discordThreadId}:`,
                 err
             );
         }
     }
 
     /**
-     * A deleted thread simply drops its link. The counterpart thread is left
-     * untouched; mirroring deletion is intentionally out of scope.
+     * A deleted thread drops its link (and the shared webhook, if nothing else
+     * uses it). The other side is left untouched; mirroring deletion is
+     * intentionally out of scope.
      */
     async handleDiscordThreadDelete(threadId: string): Promise<void> {
-        const threadLink =
-            await this.linkService.getThreadLinkByDiscordThreadId(threadId);
-        if (!threadLink) return;
-        await this.unlinkThread(threadLink.id).catch((err) =>
-            logger.error(
-                'Failed to remove thread link after Discord thread deletion:',
-                err
-            )
-        );
-        logger.info(`Discord thread ${threadId} deleted; thread link removed.`);
+        const link =
+            await this.linkService.getChannelLinkByDiscordLocation(threadId);
+        if (!link || link.discordThreadId !== threadId) return;
+        await this.linkProvisioner
+            .removeLink(link)
+            .catch((err) =>
+                logger.error(
+                    'Failed to remove link after Discord thread deletion:',
+                    err
+                )
+            );
+        this.bridgeCreated.delete(`discord:${threadId}`);
+        if (link.fluxerThreadId)
+            this.bridgeCreated.delete(`fluxer:${link.fluxerThreadId}`);
+        logger.info(`Discord thread ${threadId} deleted; link removed.`);
     }
 
     async handleFluxerThreadDelete(threadId: string): Promise<void> {
-        const threadLink =
-            await this.linkService.getThreadLinkByFluxerThreadId(threadId);
-        if (!threadLink) return;
-        await this.unlinkThread(threadLink.id).catch((err) =>
-            logger.error(
-                'Failed to remove thread link after Fluxer thread deletion:',
-                err
-            )
-        );
-        logger.info(`Fluxer thread ${threadId} deleted; thread link removed.`);
+        const link =
+            await this.linkService.getChannelLinkByFluxerLocation(threadId);
+        if (!link || link.fluxerThreadId !== threadId) return;
+        await this.linkProvisioner
+            .removeLink(link)
+            .catch((err) =>
+                logger.error(
+                    'Failed to remove link after Fluxer thread deletion:',
+                    err
+                )
+            );
+        this.bridgeCreated.delete(`fluxer:${threadId}`);
+        if (link.discordThreadId)
+            this.bridgeCreated.delete(`discord:${link.discordThreadId}`);
+        logger.info(`Fluxer thread ${threadId} deleted; link removed.`);
     }
 }

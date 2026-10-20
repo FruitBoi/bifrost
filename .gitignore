@@ -15,4 +15,4 @@ docs/.vitepress/cache
 personal.yml
 .github/workflows/docker-publish.yml
 personal2.yml
-fluxer-ca.crt
+fluxer-ca.crt.pnpm-store/

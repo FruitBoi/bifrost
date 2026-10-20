@@ -5,8 +5,7 @@ export interface MessageLinkRepository {
         guildLinkId: string,
         channelLinkId: string,
         discordMessageId: string,
-        fluxerMessageId: string,
-        threadLinkId?: string | null
+        fluxerMessageId: string
     ): Promise<void>;
 
     getMessageLinkById(id: string): Promise<MessageLink | null>;
@@ -24,8 +23,6 @@ export interface MessageLinkRepository {
     deleteByGuildLinkId(guildLinkId: string): Promise<void>;
 
     deleteByChannelLinkId(channelLinkId: string): Promise<void>;
-
-    deleteByThreadLinkId(threadLinkId: string): Promise<void>;
 
     getMessageLinksCount(): Promise<number>;
 }

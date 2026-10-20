@@ -5,10 +5,8 @@ import type {
     AutolinkPreviewResponse,
     AutolinkResponse,
     ChannelLinkSummary,
-    ChannelThreadsResponse,
     CreateChannelLinkBody,
     CreateGuildLinkBody,
-    CreateThreadLinkBody,
     GuildChannelsResponse,
     GuildsResponse,
     InviteLinkResponse,
@@ -132,55 +130,6 @@ export function useUpdateChannelLink(guildLinkId: string | undefined) {
             queryClient.invalidateQueries({
                 queryKey: ['guild-channels', guildLinkId],
             }),
-    });
-}
-
-export function useChannelThreads(
-    channelLinkId: string | undefined,
-    enabled: boolean
-) {
-    return useQuery({
-        queryKey: ['channel-threads', channelLinkId],
-        queryFn: () =>
-            apiFetch<ChannelThreadsResponse>(
-                `/channel-links/${channelLinkId}/threads`
-            ),
-        enabled: !!channelLinkId && enabled,
-    });
-}
-
-export function useCreateThreadLink(guildLinkId: string | undefined) {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: (body: CreateThreadLinkBody) =>
-            apiFetch<{ id: string }>('/thread-links', {
-                method: 'POST',
-                body: JSON.stringify(body),
-            }),
-        onSuccess: (_data, variables) => {
-            queryClient.invalidateQueries({
-                queryKey: ['guild-channels', guildLinkId],
-            });
-            queryClient.invalidateQueries({
-                queryKey: ['channel-threads', variables.channelLinkId],
-            });
-        },
-    });
-}
-
-export function useDeleteThreadLink(guildLinkId: string | undefined) {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: (threadLinkId: string) =>
-            apiFetch<void>(`/thread-links/${threadLinkId}`, {
-                method: 'DELETE',
-            }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({
-                queryKey: ['guild-channels', guildLinkId],
-            });
-            queryClient.invalidateQueries({ queryKey: ['channel-threads'] });
-        },
     });
 }
 

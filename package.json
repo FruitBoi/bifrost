@@ -9,7 +9,9 @@
         "lint": "eslint src",
         "lint:fix": "eslint src --fix",
         "format": "prettier --write src",
-        "format:check": "prettier --check src"
+        "format:check": "prettier --check src",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "keywords": [],
     "author": "",
@@ -49,6 +51,7 @@
         "prettier": "^3.8.1",
         "tsx": "^4.23.1",
         "typescript": "^5.9.3",
-        "typescript-eslint": "^8.56.1"
+        "typescript-eslint": "^8.56.1",
+        "vitest": "^5.0.5"
     }
 }

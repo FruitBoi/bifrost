@@ -19,9 +19,19 @@ ChannelLinkModel.init(
             allowNull: false,
         },
 
+        discordThreadId: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+
         fluxerChannelId: {
             type: DataTypes.STRING,
             allowNull: false,
+        },
+
+        fluxerThreadId: {
+            type: DataTypes.STRING,
+            allowNull: true,
         },
 
         discordWebhookId: {
@@ -61,8 +71,22 @@ ChannelLinkModel.init(
         createdAt: 'createdAt',
         updatedAt: false,
         indexes: [
-            { unique: true, fields: ['discordChannelId'] },
-            { unique: true, fields: ['fluxerChannelId'] },
+            // A channel may be linked once as a channel, and may additionally
+            // own any number of thread links.
+            {
+                unique: true,
+                fields: ['discordChannelId'],
+                where: { discordThreadId: null },
+            },
+            {
+                unique: true,
+                fields: ['fluxerChannelId'],
+                where: { fluxerThreadId: null },
+            },
+            { unique: true, fields: ['discordThreadId'] },
+            { unique: true, fields: ['fluxerThreadId'] },
+            { fields: ['discordChannelId'] },
+            { fields: ['fluxerChannelId'] },
             { fields: ['guildLinkId'] },
         ],
     }

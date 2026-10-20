@@ -5,6 +5,7 @@ import {
     PermissionsBitField,
 } from '@fluxerjs/core';
 import { LinkService } from '../../../services/LinkService';
+import { isChannelPairLink } from '../../../db/entities/ChannelLink';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { getFluxerCommandUsage } from '../../commandList';
 import { COMMAND_PREFIX } from '../../../utils/env';
@@ -60,10 +61,23 @@ export default class ThreadsFluxerCommandHandler extends FluxerCommandHandler {
             return;
         }
 
-        const context = await this.linkService
-            .resolveFluxerContext(message.channelId)
+        // Resolve the link of this channel, or of the parent channel when
+        // run inside a thread.
+        let channelLink = await this.linkService
+            .getChannelLinkByFluxerLocation(message.channelId)
             .catch(() => null);
-        if (!context) {
+        if (!channelLink || !isChannelPairLink(channelLink)) {
+            const channel =
+                message.channel ??
+                (await message.resolveChannel().catch(() => null));
+            if (channel?.isThread() && channel.parentId) {
+                const parentLink = await this.linkService
+                    .getChannelLinkByFluxerLocation(channel.parentId)
+                    .catch(() => null);
+                if (parentLink) channelLink = parentLink;
+            }
+        }
+        if (!channelLink) {
             await message.reply({
                 embeds: [
                     new EmbedBuilder()
@@ -77,7 +91,21 @@ export default class ThreadsFluxerCommandHandler extends FluxerCommandHandler {
             });
             return;
         }
-        const { channelLink } = context;
+        if (!isChannelPairLink(channelLink)) {
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            'Automatic thread bridging only applies to channel ↔ channel links. ' +
+                                'Run this command in a linked channel (or in a thread whose parent channel is linked).'
+                        )
+                        .setColor(EmbedColors.Error)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
 
         if (arg === undefined) {
             await message.reply({

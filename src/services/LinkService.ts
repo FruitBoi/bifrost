@@ -1,26 +1,21 @@
 import { MessageLinkRepository } from '../db/repositories/MessageLinkRepository';
-import { ChannelLinkRepository } from '../db/repositories/ChannelLinkRepository';
+import {
+    ChannelLinkRepository,
+    CreateChannelLinkData,
+} from '../db/repositories/ChannelLinkRepository';
 import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
-import { ThreadLinkRepository } from '../db/repositories/ThreadLinkRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
-import { ThreadLink } from '../db/entities/ThreadLink';
-
-/**
- * Where a message lives relative to the bridge: always a channel link, plus a
- * thread link when the message was posted inside a bridged thread.
- */
-export interface LinkContext {
-    channelLink: ChannelLink;
-    threadLink: ThreadLink | null;
-}
 
 export class LinkService {
     constructor(
         private guildRepo: GuildLinkRepository,
         private channelRepo: ChannelLinkRepository,
-        private messageRepo: MessageLinkRepository,
-        private threadRepo: ThreadLinkRepository
+        private messageRepo: MessageLinkRepository
     ) {}
+
+    // ---------------------------------------------------------------------
+    // Guild links
+    // ---------------------------------------------------------------------
 
     async getGuildLinkById(id: string) {
         return this.guildRepo.findById(id);
@@ -54,9 +49,12 @@ export class LinkService {
         return this.guildRepo.create(discordGuildId, fluxerGuildId);
     }
 
-    private async removeGuildLink(guildLinkId: string) {
+    /**
+     * Removes a guild link and every channel/thread/message link under it.
+     * Webhook cleanup is the caller's job (see LinkProvisioner.removeGuildLink).
+     */
+    async removeGuildLink(guildLinkId: string) {
         await this.messageRepo.deleteByGuildLinkId(guildLinkId);
-        await this.threadRepo.deleteByGuildLinkId(guildLinkId);
         await this.channelRepo.deleteByGuildLinkId(guildLinkId);
         await this.guildRepo.deleteById(guildLinkId);
     }
@@ -67,7 +65,6 @@ export class LinkService {
         if (!existingLink) {
             throw new Error('Guild not linked');
         }
-
         await this.removeGuildLink(existingLink.id);
     }
 
@@ -77,100 +74,63 @@ export class LinkService {
         if (!existingLink) {
             throw new Error('Guild not linked');
         }
-
         await this.removeGuildLink(existingLink.id);
     }
 
-    async createChannelLink({
-        guildLinkId,
-        discordChannelId,
-        fluxerChannelId,
-        discordWebhookId,
-        discordWebhookToken,
-        fluxerWebhookId,
-        fluxerWebhookToken,
-    }: {
-        guildLinkId: string;
-        discordChannelId: string;
-        fluxerChannelId: string;
-        discordWebhookId: string;
-        discordWebhookToken: string;
-        fluxerWebhookId: string;
-        fluxerWebhookToken: string;
-    }) {
-        const existingDiscordChannelLink =
-            await this.channelRepo.findByDiscordChannelId(discordChannelId);
-        if (existingDiscordChannelLink) {
-            throw new Error('Discord channel already linked');
-        }
+    // ---------------------------------------------------------------------
+    // Channel / thread links (one row per pair of locations)
+    // ---------------------------------------------------------------------
 
-        const existingFluxerChannelLink =
-            await this.channelRepo.findByFluxerChannelId(fluxerChannelId);
-        if (existingFluxerChannelLink) {
-            throw new Error('Fluxer channel already linked');
+    /**
+     * Persists a link. Prefer LinkProvisioner.createLink, which also takes
+     * care of webhooks; this only validates location uniqueness.
+     */
+    async createChannelLink(data: CreateChannelLinkData) {
+        const discordLocation = data.discordThreadId ?? data.discordChannelId;
+        const fluxerLocation = data.fluxerThreadId ?? data.fluxerChannelId;
+
+        if (await this.channelRepo.findByDiscordLocation(discordLocation)) {
+            throw new Error(
+                data.discordThreadId
+                    ? 'Discord thread already linked'
+                    : 'Discord channel already linked'
+            );
+        }
+        if (await this.channelRepo.findByFluxerLocation(fluxerLocation)) {
+            throw new Error(
+                data.fluxerThreadId
+                    ? 'Fluxer thread already linked'
+                    : 'Fluxer channel already linked'
+            );
         }
 
         return this.channelRepo.create({
-            guildLinkId,
-            discordChannelId,
-            fluxerChannelId,
-            discordWebhookId,
-            discordWebhookToken,
-            fluxerWebhookId,
-            fluxerWebhookToken,
+            ...data,
+            discordThreadId: data.discordThreadId ?? null,
+            fluxerThreadId: data.fluxerThreadId ?? null,
         });
     }
 
-    private async removeChannelLink(channelLink: ChannelLink) {
+    /**
+     * Removes a link row and its message links. Webhook cleanup is the
+     * caller's job (see LinkProvisioner.removeLink).
+     */
+    async removeChannelLink(channelLinkId: string): Promise<ChannelLink> {
+        const channelLink = await this.channelRepo.findById(channelLinkId);
+        if (!channelLink) {
+            throw new Error('Link not found');
+        }
         await this.messageRepo.deleteByChannelLinkId(channelLink.id);
-        await this.threadRepo.deleteByChannelLinkId(channelLink.id);
         await this.channelRepo.deleteById(channelLink.id);
-    }
-
-    async removeChannelLinkForDiscord(discordGuildId: string, linkId: string) {
-        const guildLink =
-            await this.guildRepo.findByDiscordGuildId(discordGuildId);
-        if (!guildLink) {
-            throw new Error('Guild not linked');
-        }
-
-        const channelLink = await this.channelRepo.findByGuildAndLinkId(
-            guildLink.id,
-            linkId
-        );
-
-        if (!channelLink) {
-            throw new Error('Link not found');
-        }
-
-        await this.removeChannelLink(channelLink);
-
-        return channelLink;
-    }
-
-    async removeChannelLinkForFluxer(fluxerGuildId: string, linkId: string) {
-        const guildLink =
-            await this.guildRepo.findByFluxerGuildId(fluxerGuildId);
-        if (!guildLink) {
-            throw new Error('Guild not linked');
-        }
-
-        const channelLink = await this.channelRepo.findByGuildAndLinkId(
-            guildLink.id,
-            linkId
-        );
-
-        if (!channelLink) {
-            throw new Error('Link not found');
-        }
-
-        await this.removeChannelLink(channelLink);
-
         return channelLink;
     }
 
     async setChannelAutoSyncThreads(channelLinkId: string, enabled: boolean) {
         return this.channelRepo.setAutoSyncThreads(channelLinkId, enabled);
+    }
+
+    async getChannelLinksForGuildLink(guildLinkId: string) {
+        return this.channelRepo.findAllByGuild(guildLinkId);
     }
 
     async getChannelLinksForDiscordGuild(discordGuildId: string) {
@@ -179,7 +139,6 @@ export class LinkService {
         if (!guildLink) {
             throw new Error('Guild not linked');
         }
-
         return this.channelRepo.findAllByGuild(guildLink.id);
     }
 
@@ -189,7 +148,6 @@ export class LinkService {
         if (!guildLink) {
             throw new Error('Guild not linked');
         }
-
         return this.channelRepo.findAllByGuild(guildLink.id);
     }
 
@@ -197,155 +155,36 @@ export class LinkService {
         return this.channelRepo.findById(id);
     }
 
-    async getChannelLinkByDiscordChannelId(discordChannelId: string) {
-        return this.channelRepo.findByDiscordChannelId(discordChannelId);
+    async getChannelLinkByGuildAndLinkId(guildLinkId: string, linkId: string) {
+        return this.channelRepo.findByGuildAndLinkId(guildLinkId, linkId);
     }
 
-    async getChannelLinkByFluxerChannelId(fluxerChannelId: string) {
-        return this.channelRepo.findByFluxerChannelId(fluxerChannelId);
+    /** The link whose Discord side is exactly this channel or thread ID. */
+    async getChannelLinkByDiscordLocation(locationId: string) {
+        return this.channelRepo.findByDiscordLocation(locationId);
     }
 
-    // ---------------------------------------------------------------------
-    // Thread links
-    // ---------------------------------------------------------------------
-
-    async getThreadLinkById(id: string) {
-        return this.threadRepo.findById(id);
+    /** The link whose Fluxer side is exactly this channel or thread ID. */
+    async getChannelLinkByFluxerLocation(locationId: string) {
+        return this.channelRepo.findByFluxerLocation(locationId);
     }
 
-    async getThreadLinkByDiscordThreadId(discordThreadId: string) {
-        return this.threadRepo.findByDiscordThreadId(discordThreadId);
+    /** Channel row plus thread rows whose Discord parent is this channel. */
+    async getChannelLinksForDiscordChannel(discordChannelId: string) {
+        return this.channelRepo.findAllByDiscordChannel(discordChannelId);
     }
 
-    async getThreadLinkByFluxerThreadId(fluxerThreadId: string) {
-        return this.threadRepo.findByFluxerThreadId(fluxerThreadId);
+    /** Channel row plus thread rows whose Fluxer parent is this channel. */
+    async getChannelLinksForFluxerChannel(fluxerChannelId: string) {
+        return this.channelRepo.findAllByFluxerChannel(fluxerChannelId);
     }
 
-    async getThreadLinksForChannelLink(channelLinkId: string) {
-        return this.threadRepo.findAllByChannelLink(channelLinkId);
+    async countLinksUsingDiscordWebhook(discordWebhookId: string) {
+        return this.channelRepo.countByDiscordWebhookId(discordWebhookId);
     }
 
-    async getThreadLinksForGuildLink(guildLinkId: string) {
-        return this.threadRepo.findAllByGuild(guildLinkId);
-    }
-
-    async createThreadLink({
-        channelLinkId,
-        discordThreadId,
-        fluxerThreadId,
-    }: {
-        channelLinkId: string;
-        discordThreadId: string;
-        fluxerThreadId: string;
-    }) {
-        const channelLink = await this.channelRepo.findById(channelLinkId);
-        if (!channelLink) {
-            throw new Error('Channel link not found');
-        }
-
-        const existingDiscord =
-            await this.threadRepo.findByDiscordThreadId(discordThreadId);
-        if (existingDiscord) {
-            throw new Error('Discord thread already linked');
-        }
-
-        const existingFluxer =
-            await this.threadRepo.findByFluxerThreadId(fluxerThreadId);
-        if (existingFluxer) {
-            throw new Error('Fluxer thread already linked');
-        }
-
-        return this.threadRepo.create({
-            guildLinkId: channelLink.guildLinkId,
-            channelLinkId: channelLink.id,
-            discordThreadId,
-            fluxerThreadId,
-        });
-    }
-
-    async removeThreadLink(threadLinkId: string) {
-        const threadLink = await this.threadRepo.findById(threadLinkId);
-        if (!threadLink) {
-            throw new Error('Thread link not found');
-        }
-
-        await this.messageRepo.deleteByThreadLinkId(threadLink.id);
-        await this.threadRepo.deleteById(threadLink.id);
-
-        return threadLink;
-    }
-
-    /**
-     * Resolves the bridge context for a Discord channel ID, which may be a
-     * linked channel or a linked thread. Returns null when nothing is bridged.
-     */
-    async resolveDiscordContext(
-        discordChannelId: string
-    ): Promise<LinkContext | null> {
-        const channelLink =
-            await this.channelRepo.findByDiscordChannelId(discordChannelId);
-        if (channelLink) return { channelLink, threadLink: null };
-
-        const threadLink =
-            await this.threadRepo.findByDiscordThreadId(discordChannelId);
-        if (!threadLink) return null;
-
-        const parentLink = await this.channelRepo.findById(
-            threadLink.channelLinkId
-        );
-        if (!parentLink) return null;
-
-        return { channelLink: parentLink, threadLink };
-    }
-
-    /**
-     * Resolves the bridge context for a Fluxer channel ID, which may be a
-     * linked channel or a linked thread. Returns null when nothing is bridged.
-     */
-    async resolveFluxerContext(
-        fluxerChannelId: string
-    ): Promise<LinkContext | null> {
-        const channelLink =
-            await this.channelRepo.findByFluxerChannelId(fluxerChannelId);
-        if (channelLink) return { channelLink, threadLink: null };
-
-        const threadLink =
-            await this.threadRepo.findByFluxerThreadId(fluxerChannelId);
-        if (!threadLink) return null;
-
-        const parentLink = await this.channelRepo.findById(
-            threadLink.channelLinkId
-        );
-        if (!parentLink) return null;
-
-        return { channelLink: parentLink, threadLink };
-    }
-
-    /**
-     * Resolves the context for an existing message link (channel link plus
-     * the thread link if the message is inside a bridged thread).
-     */
-    async resolveContextForMessageLink(messageLink: {
-        channelLinkId: string;
-        threadLinkId: string | null;
-    }): Promise<LinkContext | null> {
-        const channelLink = await this.channelRepo.findById(
-            messageLink.channelLinkId
-        );
-        if (!channelLink) return null;
-
-        if (!messageLink.threadLinkId) {
-            return { channelLink, threadLink: null };
-        }
-
-        const threadLink = await this.threadRepo.findById(
-            messageLink.threadLinkId
-        );
-        // A message link pointing at a removed thread link is stale: treat the
-        // whole message as unbridged rather than posting it into the parent.
-        if (!threadLink) return null;
-
-        return { channelLink, threadLink };
+    async countLinksUsingFluxerWebhook(fluxerWebhookId: string) {
+        return this.channelRepo.countByFluxerWebhookId(fluxerWebhookId);
     }
 
     // ---------------------------------------------------------------------
@@ -369,20 +208,17 @@ export class LinkService {
         fluxerMessageId,
         guildLinkId,
         channelLinkId,
-        threadLinkId = null,
     }: {
         discordMessageId: string;
         fluxerMessageId: string;
         guildLinkId: string;
         channelLinkId: string;
-        threadLinkId?: string | null;
     }) {
         return this.messageRepo.createMessageLink(
             guildLinkId,
             channelLinkId,
             discordMessageId,
-            fluxerMessageId,
-            threadLinkId
+            fluxerMessageId
         );
     }
 

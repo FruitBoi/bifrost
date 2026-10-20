@@ -1,22 +1,20 @@
 import { nanoid } from 'nanoid';
+import { Op } from 'sequelize';
 import { ChannelLink } from '../entities/ChannelLink';
 import { ChannelLinkModel } from '../models';
-import { ChannelLinkRepository } from '../repositories/ChannelLinkRepository';
+import {
+    ChannelLinkRepository,
+    CreateChannelLinkData,
+} from '../repositories/ChannelLinkRepository';
 
 export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
-    async create(data: {
-        guildLinkId: string;
-        discordChannelId: string;
-        fluxerChannelId: string;
-        discordWebhookId: string;
-        discordWebhookToken: string;
-        fluxerWebhookId: string;
-        fluxerWebhookToken: string;
-    }): Promise<ChannelLink> {
+    async create(data: CreateChannelLinkData): Promise<ChannelLink> {
         const model = await ChannelLinkModel.create({
             id: crypto.randomUUID(),
             linkId: nanoid(10),
             ...data,
+            discordThreadId: data.discordThreadId ?? null,
+            fluxerThreadId: data.fluxerThreadId ?? null,
         });
 
         if (!model) {
@@ -42,6 +40,7 @@ export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
     async findAllByGuild(guildLinkId: string): Promise<ChannelLink[]> {
         const models = await ChannelLinkModel.findAll({
             where: { guildLinkId },
+            order: [['createdAt', 'ASC']],
         });
 
         return models.map((m) => m.toJSON() as ChannelLink);
@@ -57,11 +56,16 @@ export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
         return model.toJSON() as ChannelLink;
     }
 
-    async findByDiscordChannelId(
-        discordChannelId: string
+    async findByDiscordLocation(
+        locationId: string
     ): Promise<ChannelLink | null> {
         const model = await ChannelLinkModel.findOne({
-            where: { discordChannelId },
+            where: {
+                [Op.or]: [
+                    { discordThreadId: locationId },
+                    { discordChannelId: locationId, discordThreadId: null },
+                ],
+            },
         });
 
         if (!model) return null;
@@ -69,16 +73,51 @@ export class SequelizeChannelLinkRepository implements ChannelLinkRepository {
         return model.toJSON() as ChannelLink;
     }
 
-    async findByFluxerChannelId(
-        fluxerChannelId: string
+    async findByFluxerLocation(
+        locationId: string
     ): Promise<ChannelLink | null> {
         const model = await ChannelLinkModel.findOne({
-            where: { fluxerChannelId },
+            where: {
+                [Op.or]: [
+                    { fluxerThreadId: locationId },
+                    { fluxerChannelId: locationId, fluxerThreadId: null },
+                ],
+            },
         });
 
         if (!model) return null;
 
         return model.toJSON() as ChannelLink;
+    }
+
+    async findAllByDiscordChannel(
+        discordChannelId: string
+    ): Promise<ChannelLink[]> {
+        const models = await ChannelLinkModel.findAll({
+            where: { discordChannelId },
+            order: [['createdAt', 'ASC']],
+        });
+
+        return models.map((m) => m.toJSON() as ChannelLink);
+    }
+
+    async findAllByFluxerChannel(
+        fluxerChannelId: string
+    ): Promise<ChannelLink[]> {
+        const models = await ChannelLinkModel.findAll({
+            where: { fluxerChannelId },
+            order: [['createdAt', 'ASC']],
+        });
+
+        return models.map((m) => m.toJSON() as ChannelLink);
+    }
+
+    async countByDiscordWebhookId(discordWebhookId: string): Promise<number> {
+        return await ChannelLinkModel.count({ where: { discordWebhookId } });
+    }
+
+    async countByFluxerWebhookId(fluxerWebhookId: string): Promise<number> {
+        return await ChannelLinkModel.count({ where: { fluxerWebhookId } });
     }
 
     async setAutoSyncThreads(

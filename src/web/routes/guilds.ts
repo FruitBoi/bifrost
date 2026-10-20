@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import type { Client as DiscordClient } from 'discord.js';
 import { LinkService } from '../../services/LinkService';
-import { WebhookService } from '../../services/WebhookService';
-import logger from '../../utils/logging/logger';
+import LinkProvisioner from '../../services/LinkProvisioner';
 import type { FluxerClientRef } from '../clientRefs';
 import {
     DiscordManageGuild,
@@ -20,12 +19,12 @@ import type {
 
 export function createGuildsRouter({
     linkService,
-    webhookService,
+    linkProvisioner,
     discordClient,
     fluxerClientRef,
 }: {
     linkService: LinkService;
-    webhookService: WebhookService;
+    linkProvisioner: LinkProvisioner;
     discordClient: DiscordClient;
     fluxerClientRef: FluxerClientRef;
 }): Router {
@@ -184,34 +183,7 @@ export function createGuildsRouter({
         }
 
         try {
-            const channelLinks = await linkService
-                .getChannelLinksForDiscordGuild(link.discordGuildId)
-                .catch(() => []);
-            for (const channelLink of channelLinks) {
-                await webhookService
-                    .deleteDiscordWebhook(
-                        channelLink.discordWebhookId,
-                        channelLink.discordWebhookToken
-                    )
-                    .catch((err) =>
-                        logger.error(
-                            'Failed to delete Discord webhook during guild unlink:',
-                            err
-                        )
-                    );
-                await webhookService
-                    .deleteFluxerWebhook(
-                        channelLink.fluxerWebhookId,
-                        channelLink.fluxerWebhookToken
-                    )
-                    .catch((err) =>
-                        logger.error(
-                            'Failed to delete Fluxer webhook during guild unlink:',
-                            err
-                        )
-                    );
-            }
-            await linkService.removeGuildLinkFromDiscord(link.discordGuildId);
+            await linkProvisioner.removeGuildLink(link);
             res.status(204).end();
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });

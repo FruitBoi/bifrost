@@ -5,7 +5,11 @@ import {
     PermissionFlagsBits,
 } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
-import { WebhookService } from '../../../services/WebhookService';
+import LinkProvisioner from '../../../services/LinkProvisioner';
+import {
+    discordLocationId,
+    fluxerLocationId,
+} from '../../../db/entities/ChannelLink';
 import FluxerEntityResolver from '../../../services/entityResolver/FluxerEntityResolver';
 import { matchChannels, ChannelInfo } from '../../../utils/channelMatcher';
 import DiscordCommandHandler, {
@@ -19,7 +23,7 @@ export default class AutolinkDiscordCommandHandler extends DiscordCommandHandler
     constructor(
         client: Client,
         private readonly linkService: LinkService,
-        private readonly webhookService: WebhookService,
+        private readonly linkProvisioner: LinkProvisioner,
         private readonly fluxerEntityResolver: FluxerEntityResolver
     ) {
         super(client);
@@ -69,11 +73,12 @@ export default class AutolinkDiscordCommandHandler extends DiscordCommandHandler
             await this.linkService.getChannelLinksForDiscordGuild(
                 message.guildId!
             );
+        // A thread link must not mark its parent channel as linked.
         const linkedDiscordIds = new Set(
-            existingLinks.map((l) => l.discordChannelId)
+            existingLinks.map((l) => discordLocationId(l))
         );
         const linkedFluxerIds = new Set(
-            existingLinks.map((l) => l.fluxerChannelId)
+            existingLinks.map((l) => fluxerLocationId(l))
         );
 
         // Fetch all Discord text channels in this guild
@@ -177,24 +182,10 @@ export default class AutolinkDiscordCommandHandler extends DiscordCommandHandler
 
         for (const proposal of proposals) {
             try {
-                const discordWebhook =
-                    await this.webhookService.createDiscordWebhook(
-                        proposal.discord.id,
-                        `Fluxer Bridge Webhook for channel ${proposal.discord.id}`
-                    );
-                const fluxerWebhook =
-                    await this.webhookService.createFluxerWebhook(
-                        proposal.fluxer.id,
-                        `Discord Bridge Webhook for channel ${proposal.fluxer.id}`
-                    );
-                await this.linkService.createChannelLink({
-                    guildLinkId: guildLink.id,
-                    discordChannelId: proposal.discord.id,
-                    fluxerChannelId: proposal.fluxer.id,
-                    discordWebhookId: discordWebhook.id,
-                    discordWebhookToken: discordWebhook.token,
-                    fluxerWebhookId: fluxerWebhook.id,
-                    fluxerWebhookToken: fluxerWebhook.token,
+                await this.linkProvisioner.createLink({
+                    guildLink,
+                    discord: { channelId: proposal.discord.id, threadId: null },
+                    fluxer: { channelId: proposal.fluxer.id, threadId: null },
                 });
                 successCount++;
             } catch (err: unknown) {

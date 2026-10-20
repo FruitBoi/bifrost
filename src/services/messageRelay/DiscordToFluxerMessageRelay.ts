@@ -10,7 +10,8 @@ import { formatJoinMessage } from '../../utils/formatJoinMessage';
 import MessageQueueService, { toSerializable } from '../MessageQueueService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import FluxerEntityResolver from '../entityResolver/FluxerEntityResolver';
-import { LinkContext, LinkService } from '../LinkService';
+import { ChannelLink } from '../../db/entities/ChannelLink';
+import { LinkService } from '../LinkService';
 import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
 import ThreadSyncService from '../threadSync/ThreadSyncService';
@@ -58,18 +59,19 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         this.threadSyncService = threadSyncService;
     }
 
-    private async resolveContext(
+    private async resolveLink(
         message: OmitPartialGroupDMChannel<Message<boolean>>
-    ): Promise<LinkContext | null> {
+    ): Promise<ChannelLink | null> {
+        const link =
+            await this.getLinkService().getChannelLinkByDiscordLocation(
+                message.channelId
+            );
+        if (link) return link;
+
         if (message.channel.isThread()) {
             return this.threadSyncService.resolveDiscordThread(message.channel);
         }
-
-        const channelLink =
-            await this.getLinkService().getChannelLinkByDiscordChannelId(
-                message.channelId
-            );
-        return channelLink ? { channelLink, threadLink: null } : null;
+        return null;
     }
 
     public async relayMessage(
@@ -80,9 +82,8 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
 
         if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
 
-        const context = await this.resolveContext(message);
-        if (!context) return;
-        const { channelLink: linkedChannel, threadLink } = context;
+        const linkedChannel = await this.resolveLink(message);
+        if (!linkedChannel) return;
 
         // Our own webhook echoing a bridged message back into the channel/thread.
         if (
@@ -96,7 +97,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         );
         if (!guildLink) return;
 
-        const fluxerThreadId = threadLink?.fluxerThreadId ?? null;
+        const fluxerThreadId = linkedChannel.fluxerThreadId;
 
         // Build payload before attempting send so it can be queued on failure
         let msg: WebhookMessageData;
@@ -124,8 +125,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg),
-                threadLink?.id ?? null
+                toSerializable(msg)
             );
             return;
         }
@@ -149,7 +149,6 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                     fluxerMessageId: webhookMessageId,
                     guildLinkId: linkedChannel.guildLinkId,
                     channelLinkId: linkedChannel.id,
-                    threadLinkId: threadLink?.id ?? null,
                 });
             }
             this.metricsService?.messagesRelayed.inc({
@@ -165,8 +164,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg),
-                threadLink?.id ?? null
+                toSerializable(msg)
             );
         }
     }

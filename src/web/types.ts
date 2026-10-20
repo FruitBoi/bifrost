@@ -41,40 +41,38 @@ export interface UnlinkedChannelSummary extends ChannelSummary {
     categoryPosition: number | null;
 }
 
-export interface ThreadLinkSummary {
-    id: string;
-    discordThread: ChannelSummary;
-    fluxerThread: ChannelSummary;
+/** An active thread that is not linked yet, with its parent channel. */
+export interface UnlinkedThreadSummary extends ChannelSummary {
+    parentId: string;
+    parentName: string;
 }
 
+/**
+ * A link between two locations. Each side is a channel, or a thread inside
+ * that channel when the matching `*Thread` field is set.
+ */
 export interface ChannelLinkSummary {
     id: string;
+    /** Webhook-owning channel (the thread's parent when `discordThread` is set). */
     discordChannel: ChannelSummary;
+    /** Webhook-owning channel (the thread's parent when `fluxerThread` is set). */
     fluxerChannel: ChannelSummary;
-    /** When true, new threads in either channel are bridged automatically. */
+    discordThread: ChannelSummary | null;
+    fluxerThread: ChannelSummary | null;
+    /** Only meaningful for channel↔channel links. */
     autoSyncThreads: boolean;
-    threads: ThreadLinkSummary[];
 }
 
 export interface UpdateChannelLinkBody {
     autoSyncThreads: boolean;
 }
 
-export interface ChannelThreadsResponse {
-    unlinkedDiscordThreads: ChannelSummary[];
-    unlinkedFluxerThreads: ChannelSummary[];
-}
-
-export interface CreateThreadLinkBody {
-    channelLinkId: string;
-    discordThreadId: string;
-    fluxerThreadId: string;
-}
-
 export interface GuildChannelsResponse {
     linked: ChannelLinkSummary[];
     unlinkedDiscordChannels: UnlinkedChannelSummary[];
     unlinkedFluxerChannels: UnlinkedChannelSummary[];
+    unlinkedDiscordThreads: UnlinkedThreadSummary[];
+    unlinkedFluxerThreads: UnlinkedThreadSummary[];
 }
 
 export interface CreateGuildLinkBody {
@@ -84,8 +82,10 @@ export interface CreateGuildLinkBody {
 
 export interface CreateChannelLinkBody {
     guildLinkId: string;
-    discordChannelId: string;
-    fluxerChannelId: string;
+    /** A Discord text channel ID or a thread ID. */
+    discordTargetId: string;
+    /** A Fluxer text channel ID or a thread ID. */
+    fluxerTargetId: string;
 }
 
 export interface InviteLinkResponse {

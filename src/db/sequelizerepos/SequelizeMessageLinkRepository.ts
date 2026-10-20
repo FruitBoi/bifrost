@@ -8,14 +8,12 @@ export class SequelizeMessageLinkRepository implements MessageLinkRepository {
         guildLinkId: string,
         channelLinkId: string,
         discordMessageId: string,
-        fluxerMessageId: string,
-        threadLinkId: string | null = null
+        fluxerMessageId: string
     ): Promise<void> {
         await MessageLinkModel.create({
             id: randomUUID(),
             guildLinkId,
             channelLinkId,
-            threadLinkId,
             discordMessageId,
             fluxerMessageId,
         });
@@ -68,12 +66,6 @@ export class SequelizeMessageLinkRepository implements MessageLinkRepository {
     async deleteByChannelLinkId(channelLinkId: string): Promise<void> {
         await MessageLinkModel.destroy({
             where: { channelLinkId },
-        });
-    }
-
-    async deleteByThreadLinkId(threadLinkId: string): Promise<void> {
-        await MessageLinkModel.destroy({
-            where: { threadLinkId },
         });
     }
 

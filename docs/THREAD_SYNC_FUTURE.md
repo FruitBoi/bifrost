@@ -2,15 +2,17 @@
 
 Bifröst currently bridges threads in a deliberately narrow way:
 
-- **What is synced:** messages inside a bridged thread pair (send, edit, delete) and the thread name.
+- **What is synced:** messages inside a link (send, edit, delete) for any combination of channel and thread sides, and the thread name when both sides are threads.
 - **What is not synced:** everything else. This document lists the features that could be added later, with the reasoning for leaving them out so far and the main thing to watch when implementing them.
 
 ## Current limitations
 
 - Only threads whose parent is a **plain text channel** are bridged. Threads under forum, media and announcement channels are ignored.
 - Counterpart threads created by auto-sync are created **by the bot**, so their owner on the other platform is the bot, not the user who started the original thread.
-- A thread is linked at most once; there is no re-linking after a thread link is removed other than linking it again manually.
-- Thread links are not shown in the stats command, metrics or the admin dashboard counters.
+- Auto-sync only exists on channel↔channel links and only produces thread↔thread links under them. Channel↔thread links are manual only.
+- A channel and every thread link under it share **one webhook per platform** on the (parent) channel. That webhook is deleted together with the last link that uses it, so nothing is left behind, but it also means all bridged traffic for a channel and its threads goes through a single webhook's rate limit.
+- A location (channel or thread) is linked at most once; after a link is removed it has to be linked again manually.
+- Thread links are not distinguished in the stats command, metrics or the admin dashboard counters (they count as channel links).
 
 ## Candidate features
 
@@ -19,9 +21,14 @@ Bifröst currently bridges threads in a deliberately narrow way:
 *Rationale:* When a thread is archived on one side, the other side stays active and keeps accepting messages that will then unarchive the first side again (both platforms unarchive a thread on new activity).
 *Consideration:* Thread update events fire for many unrelated changes, so the handler must diff `archived` and `locked` explicitly and compare against the counterpart's current state to avoid ping-pong, the same way renames are de-duplicated by comparing names today. Locked threads require Manage Threads to unarchive.
 
+### Rename mirroring for channel↔thread links
+
+*Rationale:* Names are only mirrored when both sides are threads. For a channel↔thread link, a thread rename could be mirrored onto the channel name (or the channel rename onto the thread).
+*Consideration:* Channel names have stricter rules than thread names (lowercase, no spaces on Discord) and renaming a channel needs Manage Channels, which the bot does not request today. Deliberately left out until there is a clear use case.
+
 ### Mirror thread deletion
 
-*Rationale:* Today a deleted thread only drops its link and leaves an orphaned counterpart.
+*Rationale:* Today a deleted thread only drops its link (and the shared webhook if unused) and leaves an orphaned counterpart.
 *Consideration:* Deletion is destructive and irreversible; it should probably be opt-in per channel link (like the auto-sync toggle) and must distinguish a deleted thread from a thread the bot merely lost access to.
 
 ### Auto-archive duration and slowmode updates
@@ -72,4 +79,4 @@ Bifröst currently bridges threads in a deliberately narrow way:
 ### Stats and metrics for thread links
 
 *Rationale:* `stats`, the Prometheus metrics and the admin dashboard report channel and message link counts but not thread links.
-*Consideration:* `ThreadLinkRepository.getThreadLinksCount()` already exists; wiring it into `DbStatsService`, the stats command handlers, `MetricsService` and `AdminStatsResponse` is straightforward. A per-direction counter for thread creations would help spot loops.
+*Consideration:* Thread links are rows in `channel_links` with a thread ID set, so a count filtered on `discordThreadId IS NOT NULL OR fluxerThreadId IS NOT NULL` is all that is needed; wiring it into `DbStatsService`, the stats command handlers, `MetricsService` and `AdminStatsResponse` is straightforward. A per-direction counter for thread creations would help spot loops.

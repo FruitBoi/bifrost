@@ -5,7 +5,12 @@ import {
     PermissionsBitField,
 } from '@fluxerjs/core';
 import { LinkService } from '../../../services/LinkService';
-import { ChannelLink } from '../../../db/entities/ChannelLink';
+import {
+    ChannelLink,
+    discordLocationId,
+    fluxerLocationId,
+    isChannelPairLink,
+} from '../../../db/entities/ChannelLink';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import DiscordEntityResolver from '../../../services/entityResolver/DiscordEntityResolver';
 import logger from '../../../utils/logging/logger';
@@ -21,27 +26,25 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
         super(client);
     }
 
-    private async buildThreadLines(
+    private async discordSideLabel(
         link: ChannelLink,
         discordGuildId: string
     ): Promise<string> {
-        const threadLinks = await this.linkService
-            .getThreadLinksForChannelLink(link.id)
-            .catch(() => []);
-        if (threadLinks.length === 0) return '';
-
-        const lines = await Promise.all(
-            threadLinks.map(async (threadLink) => {
-                const discordThread = await this.discordEntityResolver
-                    .fetchThread(threadLink.discordThreadId)
-                    .catch(() => null);
-                const discordName =
-                    discordThread?.name ?? threadLink.discordThreadId;
-                const discordUrl = `https://discord.com/channels/${discordGuildId}/${threadLink.discordThreadId}`;
-                return `    ↳ <#${threadLink.fluxerThreadId}> ←→ [${discordName}](${discordUrl})\n      └ \`${threadLink.fluxerThreadId}\` · \`${threadLink.discordThreadId}\``;
-            })
-        );
-        return '\n' + lines.join('\n');
+        const locationId = discordLocationId(link);
+        const url = `https://discord.com/channels/${discordGuildId}/${locationId}`;
+        if (link.discordThreadId) {
+            const thread = await this.discordEntityResolver
+                .fetchThread(link.discordThreadId)
+                .catch(() => null);
+            return `🧵 [${thread?.name ?? link.discordThreadId}](${url})`;
+        }
+        const channel = await this.discordEntityResolver
+            .fetchChannel(discordGuildId, link.discordChannelId)
+            .catch(() => null);
+        const name =
+            (channel as { name?: string } | null)?.name ??
+            link.discordChannelId;
+        return `[#${name}](${url})`;
     }
 
     private async buildChannelLines(
@@ -51,22 +54,18 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
     ): Promise<string[]> {
         return Promise.all(
             channelLinks.map(async (link) => {
-                const discordChannel = await this.discordEntityResolver
-                    .fetchChannel(discordGuildId, link.discordChannelId)
-                    .catch(() => null);
-                const discordName =
-                    (discordChannel as { name?: string } | null)?.name ??
-                    link.discordChannelId;
-                const discordUrl = `https://discord.com/channels/${discordGuildId}/${link.discordChannelId}`;
-                const suffix = showLinkId ? ` | \`${link.linkId}\`` : '';
-                const autoThreads = link.autoSyncThreads
-                    ? ' · 🧵 auto-threads'
-                    : '';
-                const threadLines = await this.buildThreadLines(
+                const discordLabel = await this.discordSideLabel(
                     link,
                     discordGuildId
                 );
-                return `<#${link.fluxerChannelId}> ←→ [#${discordName}](${discordUrl})${suffix}${autoThreads}\n  └ \`${link.fluxerChannelId}\` · \`${link.discordChannelId}\`${threadLines}`;
+                const fluxerIcon = link.fluxerThreadId ? '🧵 ' : '';
+                const suffix = showLinkId ? ` | \`${link.linkId}\`` : '';
+                const autoThreads =
+                    isChannelPairLink(link) && link.autoSyncThreads
+                        ? ' · 🧵 auto-threads'
+                        : '';
+                // Fluxer on left, Discord on right (viewing from Fluxer)
+                return `${fluxerIcon}<#${fluxerLocationId(link)}> ←→ ${discordLabel}${suffix}${autoThreads}\n  └ \`${fluxerLocationId(link)}\` · \`${discordLocationId(link)}\``;
             })
         );
     }

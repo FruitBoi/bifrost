@@ -28,6 +28,7 @@ import {
     FLUXER_INVITE_URL,
 } from './utils/env';
 import { LinkService } from './services/LinkService';
+import { discordLocationId } from './db/entities/ChannelLink';
 import LinkFluxerCommandHandler from './commands/fluxer/handlers/LinkFluxerCommandHandler';
 import UnlinkFluxerCommandHandler from './commands/fluxer/handlers/UnlinkFluxerCommandHandler';
 import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerCommandHandler';
@@ -47,9 +48,11 @@ import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
+import LinkProvisioner from './services/LinkProvisioner';
 
 const startFluxerClient = async ({
     linkService,
+    linkProvisioner,
     webhookService,
     healthCheckService,
     discordEntityResolver,
@@ -62,6 +65,7 @@ const startFluxerClient = async ({
     dbStatsService,
 }: {
     linkService: LinkService;
+    linkProvisioner: LinkProvisioner;
     webhookService: WebhookService;
     healthCheckService: HealthCheckService;
     discordEntityResolver: DiscordEntityResolver;
@@ -136,19 +140,13 @@ const startFluxerClient = async ({
         new LinkFluxerCommandHandler(
             client,
             linkService,
-            webhookService,
-            discordEntityResolver,
-            threadSyncService
+            linkProvisioner,
+            discordEntityResolver
         )
     );
     commandRegistry.registerCommand(
         'unlink',
-        new UnlinkFluxerCommandHandler(
-            client,
-            linkService,
-            webhookService,
-            threadSyncService
-        )
+        new UnlinkFluxerCommandHandler(client, linkService, linkProvisioner)
     );
     commandRegistry.registerCommand(
         'list',
@@ -163,7 +161,7 @@ const startFluxerClient = async ({
         new AutolinkFluxerCommandHandler(
             client,
             linkService,
-            webhookService,
+            linkProvisioner,
             discordEntityResolver
         )
     );
@@ -216,10 +214,10 @@ const startFluxerClient = async ({
             logger.error('Error deleting message link from database:', error);
         }
 
-        const context =
-            await linkService.resolveContextForMessageLink(messageLink);
-        if (!context) return;
-        const { channelLink, threadLink } = context;
+        const channelLink = await linkService.getChannelLinkById(
+            messageLink.channelLinkId
+        );
+        if (!channelLink) return;
 
         const guildLink = await linkService.getGuildLinkById(
             channelLink.guildLinkId
@@ -229,7 +227,7 @@ const startFluxerClient = async ({
         const msg = await discordEntityResolver
             .fetchMessage(
                 guildLink.discordGuildId,
-                threadLink?.discordThreadId ?? channelLink.discordChannelId,
+                discordLocationId(channelLink),
                 messageLink.discordMessageId
             )
             .catch(() => null);
@@ -267,10 +265,10 @@ const startFluxerClient = async ({
         }
         if (newMessage.webhookId) return;
 
-        const context =
-            await linkService.resolveContextForMessageLink(linkedMessage);
-        if (!context) return;
-        const { channelLink: linkedChannel, threadLink } = context;
+        const linkedChannel = await linkService.getChannelLinkById(
+            linkedMessage.channelLinkId
+        );
+        if (!linkedChannel) return;
 
         const guildLink = await linkService.getGuildLinkById(
             linkedChannel.guildLinkId
@@ -301,7 +299,7 @@ const startFluxerClient = async ({
                 webhook,
                 linkedMessage.discordMessageId,
                 newMsg,
-                threadLink?.discordThreadId ?? null
+                linkedChannel.discordThreadId
             );
         } catch (error) {
             logger.error('Error editing message via Discord webhook:', error);
@@ -312,14 +310,10 @@ const startFluxerClient = async ({
         if (message.author.id === client.user?.id) return;
 
         if (message.guildId && message.webhookId) {
-            const context = await linkService.resolveFluxerContext(
+            const link = await linkService.getChannelLinkByFluxerLocation(
                 message.channelId
             );
-            if (
-                context &&
-                context.channelLink.fluxerWebhookId === message.webhookId
-            )
-                return;
+            if (link && link.fluxerWebhookId === message.webhookId) return;
         }
 
         if (isCommandString(message.content, COMMAND_PREFIX)) {

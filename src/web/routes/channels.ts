@@ -4,11 +4,15 @@ import {
     TextChannel as DiscordTextChannel,
 } from 'discord.js';
 import type { Client as DiscordClient } from 'discord.js';
-import { ChannelLink } from '../../db/entities/ChannelLink';
+import {
+    ChannelLink,
+    discordLocationId,
+    fluxerLocationId,
+    isChannelPairLink,
+} from '../../db/entities/ChannelLink';
 import { GuildLink } from '../../db/entities/GuildLink';
 import { LinkService } from '../../services/LinkService';
-import { WebhookService } from '../../services/WebhookService';
-import ThreadSyncService from '../../services/threadSync/ThreadSyncService';
+import LinkProvisioner from '../../services/LinkProvisioner';
 import { matchChannels } from '../../utils/channelMatcher';
 import logger from '../../utils/logging/logger';
 import type { FluxerClientRef } from '../clientRefs';
@@ -24,26 +28,22 @@ import type {
     AutolinkResultItem,
     ChannelLinkSummary,
     ChannelSummary,
-    ChannelThreadsResponse,
     CreateChannelLinkBody,
-    CreateThreadLinkBody,
     GuildChannelsResponse,
-    ThreadLinkSummary,
     UnlinkedChannelSummary,
+    UnlinkedThreadSummary,
     UpdateChannelLinkBody,
 } from '../types';
 import { ChannelType as FluxerChannelType } from '@fluxerjs/core';
 
 export function createChannelsRouter({
     linkService,
-    webhookService,
-    threadSyncService,
+    linkProvisioner,
     discordClient,
     fluxerClientRef,
 }: {
     linkService: LinkService;
-    webhookService: WebhookService;
-    threadSyncService: ThreadSyncService;
+    linkProvisioner: LinkProvisioner;
     discordClient: DiscordClient;
     fluxerClientRef: FluxerClientRef;
 }): Router {
@@ -73,26 +73,6 @@ export function createChannelsRouter({
             // fall through to id
         }
         return threadId;
-    }
-
-    async function buildThreadSummaries(
-        channelLinkId: string
-    ): Promise<ThreadLinkSummary[]> {
-        const threadLinks =
-            await linkService.getThreadLinksForChannelLink(channelLinkId);
-        return Promise.all(
-            threadLinks.map(async (t) => {
-                const [discordName, fluxerName] = await Promise.all([
-                    discordThreadName(t.discordThreadId),
-                    fluxerThreadName(t.fluxerThreadId),
-                ]);
-                return {
-                    id: t.id,
-                    discordThread: { id: t.discordThreadId, name: discordName },
-                    fluxerThread: { id: t.fluxerThreadId, name: fluxerName },
-                };
-            })
-        );
     }
 
     /**
@@ -151,8 +131,8 @@ export function createChannelsRouter({
     }
 
     async function getChannelState(link: GuildLink) {
-        const channelLinks = await linkService.getChannelLinksForDiscordGuild(
-            link.discordGuildId
+        const channelLinks = await linkService.getChannelLinksForGuildLink(
+            link.id
         );
 
         const discordGuild = discordClient.guilds.cache.get(
@@ -223,22 +203,71 @@ export function createChannelsRouter({
                   })
             : [];
 
-        const linkedDiscordIds = new Set(
-            channelLinks.map((l) => l.discordChannelId)
+        const discordChannelNames = new Map(
+            discordChannels.map((c) => [c.id, c.name])
         );
-        const linkedFluxerIds = new Set(
-            channelLinks.map((l) => l.fluxerChannelId)
+        const fluxerChannelNames = new Map(
+            fluxerChannels.map((c) => [c.id, c.name])
         );
+
+        let discordThreads: UnlinkedThreadSummary[] = [];
+        if (discordGuild) {
+            try {
+                const active = await discordGuild.channels.fetchActiveThreads();
+                discordThreads = [...active.threads.values()]
+                    .filter(
+                        (t) =>
+                            !!t.parentId && discordChannelNames.has(t.parentId)
+                    )
+                    .map((t) => ({
+                        id: t.id,
+                        name: t.name,
+                        parentId: t.parentId!,
+                        parentName: discordChannelNames.get(t.parentId!)!,
+                    }));
+            } catch (err) {
+                logger.warn('Could not list active Discord threads:', err);
+            }
+        }
+
+        let fluxerThreads: UnlinkedThreadSummary[] = [];
+        if (fluxerGuild) {
+            try {
+                const active = await fluxerGuild.fetchActiveThreads();
+                fluxerThreads = active.threads
+                    .filter(
+                        (t) =>
+                            !!t.parentId && fluxerChannelNames.has(t.parentId)
+                    )
+                    .map((t) => ({
+                        id: t.id,
+                        name: t.name ?? t.id,
+                        parentId: t.parentId!,
+                        parentName: fluxerChannelNames.get(t.parentId!)!,
+                    }));
+            } catch (err) {
+                logger.warn('Could not list active Fluxer threads:', err);
+            }
+        }
+
+        const linkedDiscordIds = new Set(channelLinks.map(discordLocationId));
+        const linkedFluxerIds = new Set(channelLinks.map(fluxerLocationId));
 
         return {
             channelLinks,
-            discordChannels,
-            fluxerChannels,
+            discordChannelNames,
+            fluxerChannelNames,
             unlinkedDiscordChannels: discordChannels.filter(
                 (c) => !linkedDiscordIds.has(c.id)
             ),
             unlinkedFluxerChannels: fluxerChannels.filter(
                 (c) => !linkedFluxerIds.has(c.id)
+            ),
+            unlinkedDiscordThreads: discordThreads.filter(
+                (t) => !linkedDiscordIds.has(t.id)
+            ),
+            unlinkedFluxerThreads: fluxerThreads.filter(
+                (t) => !linkedFluxerIds.has(t.id)
             ),
         };
     }
@@ -262,36 +291,55 @@ export function createChannelsRouter({
 
         const {
             channelLinks,
-            discordChannels,
-            fluxerChannels,
+            discordChannelNames,
+            fluxerChannelNames,
             unlinkedDiscordChannels,
             unlinkedFluxerChannels,
+            unlinkedDiscordThreads,
+            unlinkedFluxerThreads,
         } = await getChannelState(link);
 
         const linked: ChannelLinkSummary[] = await Promise.all(
-            channelLinks.map(async (l) => ({
-                id: l.id,
-                discordChannel: {
-                    id: l.discordChannelId,
-                    name:
-                        discordChannels.find((c) => c.id === l.discordChannelId)
-                            ?.name ?? l.discordChannelId,
-                },
-                fluxerChannel: {
-                    id: l.fluxerChannelId,
-                    name:
-                        fluxerChannels.find((c) => c.id === l.fluxerChannelId)
-                            ?.name ?? l.fluxerChannelId,
-                },
-                autoSyncThreads: l.autoSyncThreads,
-                threads: await buildThreadSummaries(l.id),
-            }))
+            channelLinks.map(async (l) => {
+                const discordThread: ChannelSummary | null = l.discordThreadId
+                    ? {
+                          id: l.discordThreadId,
+                          name: await discordThreadName(l.discordThreadId),
+                      }
+                    : null;
+                const fluxerThread: ChannelSummary | null = l.fluxerThreadId
+                    ? {
+                          id: l.fluxerThreadId,
+                          name: await fluxerThreadName(l.fluxerThreadId),
+                      }
+                    : null;
+                return {
+                    id: l.id,
+                    discordChannel: {
+                        id: l.discordChannelId,
+                        name:
+                            discordChannelNames.get(l.discordChannelId) ??
+                            l.discordChannelId,
+                    },
+                    fluxerChannel: {
+                        id: l.fluxerChannelId,
+                        name:
+                            fluxerChannelNames.get(l.fluxerChannelId) ??
+                            l.fluxerChannelId,
+                    },
+                    discordThread,
+                    fluxerThread,
+                    autoSyncThreads: l.autoSyncThreads,
+                };
+            })
         );
 
         const response: GuildChannelsResponse = {
             linked,
             unlinkedDiscordChannels,
             unlinkedFluxerChannels,
+            unlinkedDiscordThreads,
+            unlinkedFluxerThreads,
         };
         res.json(response);
     });
@@ -363,23 +411,10 @@ export function createChannelsRouter({
 
         for (const match of matches) {
             try {
-                const discordWebhook =
-                    await webhookService.createDiscordWebhook(
-                        match.discord.id,
-                        `Fluxer Bridge Webhook for channel ${match.discord.id}`
-                    );
-                const fluxerWebhook = await webhookService.createFluxerWebhook(
-                    match.fluxer.id,
-                    `Discord Bridge Webhook for channel ${match.fluxer.id}`
-                );
-                await linkService.createChannelLink({
-                    guildLinkId: link.id,
-                    discordChannelId: match.discord.id,
-                    fluxerChannelId: match.fluxer.id,
-                    discordWebhookId: discordWebhook.id,
-                    discordWebhookToken: discordWebhook.token,
-                    fluxerWebhookId: fluxerWebhook.id,
-                    fluxerWebhookToken: fluxerWebhook.token,
+                await linkProvisioner.createLink({
+                    guildLink: link,
+                    discord: { channelId: match.discord.id, threadId: null },
+                    fluxer: { channelId: match.fluxer.id, threadId: null },
                 });
                 linkedCount++;
                 results.push({
@@ -404,11 +439,11 @@ export function createChannelsRouter({
     });
 
     router.post('/channel-links', async (req, res) => {
-        const { guildLinkId, discordChannelId, fluxerChannelId } =
+        const { guildLinkId, discordTargetId, fluxerTargetId } =
             req.body as Partial<CreateChannelLinkBody>;
-        if (!guildLinkId || !discordChannelId || !fluxerChannelId) {
+        if (!guildLinkId || !discordTargetId || !fluxerTargetId) {
             res.status(400).json({
-                error: 'guildLinkId, discordChannelId and fluxerChannelId are required',
+                error: 'guildLinkId, discordTargetId and fluxerTargetId are required',
             });
             return;
         }
@@ -429,38 +464,34 @@ export function createChannelsRouter({
             return;
         }
 
-        const { unlinkedDiscordChannels, unlinkedFluxerChannels } =
-            await getChannelState(link);
-        if (!unlinkedDiscordChannels.some((c) => c.id === discordChannelId)) {
+        const [discord, fluxer] = await Promise.all([
+            linkProvisioner.resolveDiscordTarget(
+                link.discordGuildId,
+                discordTargetId
+            ),
+            linkProvisioner.resolveFluxerTarget(
+                link.fluxerGuildId,
+                fluxerTargetId
+            ),
+        ]);
+        if (!discord) {
             res.status(400).json({
-                error: 'discordChannelId does not belong to this guild link',
+                error: 'discordTargetId is not a text channel or thread of the linked Discord guild',
             });
             return;
         }
-        if (!unlinkedFluxerChannels.some((c) => c.id === fluxerChannelId)) {
+        if (!fluxer) {
             res.status(400).json({
-                error: 'fluxerChannelId does not belong to this guild link',
+                error: 'fluxerTargetId is not a text channel or thread of the linked Fluxer guild',
             });
             return;
         }
 
         try {
-            const discordWebhook = await webhookService.createDiscordWebhook(
-                discordChannelId,
-                `Fluxer Bridge Webhook for channel ${discordChannelId}`
-            );
-            const fluxerWebhook = await webhookService.createFluxerWebhook(
-                fluxerChannelId,
-                `Discord Bridge Webhook for channel ${fluxerChannelId}`
-            );
-            const channelLink = await linkService.createChannelLink({
-                guildLinkId,
-                discordChannelId,
-                fluxerChannelId,
-                discordWebhookId: discordWebhook.id,
-                discordWebhookToken: discordWebhook.token,
-                fluxerWebhookId: fluxerWebhook.id,
-                fluxerWebhookToken: fluxerWebhook.token,
+            const channelLink = await linkProvisioner.createLink({
+                guildLink: link,
+                discord,
+                fluxer,
             });
             res.status(201).json({ id: channelLink.id });
         } catch (err) {
@@ -481,6 +512,13 @@ export function createChannelsRouter({
         const loaded = await loadAuthorizedChannelLink(req, res, req.params.id);
         if (!loaded) return;
 
+        if (!isChannelPairLink(loaded.channelLink)) {
+            res.status(400).json({
+                error: 'Automatic thread sync is only available on channel-to-channel links',
+            });
+            return;
+        }
+
         try {
             const updated = await linkService.setChannelAutoSyncThreads(
                 loaded.channelLink.id,
@@ -496,156 +534,12 @@ export function createChannelsRouter({
         }
     });
 
-    router.get('/channel-links/:id/threads', async (req, res) => {
+    router.delete('/channel-links/:id', async (req, res) => {
         const loaded = await loadAuthorizedChannelLink(req, res, req.params.id);
         if (!loaded) return;
-        const { channelLink, guildLink } = loaded;
-
-        const threadLinks = await linkService.getThreadLinksForChannelLink(
-            channelLink.id
-        );
-        const linkedDiscordIds = new Set(
-            threadLinks.map((t) => t.discordThreadId)
-        );
-        const linkedFluxerIds = new Set(
-            threadLinks.map((t) => t.fluxerThreadId)
-        );
-
-        let unlinkedDiscordThreads: ChannelSummary[] = [];
-        try {
-            const discordChannel = await discordClient.channels.fetch(
-                channelLink.discordChannelId
-            );
-            if (discordChannel instanceof DiscordTextChannel) {
-                const active = await discordChannel.threads.fetchActive();
-                unlinkedDiscordThreads = [...active.threads.values()]
-                    .filter((t) => !linkedDiscordIds.has(t.id))
-                    .map((t) => ({ id: t.id, name: t.name }));
-            }
-        } catch (err) {
-            logger.warn('Could not list active Discord threads:', err);
-        }
-
-        let unlinkedFluxerThreads: ChannelSummary[] = [];
-        try {
-            const fluxerGuild = fluxerClientRef.current?.guilds.get(
-                guildLink.fluxerGuildId
-            );
-            if (fluxerGuild) {
-                const active = await fluxerGuild.fetchActiveThreads();
-                unlinkedFluxerThreads = active.threads
-                    .filter(
-                        (t) =>
-                            t.parentId === channelLink.fluxerChannelId &&
-                            !linkedFluxerIds.has(t.id)
-                    )
-                    .map((t) => ({ id: t.id, name: t.name ?? t.id }));
-            }
-        } catch (err) {
-            logger.warn('Could not list active Fluxer threads:', err);
-        }
-
-        const response: ChannelThreadsResponse = {
-            unlinkedDiscordThreads,
-            unlinkedFluxerThreads,
-        };
-        res.json(response);
-    });
-
-    router.post('/thread-links', async (req, res) => {
-        const { channelLinkId, discordThreadId, fluxerThreadId } =
-            req.body as Partial<CreateThreadLinkBody>;
-        if (!channelLinkId || !discordThreadId || !fluxerThreadId) {
-            res.status(400).json({
-                error: 'channelLinkId, discordThreadId and fluxerThreadId are required',
-            });
-            return;
-        }
-
-        const loaded = await loadAuthorizedChannelLink(req, res, channelLinkId);
-        if (!loaded) return;
 
         try {
-            const threadLink = await threadSyncService.linkExistingThreads({
-                channelLink: loaded.channelLink,
-                discordThreadId,
-                fluxerThreadId,
-            });
-            res.status(201).json({ id: threadLink.id });
-        } catch (err) {
-            logger.error('Failed to create thread link via dashboard:', err);
-            res.status(400).json({ error: (err as Error).message });
-        }
-    });
-
-    router.delete('/thread-links/:id', async (req, res) => {
-        const threadLink = await linkService.getThreadLinkById(req.params.id);
-        if (!threadLink) {
-            res.status(404).json({ error: 'Thread link not found' });
-            return;
-        }
-
-        const loaded = await loadAuthorizedChannelLink(
-            req,
-            res,
-            threadLink.channelLinkId
-        );
-        if (!loaded) return;
-
-        try {
-            await threadSyncService.unlinkThread(threadLink.id);
-            res.status(204).end();
-        } catch (err) {
-            logger.error('Failed to delete thread link via dashboard:', err);
-            res.status(500).json({ error: (err as Error).message });
-        }
-    });
-
-    router.delete('/channel-links/:id', async (req, res) => {
-        const channelLink = await linkService.getChannelLinkById(req.params.id);
-        if (!channelLink) {
-            res.status(404).json({ error: 'Channel link not found' });
-            return;
-        }
-        const guildLink = await linkService.getGuildLinkById(
-            channelLink.guildLinkId
-        );
-        if (!guildLink) {
-            res.status(404).json({ error: 'Guild link not found' });
-            return;
-        }
-
-        const permError = assertChannelPermission(
-            req,
-            guildLink.discordGuildId,
-            guildLink.fluxerGuildId
-        );
-        if (permError) {
-            res.status(403).json({ error: permError });
-            return;
-        }
-
-        try {
-            await webhookService
-                .deleteDiscordWebhook(
-                    channelLink.discordWebhookId,
-                    channelLink.discordWebhookToken
-                )
-                .catch((err) =>
-                    logger.error('Failed to delete Discord webhook:', err)
-                );
-            await webhookService
-                .deleteFluxerWebhook(
-                    channelLink.fluxerWebhookId,
-                    channelLink.fluxerWebhookToken
-                )
-                .catch((err) =>
-                    logger.error('Failed to delete Fluxer webhook:', err)
-                );
-            await linkService.removeChannelLinkForDiscord(
-                guildLink.discordGuildId,
-                channelLink.linkId
-            );
+            await linkProvisioner.removeLink(loaded.channelLink);
             res.status(204).end();
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });

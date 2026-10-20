@@ -5,7 +5,6 @@ export class QueuedMessageModel extends Model {
     declare id: string;
     declare direction: 'discord_to_fluxer' | 'fluxer_to_discord';
     declare channelLinkId: string;
-    declare threadLinkId: string | null;
     declare sourceMessageId: string;
     declare payload: string;
     declare retryCount: number;
@@ -27,10 +26,6 @@ QueuedMessageModel.init(
         channelLinkId: {
             type: DataTypes.UUID,
             allowNull: false,
-        },
-        threadLinkId: {
-            type: DataTypes.UUID,
-            allowNull: true,
         },
         sourceMessageId: {
             type: DataTypes.STRING,

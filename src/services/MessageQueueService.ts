@@ -1,6 +1,5 @@
 import { Op } from 'sequelize';
 import { QueuedMessageModel } from '../db/models/QueuedMessageModel';
-import { ThreadLink } from '../db/entities/ThreadLink';
 import WebhookEmbed from './WebhookEmbed';
 import { LinkService } from './LinkService';
 import {
@@ -52,13 +51,11 @@ export default class MessageQueueService {
         direction: 'discord_to_fluxer' | 'fluxer_to_discord',
         channelLinkId: string,
         sourceMessageId: string,
-        payload: SerializableWebhookMessageData,
-        threadLinkId: string | null = null
+        payload: SerializableWebhookMessageData
     ): Promise<void> {
         await QueuedMessageModel.create({
             direction,
             channelLinkId,
-            threadLinkId,
             sourceMessageId,
             payload: JSON.stringify(payload),
         });
@@ -112,20 +109,6 @@ export default class MessageQueueService {
                     continue;
                 }
 
-                let threadLink: ThreadLink | null = null;
-                if (entry.threadLinkId) {
-                    threadLink = await linkService.getThreadLinkById(
-                        entry.threadLinkId
-                    );
-                    if (!threadLink) {
-                        logger.warn(
-                            `Queue drain: thread link ${entry.threadLinkId} no longer exists, discarding entry`
-                        );
-                        await entry.destroy();
-                        continue;
-                    }
-                }
-
                 if (entry.direction === 'discord_to_fluxer') {
                     const webhook = await webhookService.getFluxerWebhook(
                         channelLink.fluxerWebhookId,
@@ -135,14 +118,13 @@ export default class MessageQueueService {
                         await webhookService.sendMessageViaFluxerWebhook(
                             webhook,
                             payload,
-                            threadLink?.fluxerThreadId ?? null
+                            channelLink.fluxerThreadId
                         );
                     await linkService.createMessageLink({
                         discordMessageId: entry.sourceMessageId,
                         fluxerMessageId,
                         guildLinkId: channelLink.guildLinkId,
                         channelLinkId: channelLink.id,
-                        threadLinkId: threadLink?.id ?? null,
                     });
                 } else {
                     const webhook = await webhookService.getDiscordWebhook(
@@ -158,14 +140,13 @@ export default class MessageQueueService {
                         await webhookService.sendMessageViaDiscordWebhook(
                             webhook,
                             payload,
-                            threadLink?.discordThreadId ?? null
+                            channelLink.discordThreadId
                         );
                     await linkService.createMessageLink({
                         discordMessageId,
                         fluxerMessageId: entry.sourceMessageId,
                         guildLinkId: channelLink.guildLinkId,
                         channelLinkId: channelLink.id,
-                        threadLinkId: threadLink?.id ?? null,
                     });
                 }
 

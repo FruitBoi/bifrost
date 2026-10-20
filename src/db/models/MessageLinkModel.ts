@@ -27,10 +27,6 @@ MessageLinkModel.init(
             },
             onDelete: 'CASCADE',
         },
-        threadLinkId: {
-            type: DataTypes.UUID,
-            allowNull: true,
-        },
         discordMessageId: {
             type: DataTypes.STRING,
             allowNull: false,
@@ -56,9 +52,6 @@ MessageLinkModel.init(
             },
             {
                 fields: ['guildLinkId'],
-            },
-            {
-                fields: ['threadLinkId'],
             },
         ],
     }
