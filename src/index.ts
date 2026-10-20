@@ -2,6 +2,7 @@ import { CachedChannelLinkRepository } from './db/cachedrepos/CachedChannelLinkR
 import { CachedGuildLinkRepository } from './db/cachedrepos/CachedGuildLinkRepository';
 import { CachedMessageLinkRepository } from './db/cachedrepos/CachedMessageLinkRepository';
 import { initDatabase } from './db/migrator';
+import { inviteBotPermissions, loadBotConfig } from './config/BotConfig';
 import { SequelizeChannelLinkRepository } from './db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeGuildLinkRepository } from './db/sequelizerepos/SequelizeGuildLinkRepository';
 import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMessageLinkRepository';
@@ -48,6 +49,25 @@ import type VoiceBridgeService from './services/voice/VoiceBridgeService';
 import type { VoiceTransport } from './services/voice/VoiceTransport';
 
 const main = async () => {
+    const {
+        config: botConfig,
+        source: botConfigSource,
+        unknownKeys,
+    } = loadBotConfig();
+    logger.info(
+        botConfigSource
+            ? `Loaded config file ${botConfigSource}`
+            : 'No config file found; using default configuration'
+    );
+    for (const key of unknownKeys) {
+        logger.warn(`Config: ignoring unknown key "${key}"`);
+    }
+    if (!botConfig.permissions.manageThreads) {
+        logger.info(
+            'Config: Manage Threads is not requested (permissions.manageThreads=false); the bot can rename only threads it created and will never delete threads'
+        );
+    }
+
     await initDatabase();
 
     logger.debug(
@@ -113,6 +133,8 @@ const main = async () => {
         discordEntityResolver,
         fluxerEntityResolver
     );
+    threadSyncService.setBotConfig(botConfig);
+    categorySyncService.setBotConfig(botConfig);
     const discordStatsService = new DiscordStatsService();
     const fluxerStatsService = new FluxerStatsService();
     const dbStatsService = new DbStatsService(
@@ -275,13 +297,9 @@ const main = async () => {
         );
     });
 
-    // View Channel, Send Messages, Embed Links, Read Message History,
-    // Manage Webhooks (536947712) plus the thread bits, which share the same
-    // values on Discord and Fluxer: Manage Threads (1<<34),
-    // Create Public Threads (1<<35) and Send Messages in Threads (1<<38);
-    // plus the voice bits, also identical on both platforms: Connect (1<<20),
-    // Speak (1<<21) and Use Voice Activity (1<<25).
-    const perms = '326991162368';
+    // Permission bits are identical on Discord and Fluxer; Manage Threads is
+    // only included when enabled in the config file (see src/config/BotConfig.ts).
+    const perms = inviteBotPermissions(botConfig);
     const discordBotInviteLink = generateDiscordBotInviteLink(
         DISCORD_APP_ID,
         perms

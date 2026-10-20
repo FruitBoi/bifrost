@@ -376,6 +376,7 @@ export function fakeDiscordThread(overrides: Record<string, unknown> = {}) {
         autoArchiveDuration: 1440,
         join: vi.fn().mockResolvedValue(undefined),
         setName: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     };
 }
@@ -391,6 +392,7 @@ export function fakeFluxerThread(overrides: Record<string, unknown> = {}) {
         autoArchiveDuration: 1440,
         join: vi.fn().mockResolvedValue(undefined),
         edit: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     };
 }

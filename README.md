@@ -46,8 +46,8 @@ With the toggle off, nothing is bridged until you link it. Linking a thread work
 A **category link** bridges a whole Discord category at once: every text channel in the category becomes a thread inside one Fluxer channel. The bridge creates a Fluxer thread named after each channel and links the two as an ordinary channel↔thread link, tagged with the category link so it can be managed (and removed) together with it. The mapping is kept current afterwards:
 
 - A text channel created in or moved into the category is bridged automatically.
-- A channel moved out of the category loses its link; the Fluxer thread stays.
-- Renaming a channel renames its thread. Thread renames are **not** mirrored back (Discord normalises channel names to lowercase-with-hyphens, so the echo would rename the thread again).
+- A channel moved out of the category loses its link; the Fluxer thread stays. Set `categories.unlinkWhenChannelLeaves: false` in the [configuration file](#configuration-file) to keep the link instead.
+- Renaming a channel renames its thread (switch off with `categories.mirrorChannelRenames: false`). Thread renames are **not** mirrored back (Discord normalises channel names to lowercase-with-hyphens, so the echo would rename the thread again).
 - Deleting the category removes only the mapping; the links it created keep working on their own. Deleting a bridged Discord channel removes its link. Deleting the hosting Fluxer channel removes its own link and every category link targeting it (the threads died with the channel).
 
 Commands, from Discord (run inside any channel of the category):
@@ -68,12 +68,16 @@ In the web dashboard, the *Link category* dialog creates a category link and the
 - Webhooks only exist on channels, never on threads, so every link posts through a webhook on its (parent) channel, with the thread as target (`thread_id` on both Discord and Fluxer). A channel and all thread links under it **share one webhook per platform**; it is created with the first link that needs it and deleted with the last one. That also keeps well clear of Discord's per-channel webhook limit.
 - When auto-sync creates a counterpart for a thread that was started from a bridged message, the counterpart is attached to the bridged copy of that message, so both threads hang off the same post. Otherwise a standalone thread is created in the linked channel.
 - Threads created by the bridge are owned by the bot. The bridge recognises them by owner and never mirrors them back, so there are no create or rename loops.
-- Renames are mirrored only for thread↔thread links. Channel↔thread links relay messages but leave names alone.
-- Deleting a thread on either side only removes its link (and the shared webhook, if nothing else uses it). The counterpart thread or channel is left untouched.
+- Renames are mirrored only for thread↔thread links (switch off with `threads.mirrorRenames: false` in the [configuration file](#configuration-file)). Channel↔thread links relay messages but leave names alone. Without Manage Threads the bot can only rename threads it owns; see [Permissions](#permissions).
+- Deleting a thread on either side only removes its link (and the shared webhook, if nothing else uses it). The counterpart thread or channel is left untouched unless `threads.mirrorDeletes` is enabled, in which case a counterpart *thread* is deleted too (a counterpart channel never is).
 
 ### Permissions
 
-Besides the permissions the bot already needs for channel bridging, thread bridging requires **Create Public Threads**, **Manage Threads** (to rename the counterpart thread) and **Send Messages in Threads** on both platforms. The invite links logged at startup include these. Installations made before thread support was added must grant them to the bot's role manually or re-invite the bot.
+Besides the permissions the bot already needs for channel bridging, thread bridging requires **Create Public Threads** and **Send Messages in Threads** on both platforms. The invite links logged at startup include these. Installations made before thread support was added must grant them to the bot's role manually or re-invite the bot.
+
+**Manage Threads** is *not* requested by default. Without it the bot can rename only the threads it created itself (the counterpart threads it made for auto-sync and category links, which it owns), and it cannot delete or archive any thread. That covers the common case: a rename on the user-created side is mirrored onto the bot-created counterpart, while a rename of the bot-created thread cannot be mirrored back onto a thread the bot does not own. `threads.mirrorDeletes` needs Manage Threads and does nothing without it.
+
+To opt in, set `permissions.manageThreads: true` in the [configuration file](#configuration-file) and restart. The invite links then include Manage Threads; re-invite the bot with the new link or grant the permission to the bot's role on both platforms by hand. Thread rename mirroring (`threads.mirrorRenames`) and the category-link behaviours (`categories.mirrorChannelRenames`, `categories.unlinkWhenChannelLeaves`) are switches in the same file; see [config.example.yml](config.example.yml).
 
 ### Database migration
 
@@ -142,5 +146,36 @@ You can find a guide on how to use the hosted bot here: https://bifrost-bot.com/
 You can find a guide on how to self-host the bot using Docker here: https://bifrost-bot.com/docs/self-hosting/
 
 ## License
+### Environment variables
+
+Secrets, database settings and feature flags are read from environment variables (or an `.env` file); [.env.example](.env.example) lists every variable with a short description. Behavioural switches that are not secrets live in the optional configuration file described next.
+
+### Configuration file
+
+The bot can also read an **optional** configuration file once at startup. Nothing needs to exist for the bot to run; a missing file means every setting keeps its default.
+
+**Lookup order.** If `BF_CONFIG_FILE` is set, that file is used (startup fails if it does not exist). Otherwise the bot looks for `config.yml`, `config.yaml` and `config.json`, in that order, inside `BF_CONFIG_PATH`, the directory that also holds the SQLite database (`./config` by default; in the Docker image it is `/config`, which the compose files mount from `./config` on the host). The file may be YAML or JSON; the extension decides which parser is used.
+
+**Validation.** Keys you omit keep their defaults. Unknown keys are logged as warnings and ignored. A value of the wrong type (for example `"false"` as a string instead of `false`) stops startup with the offending key path. The bot logs which file it loaded, or that it is using defaults. Edits take effect after a restart.
+
+[config.example.yml](config.example.yml) contains every key with its default and a comment; copy it to `<BF_CONFIG_PATH>/config.yml` and change what you need.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `permissions.manageThreads` | `false` | Request **Manage Threads** in the bot invite links. Needed to rename threads the bot does not own and for `threads.mirrorDeletes`, but it also lets the bot delete and archive any thread. See [Permissions](#permissions). |
+| `threads.mirrorRenames` | `true` | Mirror thread renames between linked threads (thread↔thread links). |
+| `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
+| `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
+| `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
+
+Example `config.yml` that keeps the defaults except for enabling deletion mirroring:
+
+```yaml
+permissions:
+    manageThreads: true
+threads:
+    mirrorDeletes: true
+```
+
 
 This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.

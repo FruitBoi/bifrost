@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import CategorySyncService from '../../src/services/categorySync/CategorySyncService';
+import { DEFAULT_BOT_CONFIG } from '../../src/config/BotConfig';
 import DiscordEntityResolver from '../../src/services/entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from '../../src/services/entityResolver/FluxerEntityResolver';
 import {
@@ -897,5 +898,168 @@ describe('CategorySyncService.removeCategoryLink', () => {
         expect(removedLinks).toBe(1);
         expect(t.links.links).toEqual([a]);
         expect(t.links.categoryLinks).toEqual([]);
+    });
+});
+
+describe('CategorySyncService bot config', () => {
+    const unlinkOff = () => ({
+        ...DEFAULT_BOT_CONFIG,
+        categories: { mirrorChannelRenames: true, unlinkWhenChannelLeaves: false },
+    });
+    const renamesOff = () => ({
+        ...DEFAULT_BOT_CONFIG,
+        categories: { mirrorChannelRenames: false, unlinkWhenChannelLeaves: true },
+    });
+
+    /** A category-bridged channel link plus the thread it points at. */
+    function bridged(t: ReturnType<typeof setup>, channelId: string) {
+        const categoryLink = linkedCategory(t);
+        const thread = {
+            id: `ft-${channelId}`,
+            name: 'old-name',
+            join: vi.fn(async () => undefined),
+            edit: vi.fn(async () => undefined),
+        };
+        t.fluxerThreads.set(thread.id, thread);
+        const link = makeChannelLink({
+            discordChannelId: channelId,
+            fluxerChannelId: HOST_ID,
+            fluxerThreadId: thread.id,
+            categoryLinkId: categoryLink.id,
+        });
+        t.links.links.push(link);
+        return { categoryLink, thread, link };
+    }
+
+    it('keeps the link of a channel moved out of its category when unlinkWhenChannelLeaves is off', async () => {
+        const t = setup();
+        const { link, categoryLink } = bridged(t, 'd-m');
+        t.service.setBotConfig(unlinkOff());
+        const before = textChannel({ id: 'd-m', parentId: CATEGORY_ID });
+        const after = { ...before, parentId: 'elsewhere' };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        expect(t.provisioner.removed).toEqual([]);
+        expect(t.links.links).toEqual([link]);
+        expect(link.categoryLinkId).toBe(categoryLink.id);
+        expect(t.threadsCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps the link when the channel moves to another linked category and unlinking is off', async () => {
+        const t = setup();
+        const { link } = bridged(t, 'd-m');
+        t.links.categoryLinks.push(
+            makeCategoryLink({
+                discordCategoryId: 'dcat-2',
+                fluxerChannelId: 'fhost-2',
+            })
+        );
+        t.service.setBotConfig(unlinkOff());
+        const before = textChannel({ id: 'd-m', parentId: CATEGORY_ID });
+        const after = { ...before, parentId: 'dcat-2' };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        // The existing link survives and no second thread is created for it.
+        expect(t.provisioner.removed).toEqual([]);
+        expect(t.links.links).toEqual([link]);
+        expect(t.threadsCreate).not.toHaveBeenCalled();
+    });
+
+    it('still bridges a channel moved into a linked category when unlinking is off', async () => {
+        const t = setup();
+        const categoryLink = linkedCategory(t);
+        t.service.setBotConfig(unlinkOff());
+        const before = textChannel({ id: 'd-m', name: 'moved', parentId: null });
+        const after = { ...before, parentId: CATEGORY_ID };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        expect(t.threadsCreate).toHaveBeenCalledTimes(1);
+        expect(t.links.links[0]).toMatchObject({
+            discordChannelId: 'd-m',
+            categoryLinkId: categoryLink.id,
+        });
+    });
+
+    it('does not fetch or edit the thread on rename when mirrorChannelRenames is off', async () => {
+        const t = setup();
+        const { thread } = bridged(t, 'd-r');
+        t.service.setBotConfig(renamesOff());
+        const before = textChannel({ id: 'd-r', name: 'old-name' });
+        const after = { ...before, name: 'new-name' };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        expect(t.fluxerResolver.fetchThread).not.toHaveBeenCalled();
+        expect(thread.edit).not.toHaveBeenCalled();
+    });
+
+    it('still unlinks on leave when only renames are off', async () => {
+        const t = setup();
+        const { link } = bridged(t, 'd-m');
+        t.service.setBotConfig(renamesOff());
+        const before = textChannel({ id: 'd-m', parentId: CATEGORY_ID });
+        const after = { ...before, parentId: 'elsewhere' };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        expect(t.provisioner.removed).toEqual([link]);
+        expect(t.links.links).toHaveLength(0);
+    });
+
+    it('behaves as before with the defaults applied explicitly', async () => {
+        const t = setup();
+        const { thread, link } = bridged(t, 'd-x');
+        t.service.setBotConfig(DEFAULT_BOT_CONFIG);
+
+        const before = textChannel({ id: 'd-x', name: 'old-name' });
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            { ...before, name: 'new-name' } as never
+        );
+        expect(t.fluxerResolver.fetchThread).toHaveBeenCalledWith(thread.id);
+        expect(thread.edit).toHaveBeenCalledWith({ name: 'new-name' });
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            { ...before, parentId: 'elsewhere' } as never
+        );
+        expect(t.provisioner.removed).toEqual([link]);
+        expect(t.links.links).toHaveLength(0);
+    });
+
+    it('keeps a copy of the config, so later mutation has no effect', async () => {
+        const t = setup();
+        const { link } = bridged(t, 'd-m');
+        const config = unlinkOff();
+        t.service.setBotConfig(config);
+        config.categories.unlinkWhenChannelLeaves = true;
+        const before = textChannel({ id: 'd-m', parentId: CATEGORY_ID });
+        const after = { ...before, parentId: 'elsewhere' };
+
+        await t.service.handleDiscordChannelUpdate(
+            before as never,
+            after as never
+        );
+
+        expect(t.provisioner.removed).toEqual([]);
+        expect(t.links.links).toEqual([link]);
     });
 });

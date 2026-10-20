@@ -10,6 +10,7 @@ import {
     ThreadAutoArchiveDuration as FluxerThreadAutoArchiveDuration,
     ThreadChannel as FluxerThreadChannel,
 } from '@fluxerjs/core';
+import { BotConfig, DEFAULT_BOT_CONFIG } from '../../config/BotConfig';
 import { ChannelLink, isChannelPairLink } from '../../db/entities/ChannelLink';
 import DiscordEntityResolver from '../entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from '../entityResolver/FluxerEntityResolver';
@@ -37,10 +38,15 @@ export type ThreadAutoCreate = 'auto' | 'never';
  *
  * A bridged thread pair is an ordinary link row with both thread IDs set; it
  * shares the parent channels' webhooks (see LinkProvisioner).
+ *
+ * Rename mirroring (`threads.mirrorRenames`) and delete mirroring
+ * (`threads.mirrorDeletes`) are governed by the {@link BotConfig} passed to
+ * {@link setBotConfig}; until it is called the defaults apply.
  */
 export default class ThreadSyncService {
     private discordClient: DiscordClient | null = null;
     private fluxerClient: FluxerClient | null = null;
+    private botConfig: BotConfig = DEFAULT_BOT_CONFIG;
 
     /** De-duplicates concurrent creation attempts for the same source thread. */
     private readonly inFlight = new Map<string, Promise<ChannelLink | null>>();
@@ -64,6 +70,11 @@ export default class ThreadSyncService {
 
     setFluxerClient(client: FluxerClient) {
         this.fluxerClient = client;
+    }
+
+    /** Applies the startup config; a copy is kept so later mutation has no effect. */
+    setBotConfig(config: BotConfig): void {
+        this.botConfig = structuredClone(config);
     }
 
     private ensureDiscordClient(): DiscordClient {
@@ -410,6 +421,7 @@ export default class ThreadSyncService {
         oldThread: DiscordThreadChannel,
         newThread: DiscordThreadChannel
     ): Promise<void> {
+        if (!this.botConfig.threads.mirrorRenames) return;
         if (oldThread.name === newThread.name) return;
 
         const link = await this.linkService.getChannelLinkByDiscordLocation(
@@ -447,6 +459,7 @@ export default class ThreadSyncService {
         oldThread: FluxerChannel,
         newThread: FluxerThreadChannel
     ): Promise<void> {
+        if (!this.botConfig.threads.mirrorRenames) return;
         const oldName = (oldThread as { name?: string | null }).name ?? null;
         if (oldName === newThread.name) return;
 
@@ -480,8 +493,13 @@ export default class ThreadSyncService {
 
     /**
      * A deleted thread drops its link (and the shared webhook, if nothing else
-     * uses it). The other side is left untouched; mirroring deletion is
-     * intentionally out of scope.
+     * uses it). By default the other side is left untouched: deleting it needs
+     * Manage Threads on Discord (and the matching right on Fluxer) and is
+     * destructive, so it only happens when `threads.mirrorDeletes` is on.
+     *
+     * The link is removed before the counterpart is deleted. The counterpart's
+     * own delete event then finds no link and does nothing, so a mirrored
+     * delete never bounces back.
      */
     async handleDiscordThreadDelete(threadId: string): Promise<void> {
         const link =
@@ -499,8 +517,13 @@ export default class ThreadSyncService {
         if (link.fluxerThreadId)
             this.bridgeCreated.delete(`fluxer:${link.fluxerThreadId}`);
         logger.info(`Discord thread ${threadId} deleted; link removed.`);
+
+        if (this.botConfig.threads.mirrorDeletes && link.fluxerThreadId) {
+            await this.deleteFluxerThread(link.fluxerThreadId, threadId);
+        }
     }
 
+    /** Mirror of {@link handleDiscordThreadDelete}. */
     async handleFluxerThreadDelete(threadId: string): Promise<void> {
         const link =
             await this.linkService.getChannelLinkByFluxerLocation(threadId);
@@ -517,5 +540,52 @@ export default class ThreadSyncService {
         if (link.discordThreadId)
             this.bridgeCreated.delete(`discord:${link.discordThreadId}`);
         logger.info(`Fluxer thread ${threadId} deleted; link removed.`);
+
+        if (this.botConfig.threads.mirrorDeletes && link.discordThreadId) {
+            await this.deleteDiscordThread(link.discordThreadId, threadId);
+        }
+    }
+
+    /** Deletes the Fluxer counterpart of a deleted Discord thread. */
+    private async deleteFluxerThread(
+        fluxerThreadId: string,
+        discordThreadId: string
+    ): Promise<void> {
+        try {
+            const thread =
+                await this.fluxerEntityResolver.fetchThread(fluxerThreadId);
+            if (!thread) return;
+            await thread.delete();
+            logger.info(
+                `🗑️ Deleted Fluxer thread ${fluxerThreadId} (mirrored from Discord thread ${discordThreadId}).`
+            );
+        } catch (err) {
+            if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
+            logger.error(
+                `❌ Failed to delete Fluxer thread ${fluxerThreadId} after Discord thread ${discordThreadId} was deleted:`,
+                err
+            );
+        }
+    }
+
+    /** Deletes the Discord counterpart of a deleted Fluxer thread. */
+    private async deleteDiscordThread(
+        discordThreadId: string,
+        fluxerThreadId: string
+    ): Promise<void> {
+        try {
+            const thread =
+                await this.discordEntityResolver.fetchThread(discordThreadId);
+            if (!thread) return;
+            await thread.delete('Deleted on Fluxer');
+            logger.info(
+                `🗑️ Deleted Discord thread ${discordThreadId} (mirrored from Fluxer thread ${fluxerThreadId}).`
+            );
+        } catch (err) {
+            logger.error(
+                `❌ Failed to delete Discord thread ${discordThreadId} after Fluxer thread ${fluxerThreadId} was deleted:`,
+                err
+            );
+        }
     }
 }

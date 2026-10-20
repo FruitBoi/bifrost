@@ -7,6 +7,7 @@ import {
     TextChannel as DiscordTextChannel,
 } from 'discord.js';
 import { Client as FluxerClient } from '@fluxerjs/core';
+import { BotConfig, DEFAULT_BOT_CONFIG } from '../../config/BotConfig';
 import { CategoryLink } from '../../db/entities/CategoryLink';
 import { ChannelLink } from '../../db/entities/ChannelLink';
 import { GuildLink } from '../../db/entities/GuildLink';
@@ -52,13 +53,18 @@ export interface CategoryPreview {
  *
  * Each bridged channel is an ordinary channel↔thread {@link ChannelLink}
  * tagged with the category link's id, so messages, edits and deletes flow
- * through the normal relay. Channel renames are mirrored to the thread;
- * thread renames are not mirrored back, because Discord normalises channel
- * names (lower-case, hyphens) and the echo would rename the thread again.
+ * through the normal relay. Channel renames are mirrored to the thread
+ * (`categories.mirrorChannelRenames`); thread renames are not mirrored back,
+ * because Discord normalises channel names (lower-case, hyphens) and the echo
+ * would rename the thread again. Moving a channel out of its category drops
+ * the link when `categories.unlinkWhenChannelLeaves` is on (the default);
+ * otherwise the link survives the move. Both switches come from the
+ * {@link BotConfig} passed to {@link setBotConfig}.
  */
 export default class CategorySyncService {
     private discordClient: DiscordClient | null = null;
     private fluxerClient: FluxerClient | null = null;
+    private botConfig: BotConfig = DEFAULT_BOT_CONFIG;
 
     /** De-duplicates concurrent bridging of the same Discord channel. */
     private readonly inFlight = new Map<string, Promise<CategorySyncItem>>();
@@ -77,6 +83,11 @@ export default class CategorySyncService {
 
     setFluxerClient(client: FluxerClient) {
         this.fluxerClient = client;
+    }
+
+    /** Applies the startup config; a copy is kept so later mutation has no effect. */
+    setBotConfig(config: BotConfig): void {
+        this.botConfig = structuredClone(config);
     }
 
     private ensureFluxerClient(): FluxerClient {
@@ -344,8 +355,9 @@ export default class CategorySyncService {
 
     /**
      * Moving a text channel into a linked category bridges it; moving a
-     * category-bridged channel out drops its link (the thread stays);
-     * renaming a category-bridged channel renames its thread.
+     * category-bridged channel out drops its link (the thread stays) when
+     * `categories.unlinkWhenChannelLeaves` is on; renaming a category-bridged
+     * channel renames its thread when `categories.mirrorChannelRenames` is on.
      */
     async handleDiscordChannelUpdate(
         oldChannel: NonThreadGuildBasedChannel | DMChannel,
@@ -361,7 +373,10 @@ export default class CategorySyncService {
             const link = await this.linkService.getChannelLinkByDiscordLocation(
                 newChannel.id
             );
-            if (link?.categoryLinkId) {
+            if (
+                this.botConfig.categories.unlinkWhenChannelLeaves &&
+                link?.categoryLinkId
+            ) {
                 const previous = await this.linkService.getCategoryLinkById(
                     link.categoryLinkId
                 );
@@ -389,7 +404,11 @@ export default class CategorySyncService {
             return;
         }
 
-        if (oldName !== null && oldName !== newChannel.name) {
+        if (
+            this.botConfig.categories.mirrorChannelRenames &&
+            oldName !== null &&
+            oldName !== newChannel.name
+        ) {
             await this.mirrorChannelRename(newChannel);
         }
     }

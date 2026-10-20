@@ -4,7 +4,7 @@ node_modules/
 .env.main
 .env.custominstance
 .env.dev
-config/
+/config/
 logs/
 .idea/
 docs/.vitepress/dist

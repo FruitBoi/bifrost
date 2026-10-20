@@ -2,7 +2,7 @@
 
 Bifröst currently bridges threads in a deliberately narrow way:
 
-- **What is synced:** messages inside a link (send, edit, delete) for any combination of channel and thread sides, the thread name when both sides are threads, and (for links created by a category link) the Discord channel name onto the Fluxer thread.
+- **What is synced:** messages inside a link (send, edit, delete) for any combination of channel and thread sides, the thread name when both sides are threads (`threads.mirrorRenames`), (for links created by a category link) the Discord channel name onto the Fluxer thread (`categories.mirrorChannelRenames`), and, only when opted in, thread deletion (`threads.mirrorDeletes`). The switches live in the optional configuration file; see `config.example.yml`.
 - **What is not synced:** everything else. This document lists the features that could be added later, with the reasoning for leaving them out so far and the main thing to watch when implementing them.
 
 ## Current limitations
@@ -15,6 +15,12 @@ Bifröst currently bridges threads in a deliberately narrow way:
 - A location (channel or thread) is linked at most once; after a link is removed it has to be linked again manually.
 - Thread links are not distinguished in the stats command, metrics or the admin dashboard counters (they count as channel links).
 
+## Implemented as opt-in
+
+### Mirror thread deletion
+
+By default a deleted thread only drops its link (and the shared webhook if unused) and leaves its counterpart in place. Deleting the counterpart as well is available behind `threads.mirrorDeletes` in the configuration file (see `config.example.yml`); it is off by default because deletion is destructive and irreversible. It needs Manage Threads, which is itself only requested in the invite links when `permissions.manageThreads` is on. The switch is global rather than per channel link; a per-link toggle (like auto-sync) remains possible if the global one proves too coarse.
+
 ## Candidate features
 
 ### Mirror archive / unarchive and lock state
@@ -26,11 +32,6 @@ Bifröst currently bridges threads in a deliberately narrow way:
 
 *Rationale:* Names are only mirrored when both sides are threads, plus channel → thread for links created by a category link. For a manually created channel↔thread link, a thread rename could be mirrored onto the channel name (or the channel rename onto the thread).
 *Consideration:* Channel names have stricter rules than thread names (lowercase, no spaces on Discord) and renaming a channel needs Manage Channels, which the bot does not request today. The channel → thread half could reuse the category-link rename path; the thread → channel half has the same echo problem described under category links below. Deliberately left out until there is a clear use case.
-
-### Mirror thread deletion
-
-*Rationale:* Today a deleted thread only drops its link (and the shared webhook if unused) and leaves an orphaned counterpart.
-*Consideration:* Deletion is destructive and irreversible; it should probably be opt-in per channel link (like the auto-sync toggle) and must distinguish a deleted thread from a thread the bot merely lost access to.
 
 ### Auto-archive duration and slowmode updates
 
@@ -90,7 +91,7 @@ Bifröst currently bridges threads in a deliberately narrow way:
 ### Category links: mirror channel deletion to thread archival
 
 *Rationale:* Deleting a bridged Discord channel (or moving it out of the category) only removes its link, leaving an active Fluxer thread that looks bridged but no longer is. Archiving the thread would signal that the channel is gone without destroying its history.
-*Consideration:* Archival is reversible, so it is safer than deleting the thread, but it still needs Manage Threads and must not fire when the bot merely lost access to the channel. A moved channel is a weaker signal than a deleted one (it may come back, in which case the bridge would create a second thread rather than reuse the archived one), so the two cases probably want different handling. This overlaps with the archive/unarchive mirroring candidate above.
+*Consideration:* Archival is reversible, so it is safer than deleting the thread, but it still needs Manage Threads (only requested when `permissions.manageThreads` is on) and must not fire when the bot merely lost access to the channel. A moved channel is a weaker signal than a deleted one (it may come back, in which case the bridge would create a second thread rather than reuse the archived one), so the two cases probably want different handling. This overlaps with the archive/unarchive mirroring candidate above.
 
 ### Category links: per-category naming templates
 

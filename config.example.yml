@@ -1,0 +1,31 @@
+# Bifröst optional startup configuration.
+#
+# Copy this file to <BF_CONFIG_PATH>/config.yml (BF_CONFIG_PATH defaults to
+# ./config; in Docker it is the mounted /config volume, next to data.sqlite).
+# config.yaml and config.json are accepted too, and BF_CONFIG_FILE can point to
+# a file anywhere else. The file is optional: when it is missing, every value
+# below applies as its default. Keys you leave out keep their defaults, unknown
+# keys are logged as warnings, and a value of the wrong type stops startup.
+# Restart the bot after editing; the file is read once at startup.
+
+permissions:
+    # Request Manage Threads in the bot invite links. It lets the bot rename
+    # threads it does not own, but also lets it delete and archive any thread,
+    # so it is off by default. Threads the bridge creates are owned by the bot
+    # and can be renamed without it.
+    manageThreads: false
+
+threads:
+    # Mirror thread renames between linked threads.
+    mirrorRenames: true
+    # When a linked thread is deleted on one side, delete its counterpart too.
+    # Requires permissions.manageThreads on Discord and the matching right on
+    # Fluxer; the counterpart is otherwise left in place and only the link is
+    # removed.
+    mirrorDeletes: false
+
+categories:
+    # Mirror Discord channel renames to the category-created Fluxer thread.
+    mirrorChannelRenames: true
+    # Drop the link when a channel is moved out of a linked category.
+    unlinkWhenChannelLeaves: true
