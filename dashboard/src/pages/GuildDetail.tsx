@@ -5,11 +5,13 @@ import {
     MessageSquareText,
     PackageOpen,
     Trash,
+    Volume2,
 } from 'lucide-react';
 import type {
     CategoryLinkSummary,
     ChannelLinkSummary,
     ChannelSummary,
+    VoiceLinkResponse,
 } from '../../../src/web/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,8 +29,11 @@ import { toastManager } from '@/components/ui/toast';
 import {
     useDeleteCategoryLink,
     useDeleteChannelLink,
+    useDeleteVoiceLink,
     useGuildChannels,
     useUpdateChannelLink,
+    useUpdateVoiceLink,
+    useVoiceLinks,
 } from '@/api/client';
 import { Layout } from '../components/Layout';
 import {
@@ -42,6 +47,7 @@ import {
 import { CreateChannelLinkDialog } from '../components/CreateChannelLinkDialog';
 import { AutolinkDialog } from '../components/AutolinkDialog';
 import { LinkCategoryDialog } from '../components/LinkCategoryDialog';
+import { LinkVoiceDialog } from '../components/LinkVoiceDialog';
 
 /** `#channel` for a channel side, or a thread icon with `#parent › thread`. */
 function LocationCell({
@@ -142,9 +148,132 @@ function CategoryLinksBlock({
     );
 }
 
+function describeVoiceLink(link: VoiceLinkResponse): string {
+    return `${link.discordChannelName ?? link.discordChannelId} ↔ ${link.fluxerChannelName ?? link.fluxerChannelId}`;
+}
+
+/**
+ * One row per voice link: Discord voice channel ↔ Fluxer voice channel, with
+ * an enabled switch and an unlink button.
+ */
+function VoiceLinksBlock({
+    voiceLinks,
+    guildLinkId,
+}: {
+    voiceLinks: VoiceLinkResponse[];
+    guildLinkId: string | undefined;
+}) {
+    const updateVoiceLink = useUpdateVoiceLink(guildLinkId);
+    const deleteVoiceLink = useDeleteVoiceLink(guildLinkId);
+
+    return (
+        <section className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <h2 className="text-muted-foreground text-sm font-medium">
+                    Voice
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                    Only one voice link per server pair can be live at a time.
+                </p>
+            </div>
+            <ul className="divide-border divide-y rounded-lg border">
+                {voiceLinks.map((link) => (
+                    <li
+                        key={link.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2"
+                    >
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+                            <span className="inline-flex items-center gap-1.5">
+                                <Volume2
+                                    aria-hidden="true"
+                                    className="text-muted-foreground size-3.5 shrink-0"
+                                />
+                                <span
+                                    className={
+                                        link.discordChannelName
+                                            ? undefined
+                                            : 'text-muted-foreground'
+                                    }
+                                >
+                                    {link.discordChannelName ??
+                                        link.discordChannelId}
+                                </span>
+                            </span>
+                            <span className="text-muted-foreground">↔</span>
+                            <span
+                                className={
+                                    link.fluxerChannelName
+                                        ? undefined
+                                        : 'text-muted-foreground'
+                                }
+                            >
+                                {link.fluxerChannelName ?? link.fluxerChannelId}
+                            </span>
+                            {!link.enabled && (
+                                <Badge variant="secondary" size="sm">
+                                    disabled
+                                </Badge>
+                            )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                            <Switch
+                                aria-label={`Enable voice bridge ${describeVoiceLink(link)}`}
+                                checked={link.enabled}
+                                disabled={
+                                    updateVoiceLink.isPending &&
+                                    updateVoiceLink.variables?.voiceLinkId ===
+                                        link.id
+                                }
+                                onCheckedChange={(checked) =>
+                                    updateVoiceLink.mutate(
+                                        {
+                                            voiceLinkId: link.id,
+                                            enabled: checked,
+                                        },
+                                        {
+                                            onError: (err) =>
+                                                toastManager.add({
+                                                    type: 'error',
+                                                    title: 'Could not update voice link',
+                                                    description: err.message,
+                                                }),
+                                        }
+                                    )
+                                }
+                            />
+                            <Button
+                                aria-label={`Unlink voice ${describeVoiceLink(link)}`}
+                                variant="destructive-outline"
+                                size="icon-sm"
+                                loading={
+                                    deleteVoiceLink.isPending &&
+                                    deleteVoiceLink.variables === link.id
+                                }
+                                onClick={() =>
+                                    deleteVoiceLink.mutate(link.id, {
+                                        onError: (err) =>
+                                            toastManager.add({
+                                                type: 'error',
+                                                title: 'Could not unlink voice channels',
+                                                description: err.message,
+                                            }),
+                                    })
+                                }
+                            >
+                                <Trash aria-hidden="true" />
+                            </Button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </section>
+    );
+}
+
 export function GuildDetail() {
     const { guildLinkId } = useParams<{ guildLinkId: string }>();
     const { data, isLoading } = useGuildChannels(guildLinkId);
+    const voiceLinks = useVoiceLinks(guildLinkId);
     const deleteChannelLink = useDeleteChannelLink(guildLinkId);
     const updateChannelLink = useUpdateChannelLink(guildLinkId);
 
@@ -165,6 +294,15 @@ export function GuildDetail() {
                     data.unlinkedDiscordCategories.length === 0 ||
                     data.unlinkedFluxerChannels.length === 0
                 }
+            />
+            <LinkVoiceDialog
+                guildLinkId={guildLinkId!}
+                linkedDiscordChannelIds={(voiceLinks.data ?? []).map(
+                    (l) => l.discordChannelId
+                )}
+                linkedFluxerChannelIds={(voiceLinks.data ?? []).map(
+                    (l) => l.fluxerChannelId
+                )}
             />
             <CreateChannelLinkDialog
                 guildLinkId={guildLinkId!}
@@ -202,6 +340,13 @@ export function GuildDetail() {
             {data && data.categoryLinks.length > 0 && (
                 <CategoryLinksBlock
                     categoryLinks={data.categoryLinks}
+                    guildLinkId={guildLinkId}
+                />
+            )}
+
+            {voiceLinks.data && voiceLinks.data.length > 0 && (
+                <VoiceLinksBlock
+                    voiceLinks={voiceLinks.data}
                     guildLinkId={guildLinkId}
                 />
             )}

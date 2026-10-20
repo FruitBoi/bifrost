@@ -1,6 +1,7 @@
 import { ChannelType as DiscordChannelType } from 'discord.js';
 import { ChannelLink } from '../db/entities/ChannelLink';
 import { GuildLink } from '../db/entities/GuildLink';
+import { VoiceLink } from '../db/entities/VoiceLink';
 import DiscordEntityResolver from './entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from './entityResolver/FluxerEntityResolver';
 import { LinkService } from './LinkService';
@@ -21,6 +22,12 @@ export interface ResolvedLinkTarget extends LinkTarget {
     name: string;
     /** Parent channel name when `kind === 'thread'`. */
     parentName: string | null;
+}
+
+/** A resolved voice channel on either platform. */
+export interface ResolvedVoiceTarget {
+    id: string;
+    name: string;
 }
 
 /**
@@ -337,5 +344,86 @@ export default class LinkProvisioner {
                     logger.error('Failed to delete Fluxer webhook:', err)
                 );
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Voice links (one Discord voice channel <-> one Fluxer voice channel)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Resolves a Discord voice channel ID inside the given guild. Returns
+     * null when the ID is not a voice channel of that guild.
+     */
+    async resolveDiscordVoiceTarget(
+        discordGuildId: string,
+        id: string
+    ): Promise<ResolvedVoiceTarget | null> {
+        const channel = await this.discordEntityResolver.fetchVoiceChannel(
+            discordGuildId,
+            id
+        );
+        if (!channel) return null;
+        return { id: channel.id, name: channel.name };
+    }
+
+    /** Mirror of {@link resolveDiscordVoiceTarget} for Fluxer. */
+    async resolveFluxerVoiceTarget(
+        fluxerGuildId: string,
+        id: string
+    ): Promise<ResolvedVoiceTarget | null> {
+        const channel = await this.fluxerEntityResolver.fetchVoiceChannel(
+            fluxerGuildId,
+            id
+        );
+        if (!channel) return null;
+        return { id: channel.id, name: channel.name ?? channel.id };
+    }
+
+    /**
+     * Links two voice channels. Both must be voice channels of the linked
+     * guilds, and each voice channel can be linked only once. Voice links
+     * have no webhooks, so nothing is provisioned besides the row.
+     */
+    async createVoiceLink(
+        guildLink: GuildLink,
+        discordChannelId: string,
+        fluxerChannelId: string
+    ): Promise<VoiceLink> {
+        const discord = await this.resolveDiscordVoiceTarget(
+            guildLink.discordGuildId,
+            discordChannelId
+        );
+        if (!discord) {
+            throw new Error(
+                `Discord channel ${discordChannelId} is not a voice channel of the linked server`
+            );
+        }
+        const fluxer = await this.resolveFluxerVoiceTarget(
+            guildLink.fluxerGuildId,
+            fluxerChannelId
+        );
+        if (!fluxer) {
+            throw new Error(
+                `Fluxer channel ${fluxerChannelId} is not a voice channel of the linked server`
+            );
+        }
+
+        if (await this.linkService.getVoiceLinkForDiscordChannel(discord.id)) {
+            throw new Error('Discord voice channel already linked');
+        }
+        if (await this.linkService.getVoiceLinkForFluxerChannel(fluxer.id)) {
+            throw new Error('Fluxer voice channel already linked');
+        }
+
+        return this.linkService.createVoiceLink({
+            guildLinkId: guildLink.id,
+            discordChannelId: discord.id,
+            fluxerChannelId: fluxer.id,
+        });
+    }
+
+    /** Removes a voice link; there are no webhooks to clean up. */
+    async removeVoiceLink(voiceLinkId: string): Promise<VoiceLink> {
+        return this.linkService.removeVoiceLink(voiceLinkId);
     }
 }

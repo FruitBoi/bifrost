@@ -86,6 +86,33 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
         );
     }
 
+    /**
+     * "Voice links" section, listed after the channel links: a header line
+     * followed by `🔊 <#discord> ←→ [🔊 fluxer](url) · state` per link.
+     * Empty when the guild has no voice links.
+     */
+    private async buildVoiceLines(
+        guildLinkId: string,
+        fluxerGuildId: string
+    ): Promise<string[]> {
+        const voiceLinks = await this.linkService
+            .getVoiceLinksForGuildLink(guildLinkId)
+            .catch(() => []);
+        if (voiceLinks.length === 0) return [];
+        const lines = await Promise.all(
+            voiceLinks.map(async (link) => {
+                const channel = await this.fluxerEntityResolver
+                    .fetchVoiceChannel(fluxerGuildId, link.fluxerChannelId)
+                    .catch(() => null);
+                const fluxerName = channel?.name ?? link.fluxerChannelId;
+                const fluxerUrl = `https://fluxer.app/channels/${fluxerGuildId}/${link.fluxerChannelId}`;
+                const state = link.enabled ? '✅ enabled' : '⛔ disabled';
+                return `🔊 <#${link.discordChannelId}> ←→ [🔊 ${fluxerName}](${fluxerUrl}) · ${state}\n  └ \`${link.discordChannelId}\` · \`${link.fluxerChannelId}\``;
+            })
+        );
+        return ['**Voice links**', ...lines];
+    }
+
     public async handleCommand(
         message: DiscordCommandHandlerMessage,
         _command: string,
@@ -156,9 +183,14 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                         guildLink.id,
                         guildLink.fluxerGuildId
                     );
+                    const voiceLines = await this.buildVoiceLines(
+                        guildLink.id,
+                        guildLink.fluxerGuildId
+                    );
                     if (
                         channelLinks.length === 0 &&
-                        categoryLines.length === 0
+                        categoryLines.length === 0 &&
+                        voiceLines.length === 0
                     ) {
                         embeds.push(
                             new EmbedBuilder()
@@ -174,6 +206,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                                 guildLink.fluxerGuildId,
                                 true
                             )),
+                            ...voiceLines,
                         ];
                         const chunks = chunkDescriptionLines(lines);
                         chunks.forEach((chunk, i) => {
@@ -290,9 +323,14 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                         guildLink.id,
                         guildLink.fluxerGuildId
                     );
+                    const voiceLines = await this.buildVoiceLines(
+                        guildLink.id,
+                        guildLink.fluxerGuildId
+                    );
                     if (
                         channelLinks.length === 0 &&
-                        categoryLines.length === 0
+                        categoryLines.length === 0 &&
+                        voiceLines.length === 0
                     ) {
                         await message.reply({
                             embeds: [
@@ -314,6 +352,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                             guildLink.fluxerGuildId,
                             true
                         )),
+                        ...voiceLines,
                     ];
                     const chunks = chunkDescriptionLines(lines);
                     const embeds = chunks.map((chunk, i) =>
@@ -415,8 +454,16 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 guildLink.id,
                 guildLink.fluxerGuildId
             );
+            const voiceLines = await this.buildVoiceLines(
+                guildLink.id,
+                guildLink.fluxerGuildId
+            );
 
-            if (channelLinks.length === 0 && categoryLines.length === 0) {
+            if (
+                channelLinks.length === 0 &&
+                categoryLines.length === 0 &&
+                voiceLines.length === 0
+            ) {
                 await message.reply({
                     embeds: [
                         new EmbedBuilder()
@@ -437,6 +484,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                     channelLinks,
                     guildLink.fluxerGuildId
                 )),
+                ...voiceLines,
             ];
             const chunks = chunkDescriptionLines(lines);
             const embeds = chunks.map((chunk, i) =>

@@ -5,3 +5,11 @@ packages:
 onlyBuiltDependencies:
     - sqlite3
     - esbuild
+    - '@discordjs/opus'
+
+# @fluxerjs/voice@3.1.0 pins @fluxerjs/core@3.1.0 exactly; force it onto the
+# project's core/types/util so only one copy of each is installed.
+overrides:
+    '@fluxerjs/voice>@fluxerjs/core': '^3.3.0'
+    '@fluxerjs/voice>@fluxerjs/types': '^3.3.0'
+    '@fluxerjs/voice>@fluxerjs/util': '^3.1.0'

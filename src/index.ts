@@ -6,6 +6,7 @@ import { SequelizeChannelLinkRepository } from './db/sequelizerepos/SequelizeCha
 import { SequelizeGuildLinkRepository } from './db/sequelizerepos/SequelizeGuildLinkRepository';
 import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCategoryLinkRepository';
+import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -23,6 +24,8 @@ import CategorySyncService from './services/categorySync/CategorySyncService';
 import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
+    ENABLE_VOICE_BRIDGE,
+    VOICE_LEAVE_GRACE_MS,
     DISCORD_HEALTH_URL,
     ENABLE_WEB_DASHBOARD,
     FLUXER_APP_ID,
@@ -41,6 +44,8 @@ import {
 import logger from './utils/logging/logger';
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
+import type VoiceBridgeService from './services/voice/VoiceBridgeService';
+import type { VoiceTransport } from './services/voice/VoiceTransport';
 
 const main = async () => {
     await initDatabase();
@@ -68,6 +73,7 @@ const main = async () => {
     const channelLinkRepo = new SequelizeChannelLinkRepository();
     const messageLinkRepo = new SequelizeMessageLinkRepository();
     const categoryLinkRepo = new SequelizeCategoryLinkRepository();
+    const voiceLinkRepo = new SequelizeVoiceLinkRepository();
 
     const cachedGuildLinkRepo = new CachedGuildLinkRepository(guildLinkRepo, 0);
     const cachedChannelLinkRepo = new CachedChannelLinkRepository(
@@ -83,7 +89,8 @@ const main = async () => {
         cachedGuildLinkRepo,
         cachedChannelLinkRepo,
         cachedMessageLinkRepo,
-        categoryLinkRepo
+        categoryLinkRepo,
+        voiceLinkRepo
     );
     const webhookService = new WebhookService();
     const discordEntityResolver = new DiscordEntityResolver();
@@ -117,6 +124,62 @@ const main = async () => {
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
     const FLUXER_BACKOFF_MS = 20 * 60_000; // 20 min wait after exhausting restarts
 
+    // The voice stack (native Opus/DAVE/LiveKit modules) is only loaded when
+    // the bridge is enabled, so a deployment without voice never touches it.
+    // The Fluxer transport must be created before the client logs in, and the
+    // Fluxer client is re-created on restart, so the bridge is (re)started
+    // from startVoiceBridge() every time both clients are up.
+    const voice = ENABLE_VOICE_BRIDGE
+        ? {
+              DiscordVoiceTransport: (
+                  await import('./services/voice/discord/DiscordVoiceTransport')
+              ).default,
+              FluxerVoiceTransport: (
+                  await import('./services/voice/fluxer/FluxerVoiceTransport')
+              ).default,
+              VoiceBridgeService: (
+                  await import('./services/voice/VoiceBridgeService')
+              ).default,
+              createOpusMixer: (await import('./services/voice/OpusMixer'))
+                  .createOpusMixer,
+          }
+        : null;
+    if (voice) logger.info('[VoiceBridge] Voice bridging is enabled');
+
+    let discordVoiceTransport: VoiceTransport | null = null;
+    let fluxerVoiceTransport: VoiceTransport | null = null;
+    let voiceBridge: VoiceBridgeService | null = null;
+
+    const stopVoiceBridge = async () => {
+        if (!voiceBridge) return;
+        const bridge = voiceBridge;
+        voiceBridge = null;
+        try {
+            await bridge.stop();
+        } catch (err) {
+            logger.error('[VoiceBridge] Error while stopping bridge:', err);
+        }
+    };
+
+    const startVoiceBridge = async () => {
+        if (!voice || !discordVoiceTransport || !fluxerVoiceTransport) return;
+        await stopVoiceBridge();
+        voiceBridge = new voice.VoiceBridgeService({
+            linkService,
+            discord: discordVoiceTransport,
+            fluxer: fluxerVoiceTransport,
+            createMixer: voice.createOpusMixer,
+            metricsService,
+            leaveGraceMs: VOICE_LEAVE_GRACE_MS,
+        });
+        try {
+            await voiceBridge.start();
+            logger.info('[VoiceBridge] Bridge service started');
+        } catch (err) {
+            logger.error('[VoiceBridge] Failed to start bridge service:', err);
+        }
+    };
+
     const fluxerArgs = {
         linkService,
         linkProvisioner,
@@ -131,6 +194,11 @@ const main = async () => {
         discordStatsService,
         fluxerStatsService,
         dbStatsService,
+        onClientCreated: voice
+            ? (client: FluxerClient) => {
+                  fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
+              }
+            : undefined,
     };
 
     const fluxerClientRef: { current: FluxerClient | null } = { current: null };
@@ -144,6 +212,7 @@ const main = async () => {
             `[Fluxer] Restarting client (attempt #${fluxerRestartAttempts})...`
         );
         healthCheckService.resetFluxerDownCount();
+        await stopVoiceBridge();
         try {
             fluxerClientRef.current?.destroy?.();
             // eslint-disable-next-line no-empty
@@ -155,6 +224,7 @@ const main = async () => {
                 `[Fluxer] Client restarted successfully (attempt #${fluxerRestartAttempts})`
             );
             fluxerRestartState = 'idle';
+            await startVoiceBridge();
         } catch (err) {
             logger.error(
                 `[Fluxer] Restart #${fluxerRestartAttempts} failed:`,
@@ -208,8 +278,10 @@ const main = async () => {
     // View Channel, Send Messages, Embed Links, Read Message History,
     // Manage Webhooks (536947712) plus the thread bits, which share the same
     // values on Discord and Fluxer: Manage Threads (1<<34),
-    // Create Public Threads (1<<35) and Send Messages in Threads (1<<38).
-    const perms = '326954462208';
+    // Create Public Threads (1<<35) and Send Messages in Threads (1<<38);
+    // plus the voice bits, also identical on both platforms: Connect (1<<20),
+    // Speak (1<<21) and Use Voice Activity (1<<25).
+    const perms = '326991162368';
     const discordBotInviteLink = generateDiscordBotInviteLink(
         DISCORD_APP_ID,
         perms
@@ -254,6 +326,11 @@ const main = async () => {
     }, 30_000);
 
     logger.info('Both Discord and Fluxer clients have started successfully.');
+
+    if (voice) {
+        discordVoiceTransport = new voice.DiscordVoiceTransport(discordClient);
+        if (fluxerClientRef.current) await startVoiceBridge();
+    }
 
     if (ENABLE_WEB_DASHBOARD) {
         const webApp = createWebApp({

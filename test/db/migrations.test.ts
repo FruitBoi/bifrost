@@ -8,10 +8,12 @@ import * as indexes from '../../src/db/migrations/00002-add-channel-link-indexes
 import * as threadLinks from '../../src/db/migrations/00003-add-thread-links';
 import * as locationLinks from '../../src/db/migrations/00004-location-links';
 import * as categoryLinks from '../../src/db/migrations/00005-category-links';
+import * as voiceLinks from '../../src/db/migrations/00006-voice-links';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
+import { SequelizeVoiceLinkRepository } from '../../src/db/sequelizerepos/SequelizeVoiceLinkRepository';
 
 // Same storage/context as src/db/migrator.ts, but over the TypeScript sources
 // (the real migrator globs the compiled dist/ files).
@@ -37,6 +39,11 @@ const umzug = new Umzug({
             name: '00005-category-links.js',
             up: categoryLinks.up,
             down: categoryLinks.down,
+        },
+        {
+            name: '00006-voice-links.js',
+            up: voiceLinks.up,
+            down: voiceLinks.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -368,9 +375,9 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
             fluxerChannelId: 'fhost',
         });
         expect(created.id).toBeTruthy();
-        expect(await categories.findByDiscordCategoryId('dcat')).toMatchObject(
-            { id: created.id }
-        );
+        expect(await categories.findByDiscordCategoryId('dcat')).toMatchObject({
+            id: created.id,
+        });
         expect(await categories.findById(created.id)).toMatchObject({
             discordCategoryId: 'dcat',
         });
@@ -406,9 +413,7 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         });
         expect(bridged.categoryLinkId).toBe(created.id);
         expect(
-            (await channels.findAllByCategoryLink(created.id)).map(
-                (l) => l.id
-            )
+            (await channels.findAllByCategoryLink(created.id)).map((l) => l.id)
         ).toEqual([bridged.id]);
         expect(await channels.findAllByCategoryLink('nope')).toEqual([]);
         // Rows from before the migration have a null categoryLinkId.
@@ -461,6 +466,124 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(
             (await qi.describeTable('channel_links')).categoryLinkId
         ).toBeDefined();
+    });
+
+    it('00006 adds voice_links with its indexes, and rolls back cleanly', async () => {
+        expect(await executed()).toContain('00006-voice-links.js');
+        expect(await qi.tableExists('voice_links')).toBe(true);
+
+        const cols = await qi.describeTable('voice_links');
+        expect(cols.guildLinkId).toMatchObject({ allowNull: false });
+        expect(cols.discordChannelId).toMatchObject({ allowNull: false });
+        expect(cols.fluxerChannelId).toMatchObject({ allowNull: false });
+        expect(cols.enabled).toMatchObject({
+            allowNull: false,
+            defaultValue: true,
+        });
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('voice_links');
+        const byName = (name: string) => indexes.find((i) => i.name === name);
+        expect(byName('voice_links_discord_channel_id')).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'discordChannelId' }],
+        });
+        expect(byName('voice_links_fluxer_channel_id')).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'fluxerChannelId' }],
+        });
+        expect(byName('voice_links_guild_link_id')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'guildLinkId' }],
+        });
+
+        // The repository works against the new schema.
+        const voice = new SequelizeVoiceLinkRepository();
+        const created = await voice.create({
+            guildLinkId: 'g1',
+            discordChannelId: 'dvc',
+            fluxerChannelId: 'fvc',
+        });
+        expect(created).toMatchObject({
+            guildLinkId: 'g1',
+            discordChannelId: 'dvc',
+            fluxerChannelId: 'fvc',
+            enabled: true,
+        });
+        expect(created.id).toBeTruthy();
+        expect(created.createdAt).toBeInstanceOf(Date);
+        expect(await voice.findById(created.id)).toMatchObject({
+            discordChannelId: 'dvc',
+        });
+        expect(await voice.findByDiscordChannelId('dvc')).toMatchObject({
+            id: created.id,
+        });
+        expect(await voice.findByFluxerChannelId('fvc')).toMatchObject({
+            id: created.id,
+        });
+        expect(await voice.findByDiscordChannelId('nope')).toBeNull();
+        expect((await voice.findAllByGuild('g1')).map((v) => v.id)).toEqual([
+            created.id,
+        ]);
+        expect((await voice.findAll()).map((v) => v.id)).toEqual([created.id]);
+        expect(await voice.getVoiceLinksCount()).toBe(1);
+
+        const disabled = await voice.create({
+            guildLinkId: 'g1',
+            discordChannelId: 'dvc-off',
+            fluxerChannelId: 'fvc-off',
+            enabled: false,
+        });
+        expect(disabled.enabled).toBe(false);
+        expect((await voice.setEnabled(created.id, false))?.enabled).toBe(
+            false
+        );
+        expect((await voice.findById(created.id))?.enabled).toBe(false);
+        expect((await voice.setEnabled(created.id, true))?.enabled).toBe(true);
+        expect(await voice.setEnabled('missing', true)).toBeNull();
+
+        // Each voice channel can be linked only once.
+        await expect(
+            voice.create({
+                guildLinkId: 'g1',
+                discordChannelId: 'dvc',
+                fluxerChannelId: 'fvc-other',
+            })
+        ).rejects.toThrow();
+        await expect(
+            voice.create({
+                guildLinkId: 'g1',
+                discordChannelId: 'dvc-other',
+                fluxerChannelId: 'fvc',
+            })
+        ).rejects.toThrow();
+
+        await voice.deleteById(disabled.id);
+        expect(await voice.findById(disabled.id)).toBeNull();
+        expect(await voice.getVoiceLinksCount()).toBe(1);
+        await voice.deleteByGuildLinkId('g1');
+        expect(await voice.getVoiceLinksCount()).toBe(0);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00006-voice-links.js' });
+        expect(await executed()).toEqual([
+            '00001-baseline.js',
+            '00002-add-channel-link-indexes.js',
+            '00003-add-thread-links.js',
+            '00004-location-links.js',
+            '00005-category-links.js',
+        ]);
+        expect(await qi.tableExists('voice_links')).toBe(false);
+        expect(await qi.tableExists('category_links')).toBe(true);
+        expect(
+            (await select<{ id: string }>('SELECT id FROM channel_links'))
+                .length
+        ).toBe(4);
+
+        await umzug.up();
+        expect(await executed()).toContain('00006-voice-links.js');
+        expect(await qi.tableExists('voice_links')).toBe(true);
+        expect(await voice.getVoiceLinksCount()).toBe(0);
     });
 
     it('rolls 00004 back to the thread_links schema and re-applies', async () => {
@@ -528,6 +651,7 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         await umzug.up();
         expect(await executed()).toContain('00004-location-links.js');
         expect(await executed()).toContain('00005-category-links.js');
+        expect(await executed()).toContain('00006-voice-links.js');
         expect(
             (
                 await new SequelizeChannelLinkRepository().findByDiscordLocation(
@@ -536,5 +660,6 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
             )?.fluxerThreadId
         ).toBe('ft0');
         expect(await qi.tableExists('category_links')).toBe(true);
+        expect(await qi.tableExists('voice_links')).toBe(true);
     });
 });

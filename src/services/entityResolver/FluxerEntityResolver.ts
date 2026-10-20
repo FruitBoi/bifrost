@@ -5,6 +5,7 @@ import {
     GuildEmoji,
     Message,
     ThreadChannel,
+    VoiceChannel,
 } from '@fluxerjs/core';
 import NodeCache from 'node-cache';
 import logger from '../../utils/logging/logger';
@@ -94,6 +95,40 @@ export default class FluxerEntityResolver implements EntityResolver<
             return channel;
         } catch {
             return null;
+        }
+    }
+
+    /** Fetches a voice channel of the guild; null for any other channel type. */
+    async fetchVoiceChannel(
+        guildOrId: string | Guild,
+        channelId: string
+    ): Promise<VoiceChannel | null> {
+        const channel = await this.fetchChannel(guildOrId, channelId);
+        if (!channel || !channel.isVoice()) return null;
+        return channel;
+    }
+
+    /** Lists the guild's voice channels; empty when the guild is unknown. */
+    async listVoiceChannels(
+        guildOrId: string | Guild
+    ): Promise<{ id: string; name: string }[]> {
+        this.ensureClient();
+
+        try {
+            const guild =
+                typeof guildOrId === 'string'
+                    ? await this.fetchGuild(guildOrId)
+                    : guildOrId;
+            if (!guild) return [];
+
+            return (await guild.fetchChannels())
+                .filter((channel) => channel.isVoice())
+                .map((channel) => ({
+                    id: channel.id,
+                    name: channel.name ?? channel.id,
+                }));
+        } catch {
+            return [];
         }
     }
 

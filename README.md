@@ -13,6 +13,7 @@
 - Bridge messages using webhooks
 - Easy setup using our hosted bot or self-hosting with Docker
 - Customizable bot prefix and settings
+- Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
 
@@ -77,6 +78,47 @@ Besides the permissions the bot already needs for channel bridging, thread bridg
 ### Database migration
 
 Thread bridging ships as three migrations. `00003-add-thread-links` adds `channel_links.autoSyncThreads` and a `thread_links` table (the first iteration of the feature). `00004-location-links` adds the nullable `channel_links.discordThreadId` / `fluxerThreadId` columns, replaces the unique indexes on the channel ID columns with partial ones (a channel can be linked once as a channel and still own any number of thread links), converts any existing `thread_links` rows into links of their own (inheriting the parent link's webhooks and keeping their message links), and drops `thread_links`. `00005-category-links` adds the `category_links` table (one row per linked Discord category) and the nullable `channel_links.categoryLinkId` column that tags the links a category link creates. Migrations run automatically on startup, so existing databases need no manual steps; existing channel links are unchanged and simply start with the toggle off.
+
+## Voice
+
+A **voice link** bridges a Discord voice channel with a Fluxer voice channel. While the bridge is live, the bot sits in both channels and plays the mixed audio of each side into the other, so each side hears everyone on the other side as one extra participant. Voice bridging is **off by default** and is switched on with `BF_ENABLE_VOICE_BRIDGE=true`; without it the voice packages are never loaded and the commands below report that the feature is disabled.
+
+Two constraints follow from how both platforms work:
+
+- A bot can be in **one voice channel per server** on either platform, so a linked server pair can have many voice links but only **one live bridge at a time**. If a second linked channel gets visitors while a bridge is live, it is left alone until the first one ends.
+- The bot cannot speak as individual users. Discord shows one participant for the whole Fluxer side and vice versa.
+
+### Lifecycle
+
+- The bridge joins both channels as soon as a person (not a bot) is in either linked channel, and leaves both after they have been empty for `BF_VOICE_LEAVE_GRACE_MS` (default 30 seconds).
+- Users who self-mute or deafen are left out of the mix for the other side; everyone else is mixed in as they speak.
+- If either voice connection drops while people are still present, the bridge leaves the other side too and rejoins with a short backoff. After a few failed attempts it gives up until someone joins again.
+- Disabling or removing a voice link while its bridge is live disconnects the bridge immediately.
+
+### Commands
+
+From either platform (the first ID is a voice channel on the platform you run the command on, the second one is on the other platform):
+
+- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — shows a preview with both channel names. Confirm with `!b voice confirm`.
+- `!b voice unlink <voiceChannelId>` — removes the link. Confirm with `!b voice confirm`.
+- `!b voice on <voiceChannelId>` / `!b voice off <voiceChannelId>` — enables or disables a link without removing it.
+- `!b voice` — lists the server's voice links and whether they are enabled. `!b list` shows them too, marked with 🔊.
+
+In the web dashboard, the *Link voice* dialog pairs two voice channels and the *Voice* block lists existing links with an enable switch and an unlink button.
+
+### Permissions
+
+On top of the permissions listed above, voice bridging requires **Connect**, **Speak** and **Use Voice Activity** in the linked voice channels on both platforms, and the Discord bot needs the *Guild Voice States* gateway intent (requested automatically). The invite links logged at startup include the extra permissions; installations made before voice support was added must grant them manually or re-invite the bot.
+
+### Self-hosting notes
+
+The audio path uses native modules (`@discordjs/opus`, `sodium-native`, `@snazzah/davey` for Discord's DAVE end-to-end encryption, and `@livekit/rtc-node` pulled in by `@fluxerjs/voice`). The container needs outbound UDP to Discord's voice servers and to the Fluxer instance's LiveKit media server. Each live bridge costs roughly one CPU core-fraction for Opus decoding, mixing and encoding in both directions. The voice packages declare Node 22 as their minimum while the image ships Node 20; the stack was verified to load and run its tests on Node 20, but moving the image to `node:22-slim` is recommended before relying on voice in production.
+
+Fluxer currently runs voice on LiveKit and has announced it will replace it with its own end-to-end encrypted voice server. The Fluxer side of the bridge is isolated behind a small transport interface so it can be swapped when that happens; see [docs/VOICE_BRIDGE_FUTURE.md](docs/VOICE_BRIDGE_FUTURE.md) and [docs/VOICE_SPIKE.md](docs/VOICE_SPIKE.md).
+
+### Database migration
+
+Voice links ship as migration `00006-voice-links`, which adds the `voice_links` table (one row per pair of voice channels, with an `enabled` flag). It runs automatically on startup.
 
 ## Community
 

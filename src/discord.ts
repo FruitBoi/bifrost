@@ -40,6 +40,7 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryDiscordCommandHandler from './commands/discord/handlers/CategoryDiscordCommandHandler';
+import VoiceDiscordCommandHandler from './commands/discord/handlers/VoiceDiscordCommandHandler';
 
 const startDiscordClient = async ({
     linkService,
@@ -75,6 +76,7 @@ const startDiscordClient = async ({
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages,
             GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildVoiceStates,
         ],
         partials: [Partials.Message, Partials.Channel],
         presence: {
@@ -148,6 +150,10 @@ const startDiscordClient = async ({
             linkService,
             categorySyncService
         )
+    );
+    commandRegistry.registerCommand(
+        'voice',
+        new VoiceDiscordCommandHandler(client, linkService, linkProvisioner)
     );
     commandRegistry.registerCommand(
         'autolink',

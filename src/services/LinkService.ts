@@ -5,16 +5,33 @@ import {
 } from '../db/repositories/ChannelLinkRepository';
 import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
 import { CategoryLinkRepository } from '../db/repositories/CategoryLinkRepository';
+import { VoiceLinkRepository } from '../db/repositories/VoiceLinkRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
 import { CategoryLink } from '../db/entities/CategoryLink';
+import { VoiceLink } from '../db/entities/VoiceLink';
+
+/**
+ * Notified after a voice link is created, enabled/disabled or removed, so the
+ * live bridge can react. `link` is null when the link was removed.
+ */
+export interface VoiceLinkListener {
+    onVoiceLinkChanged(voiceLinkId: string, link: VoiceLink | null): void;
+}
 
 export class LinkService {
     constructor(
         private guildRepo: GuildLinkRepository,
         private channelRepo: ChannelLinkRepository,
         private messageRepo: MessageLinkRepository,
-        private categoryRepo: CategoryLinkRepository
+        private categoryRepo: CategoryLinkRepository,
+        private voiceRepo: VoiceLinkRepository
     ) {}
+
+    private voiceLinkListener: VoiceLinkListener | null = null;
+
+    setVoiceLinkListener(listener: VoiceLinkListener | null) {
+        this.voiceLinkListener = listener;
+    }
 
     // ---------------------------------------------------------------------
     // Guild links
@@ -60,7 +77,12 @@ export class LinkService {
         await this.messageRepo.deleteByGuildLinkId(guildLinkId);
         await this.channelRepo.deleteByGuildLinkId(guildLinkId);
         await this.categoryRepo.deleteByGuildLinkId(guildLinkId);
+        const voiceLinks = await this.voiceRepo.findAllByGuild(guildLinkId);
+        await this.voiceRepo.deleteByGuildLinkId(guildLinkId);
         await this.guildRepo.deleteById(guildLinkId);
+        for (const voiceLink of voiceLinks) {
+            this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
+        }
     }
 
     async removeGuildLinkFromDiscord(discordGuildId: string) {
@@ -283,5 +305,78 @@ export class LinkService {
 
     async deleteMessageLink(id: string) {
         return this.messageRepo.deleteMessageLink(id);
+    }
+
+    // ---------------------------------------------------------------------
+    // Voice links (one row per pair of voice channels, no webhooks)
+    // ---------------------------------------------------------------------
+
+    async getVoiceLinkById(id: string) {
+        return this.voiceRepo.findById(id);
+    }
+
+    async getVoiceLinkForDiscordChannel(discordChannelId: string) {
+        return this.voiceRepo.findByDiscordChannelId(discordChannelId);
+    }
+
+    async getVoiceLinkForFluxerChannel(fluxerChannelId: string) {
+        return this.voiceRepo.findByFluxerChannelId(fluxerChannelId);
+    }
+
+    async getVoiceLinksForGuildLink(guildLinkId: string) {
+        return this.voiceRepo.findAllByGuild(guildLinkId);
+    }
+
+    async getAllVoiceLinks() {
+        return this.voiceRepo.findAll();
+    }
+
+    async getVoiceLinksCount() {
+        return this.voiceRepo.getVoiceLinksCount();
+    }
+
+    /**
+     * Persists a voice link. Each voice channel can be linked once; callers
+     * validate that both IDs really are voice channels of the linked guilds.
+     */
+    async createVoiceLink(data: {
+        guildLinkId: string;
+        discordChannelId: string;
+        fluxerChannelId: string;
+        enabled?: boolean;
+    }): Promise<VoiceLink> {
+        if (
+            await this.voiceRepo.findByDiscordChannelId(data.discordChannelId)
+        ) {
+            throw new Error('Discord voice channel already linked');
+        }
+        if (await this.voiceRepo.findByFluxerChannelId(data.fluxerChannelId)) {
+            throw new Error('Fluxer voice channel already linked');
+        }
+        const link = await this.voiceRepo.create(data);
+        this.voiceLinkListener?.onVoiceLinkChanged(link.id, link);
+        return link;
+    }
+
+    async setVoiceLinkEnabled(
+        voiceLinkId: string,
+        enabled: boolean
+    ): Promise<VoiceLink> {
+        const link = await this.voiceRepo.setEnabled(voiceLinkId, enabled);
+        if (!link) {
+            throw new Error('Voice link not found');
+        }
+        this.voiceLinkListener?.onVoiceLinkChanged(link.id, link);
+        return link;
+    }
+
+    async removeVoiceLink(voiceLinkId: string): Promise<VoiceLink> {
+        const link = await this.voiceRepo.findById(voiceLinkId);
+        if (!link) {
+            throw new Error('Voice link not found');
+        }
+        await this.voiceRepo.deleteById(link.id);
+        this.voiceLinkListener?.onVoiceLinkChanged(link.id, null);
+        return link;
     }
 }

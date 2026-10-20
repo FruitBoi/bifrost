@@ -15,6 +15,7 @@ import authRouter from './routes/auth';
 import invitesRouter from './routes/invites';
 import { createGuildsRouter } from './routes/guilds';
 import { createChannelsRouter } from './routes/channels';
+import { createVoiceRouter } from './routes/voice';
 import { createAdminRouter } from './routes/admin';
 
 const DASHBOARD_DIST = path.join(__dirname, '..', '..', 'dashboard', 'dist');
@@ -66,6 +67,14 @@ export function createWebApp({
             linkService,
             linkProvisioner,
             categorySyncService,
+            discordClient,
+            fluxerClientRef,
+        })
+    );
+    app.use(
+        '/api',
+        createVoiceRouter({
+            linkService,
             discordClient,
             fluxerClientRef,
         })

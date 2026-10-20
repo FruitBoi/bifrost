@@ -169,6 +169,13 @@ export const WEB_TRUST_PROXY = parseTrustProxy(process.env.BF_WEB_TRUST_PROXY);
 export const DISCORD_CLIENT_SECRET = process.env.BF_DISCORD_CLIENT_SECRET || '';
 export const FLUXER_CLIENT_SECRET = process.env.BF_FLUXER_CLIENT_SECRET || '';
 
+export const ENABLE_VOICE_BRIDGE = parseBool(
+    process.env.BF_ENABLE_VOICE_BRIDGE
+);
+export const VOICE_LEAVE_GRACE_MS = process.env.BF_VOICE_LEAVE_GRACE_MS
+    ? Number(process.env.BF_VOICE_LEAVE_GRACE_MS)
+    : 30000;
+
 export const GIT_COMMIT =
     process.env.GIT_COMMIT || tryExec('git rev-parse HEAD');
 export const REPO_URL =

@@ -111,6 +111,33 @@ export interface CreateCategoryLinkBody {
     fluxerChannelId: string;
 }
 
+/** A Discord voice channel bridged with a Fluxer voice channel. */
+export interface VoiceLinkResponse {
+    id: string;
+    discordChannelId: string;
+    fluxerChannelId: string;
+    /** Null when the bot cannot see the channel any more. */
+    discordChannelName: string | null;
+    fluxerChannelName: string | null;
+    enabled: boolean;
+    createdAt: string;
+}
+
+/** Voice channels of the two guilds of a guild link. */
+export interface VoiceChannelsResponse {
+    discord: ChannelSummary[];
+    fluxer: ChannelSummary[];
+}
+
+export interface CreateVoiceLinkBody {
+    discordChannelId: string;
+    fluxerChannelId: string;
+}
+
+export interface UpdateVoiceLinkBody {
+    enabled: boolean;
+}
+
 export interface CategoryLinkResultResponse {
     id: string;
     linked: number;

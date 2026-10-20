@@ -1,10 +1,12 @@
 import {
     AnyThreadChannel,
     Channel,
+    ChannelType,
     Client,
     Guild,
     GuildEmoji,
     Message,
+    VoiceChannel,
 } from 'discord.js';
 import NodeCache from 'node-cache';
 import EntityResolver from '../entityResolver/EntityResolver';
@@ -72,6 +74,41 @@ export default class DiscordEntityResolver implements EntityResolver<
             return channel;
         } catch {
             return null;
+        }
+    }
+
+    /** Fetches a voice channel of the guild; null for any other channel type. */
+    async fetchVoiceChannel(
+        guildOrId: string | Guild,
+        channelId: string
+    ): Promise<VoiceChannel | null> {
+        const channel = await this.fetchChannel(guildOrId, channelId);
+        if (!channel || channel.type !== ChannelType.GuildVoice) return null;
+        return channel;
+    }
+
+    /** Lists the guild's voice channels; empty when the guild is unknown. */
+    async listVoiceChannels(
+        guildOrId: string | Guild
+    ): Promise<{ id: string; name: string }[]> {
+        this.ensureClient();
+
+        try {
+            const guild =
+                typeof guildOrId === 'string'
+                    ? await this.fetchGuild(guildOrId)
+                    : guildOrId;
+            if (!guild) return [];
+
+            const channels = await guild.channels.fetch();
+            return channels
+                .filter(
+                    (channel): channel is VoiceChannel =>
+                        channel?.type === ChannelType.GuildVoice
+                )
+                .map((channel) => ({ id: channel.id, name: channel.name }));
+        } catch {
+            return [];
         }
     }
 

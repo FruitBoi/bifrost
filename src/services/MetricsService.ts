@@ -10,6 +10,8 @@ export default class MetricsService {
     public readonly healthPingMs: Gauge<'bot'>;
     public readonly messagesRelayed: Counter<'direction'>;
     public readonly messageRelayErrors: Counter<'direction'>;
+    public readonly voiceBridgesLive: Gauge;
+    public readonly voiceBridgeJoins: Counter<'result'>;
 
     constructor(port: number) {
         this.registry = new Registry();
@@ -45,6 +47,19 @@ export default class MetricsService {
             name: 'bifrost_message_relay_errors_total',
             help: 'Total number of message relay errors',
             labelNames: ['direction'],
+            registers: [this.registry],
+        });
+
+        this.voiceBridgesLive = new Gauge({
+            name: 'bifrost_voice_bridges_live',
+            help: 'Number of voice bridges currently live',
+            registers: [this.registry],
+        });
+
+        this.voiceBridgeJoins = new Counter({
+            name: 'bifrost_voice_bridge_joins_total',
+            help: 'Total number of voice bridge join attempts by result',
+            labelNames: ['result'],
             registers: [this.registry],
         });
 

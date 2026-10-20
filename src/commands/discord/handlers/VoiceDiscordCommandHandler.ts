@@ -1,0 +1,434 @@
+import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import { LinkService } from '../../../services/LinkService';
+import LinkProvisioner from '../../../services/LinkProvisioner';
+import { GuildLink } from '../../../db/entities/GuildLink';
+import { VoiceLink } from '../../../db/entities/VoiceLink';
+import DiscordCommandHandler, {
+    DiscordCommandHandlerMessage,
+} from '../DiscordCommandHandler';
+import { getDiscordCommandUsage } from '../../../commands/commandList';
+import { COMMAND_PREFIX, ENABLE_VOICE_BRIDGE } from '../../../utils/env';
+import logger from '../../../utils/logging/logger';
+import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
+
+type PendingVoiceAction =
+    | {
+          type: 'create';
+          guildLink: GuildLink;
+          discordChannelId: string;
+          fluxerChannelId: string;
+      }
+    | { type: 'remove'; voiceLinkId: string };
+
+/**
+ * `voice <discordVoiceChannelId> <fluxerVoiceChannelId> | unlink <id> |
+ * on <id> | off <id> | confirm` — pairs a Discord voice channel with a
+ * Fluxer voice channel. Creating and removing a voice link shows a preview
+ * and is executed with `confirm`; `on`/`off` toggle a link without removing
+ * it, and with no arguments the server's voice links are listed.
+ */
+export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
+    private pending = new Map<
+        string,
+        { action: PendingVoiceAction; timer: NodeJS.Timeout }
+    >();
+
+    constructor(
+        client: Client,
+        private readonly linkService: LinkService,
+        private readonly linkProvisioner: LinkProvisioner
+    ) {
+        super(client);
+    }
+
+    private setPending(userId: string, action: PendingVoiceAction) {
+        const existing = this.pending.get(userId);
+        if (existing) clearTimeout(existing.timer);
+        const timer = setTimeout(
+            () => this.pending.delete(userId),
+            5 * 60 * 1000
+        );
+        this.pending.set(userId, { action, timer });
+    }
+
+    private takePending(userId: string): PendingVoiceAction | null {
+        const entry = this.pending.get(userId);
+        if (!entry) return null;
+        clearTimeout(entry.timer);
+        this.pending.delete(userId);
+        return entry.action;
+    }
+
+    private async replyError(
+        message: DiscordCommandHandlerMessage,
+        description: string
+    ) {
+        await message.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setDescription(description)
+                    .setColor(EmbedColors.Error)
+                    .setFooter(this.footer(message))
+                    .setTimestamp(),
+            ],
+        });
+    }
+
+    private async replyEmbed(
+        message: DiscordCommandHandlerMessage,
+        description: string,
+        color: number
+    ) {
+        await message.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setDescription(description)
+                    .setColor(color)
+                    .setFooter(this.footer(message))
+                    .setTimestamp(),
+            ],
+        });
+    }
+
+    /** Fluxer voice channel name for display, falling back to the ID. */
+    private async fluxerName(
+        guildLink: GuildLink,
+        fluxerChannelId: string
+    ): Promise<string> {
+        const target = await this.linkProvisioner
+            .resolveFluxerVoiceTarget(guildLink.fluxerGuildId, fluxerChannelId)
+            .catch(() => null);
+        return target?.name ?? fluxerChannelId;
+    }
+
+    /**
+     * Looks up the voice link for a Discord voice channel and makes sure it
+     * belongs to this server's guild link.
+     */
+    private async voiceLinkFor(
+        guildLink: GuildLink,
+        discordChannelId: string
+    ): Promise<VoiceLink | null> {
+        const voiceLink = await this.linkService
+            .getVoiceLinkForDiscordChannel(discordChannelId)
+            .catch(() => null);
+        if (!voiceLink || voiceLink.guildLinkId !== guildLink.id) return null;
+        return voiceLink;
+    }
+
+    public async handleCommand(
+        message: DiscordCommandHandlerMessage,
+        _command: string,
+        ...args: string[]
+    ): Promise<void> {
+        if (!message.inGuild()) {
+            await this.replyError(
+                message,
+                'This command must be used in a server.'
+            );
+            return;
+        }
+
+        if (
+            !(await this.requirePermission(
+                message,
+                PermissionFlagsBits.ManageWebhooks,
+                'Manage Webhooks'
+            ))
+        )
+            return;
+
+        if (!ENABLE_VOICE_BRIDGE) {
+            await this.replyError(
+                message,
+                'Voice bridging is disabled on this bot. Set `BF_ENABLE_VOICE_BRIDGE=true` to enable it.'
+            );
+            return;
+        }
+
+        const sub = args[0]?.toLowerCase();
+
+        if (sub === 'confirm') {
+            await this.handleConfirm(message);
+            return;
+        }
+
+        const guildLink = await this.linkService
+            .getGuildLinkForDiscordGuild(message.guildId!)
+            .catch(() => null);
+        if (!guildLink) {
+            await this.replyError(
+                message,
+                `This server is not linked to a Fluxer guild. Link one first with \`${COMMAND_PREFIX}link <fluxer-guild-id>\`.`
+            );
+            return;
+        }
+
+        if (sub === undefined) {
+            await this.handleList(message, guildLink);
+            return;
+        }
+
+        if (sub === 'unlink') {
+            await this.handleUnlink(message, guildLink, args[1]);
+            return;
+        }
+
+        if (sub === 'on' || sub === 'off') {
+            await this.handleToggle(message, guildLink, args[1], sub === 'on');
+            return;
+        }
+
+        await this.handleCreate(message, guildLink, args[0], args[1]);
+    }
+
+    private async handleList(
+        message: DiscordCommandHandlerMessage,
+        guildLink: GuildLink
+    ) {
+        try {
+            const voiceLinks = await this.linkService.getVoiceLinksForGuildLink(
+                guildLink.id
+            );
+            if (voiceLinks.length === 0) {
+                await message.reply(getDiscordCommandUsage('voice'));
+                return;
+            }
+
+            const lines = await Promise.all(
+                voiceLinks.map(async (voiceLink) => {
+                    const fluxerName = await this.fluxerName(
+                        guildLink,
+                        voiceLink.fluxerChannelId
+                    );
+                    const fluxerUrl = `https://fluxer.app/channels/${guildLink.fluxerGuildId}/${voiceLink.fluxerChannelId}`;
+                    const state = voiceLink.enabled
+                        ? '✅ enabled'
+                        : '⛔ disabled';
+                    return `🔊 <#${voiceLink.discordChannelId}> ←→ [🔊 ${fluxerName}](${fluxerUrl}) · ${state}\n  └ \`${voiceLink.discordChannelId}\` · \`${voiceLink.fluxerChannelId}\``;
+                })
+            );
+            const chunks = chunkDescriptionLines(lines);
+            const embeds = chunks.map((chunk, i) =>
+                new EmbedBuilder()
+                    .setTitle(i === 0 ? 'Discord ↔ Fluxer | Voice Links' : null)
+                    .setDescription(chunk.join('\n\n'))
+                    .setColor(EmbedColors.Info)
+            );
+            embeds[embeds.length - 1]
+                .setFooter(this.footer(message))
+                .setTimestamp();
+            await message.reply({ embeds });
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to list voice links: ${(err as Error).message}`
+            );
+            logger.error('Error listing voice links:', err);
+        }
+    }
+
+    private async handleCreate(
+        message: DiscordCommandHandlerMessage,
+        guildLink: GuildLink,
+        discordChannelId: string,
+        fluxerChannelId: string | undefined
+    ) {
+        if (!fluxerChannelId) {
+            await message.reply(getDiscordCommandUsage('voice'));
+            return;
+        }
+
+        try {
+            const discord =
+                await this.linkProvisioner.resolveDiscordVoiceTarget(
+                    guildLink.discordGuildId,
+                    discordChannelId
+                );
+            if (!discord) {
+                await this.replyError(
+                    message,
+                    `\`${discordChannelId}\` is not a voice channel of this server.`
+                );
+                return;
+            }
+            const fluxer = await this.linkProvisioner.resolveFluxerVoiceTarget(
+                guildLink.fluxerGuildId,
+                fluxerChannelId
+            );
+            if (!fluxer) {
+                await this.replyError(
+                    message,
+                    `\`${fluxerChannelId}\` is not a voice channel of the linked Fluxer guild.`
+                );
+                return;
+            }
+
+            if (
+                await this.linkService.getVoiceLinkForDiscordChannel(discord.id)
+            ) {
+                await this.replyError(
+                    message,
+                    `<#${discord.id}> is already linked to a Fluxer voice channel. Run \`${COMMAND_PREFIX}voice unlink ${discord.id}\` first.`
+                );
+                return;
+            }
+            if (
+                await this.linkService.getVoiceLinkForFluxerChannel(fluxer.id)
+            ) {
+                await this.replyError(
+                    message,
+                    `Fluxer voice channel **${fluxer.name}** (\`${fluxer.id}\`) is already linked to a Discord voice channel.`
+                );
+                return;
+            }
+
+            this.setPending(message.author.id, {
+                type: 'create',
+                guildLink,
+                discordChannelId: discord.id,
+                fluxerChannelId: fluxer.id,
+            });
+            await this.replyEmbed(
+                message,
+                `This links voice channel 🔊 <#${discord.id}> with Fluxer voice channel 🔊 **${fluxer.name}** (\`${fluxer.id}\`).\n` +
+                    `Only one voice link per server pair can be live at a time; the bridge joins whichever linked channel gets visitors first.\n` +
+                    `Run \`${COMMAND_PREFIX}voice confirm\` to proceed.`,
+                EmbedColors.Warning
+            );
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to prepare voice link: ${(err as Error).message}`
+            );
+            logger.error('Voice link preview failed:', err);
+        }
+    }
+
+    private async handleUnlink(
+        message: DiscordCommandHandlerMessage,
+        guildLink: GuildLink,
+        discordChannelId: string | undefined
+    ) {
+        if (!discordChannelId) {
+            await message.reply(getDiscordCommandUsage('voice'));
+            return;
+        }
+
+        const voiceLink = await this.voiceLinkFor(guildLink, discordChannelId);
+        if (!voiceLink) {
+            await this.replyError(
+                message,
+                `Voice channel \`${discordChannelId}\` is not linked in this server.`
+            );
+            return;
+        }
+
+        const fluxerName = await this.fluxerName(
+            guildLink,
+            voiceLink.fluxerChannelId
+        );
+        this.setPending(message.author.id, {
+            type: 'remove',
+            voiceLinkId: voiceLink.id,
+        });
+        await this.replyEmbed(
+            message,
+            `This removes the voice link between 🔊 <#${voiceLink.discordChannelId}> and Fluxer voice channel 🔊 **${fluxerName}** (\`${voiceLink.fluxerChannelId}\`). A live bridge is disconnected immediately.\n` +
+                `Run \`${COMMAND_PREFIX}voice confirm\` to proceed.`,
+            EmbedColors.Warning
+        );
+    }
+
+    private async handleToggle(
+        message: DiscordCommandHandlerMessage,
+        guildLink: GuildLink,
+        discordChannelId: string | undefined,
+        enabled: boolean
+    ) {
+        if (!discordChannelId) {
+            await message.reply(getDiscordCommandUsage('voice'));
+            return;
+        }
+
+        const voiceLink = await this.voiceLinkFor(guildLink, discordChannelId);
+        if (!voiceLink) {
+            await this.replyError(
+                message,
+                `Voice channel \`${discordChannelId}\` is not linked in this server.`
+            );
+            return;
+        }
+
+        try {
+            await this.linkService.setVoiceLinkEnabled(voiceLink.id, enabled);
+            await this.replyEmbed(
+                message,
+                enabled
+                    ? `Voice link for 🔊 <#${voiceLink.discordChannelId}> is now **enabled**.`
+                    : `Voice link for 🔊 <#${voiceLink.discordChannelId}> is now **disabled**. The link is kept but the bridge will not join.`,
+                EmbedColors.Success
+            );
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to ${enabled ? 'enable' : 'disable'} voice link: ${(err as Error).message}`
+            );
+            logger.error('Voice link toggle failed:', err);
+        }
+    }
+
+    private async handleConfirm(message: DiscordCommandHandlerMessage) {
+        const pending = this.takePending(message.author.id);
+        if (!pending) {
+            await this.replyError(
+                message,
+                `No pending voice action. Run \`${COMMAND_PREFIX}voice <discordVoiceChannelId> <fluxerVoiceChannelId>\` or \`${COMMAND_PREFIX}voice unlink <discordVoiceChannelId>\` first.`
+            );
+            return;
+        }
+
+        if (pending.type === 'create') {
+            try {
+                const voiceLink = await this.linkProvisioner.createVoiceLink(
+                    pending.guildLink,
+                    pending.discordChannelId,
+                    pending.fluxerChannelId
+                );
+                const fluxerName = await this.fluxerName(
+                    pending.guildLink,
+                    voiceLink.fluxerChannelId
+                );
+                await this.replyEmbed(
+                    message,
+                    `Linked voice channel 🔊 <#${voiceLink.discordChannelId}> with Fluxer voice channel 🔊 **${fluxerName}** (\`${voiceLink.fluxerChannelId}\`).`,
+                    EmbedColors.Success
+                );
+            } catch (err: unknown) {
+                await this.replyError(
+                    message,
+                    `Failed to create voice link: ${(err as Error).message}`
+                );
+                logger.error('Voice link failed:', err);
+            }
+            return;
+        }
+
+        try {
+            const voiceLink = await this.linkProvisioner.removeVoiceLink(
+                pending.voiceLinkId
+            );
+            await this.replyEmbed(
+                message,
+                `Removed the voice link for 🔊 <#${voiceLink.discordChannelId}> (Fluxer voice channel \`${voiceLink.fluxerChannelId}\`).`,
+                EmbedColors.Success
+            );
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to remove voice link: ${(err as Error).message}`
+            );
+            logger.error('Voice unlink failed:', err);
+        }
+    }
+}

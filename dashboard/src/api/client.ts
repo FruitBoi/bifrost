@@ -9,11 +9,15 @@ import type {
     CreateCategoryLinkBody,
     CreateChannelLinkBody,
     CreateGuildLinkBody,
+    CreateVoiceLinkBody,
     GuildChannelsResponse,
     GuildsResponse,
     InviteLinkResponse,
     MeResponse,
     UpdateChannelLinkBody,
+    UpdateVoiceLinkBody,
+    VoiceChannelsResponse,
+    VoiceLinkResponse,
 } from '../../../src/web/types';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -188,6 +192,79 @@ export function useRunAutolink(guildLinkId: string | undefined) {
         onSuccess: () =>
             queryClient.invalidateQueries({
                 queryKey: ['guild-channels', guildLinkId],
+            }),
+    });
+}
+
+export function useVoiceChannels(
+    guildLinkId: string | undefined,
+    enabled: boolean
+) {
+    return useQuery({
+        queryKey: ['voice-channels', guildLinkId],
+        queryFn: () =>
+            apiFetch<VoiceChannelsResponse>(
+                `/guild-links/${guildLinkId}/voice-channels`
+            ),
+        enabled: !!guildLinkId && enabled,
+    });
+}
+
+export function useVoiceLinks(guildLinkId: string | undefined) {
+    return useQuery({
+        queryKey: ['voice-links', guildLinkId],
+        queryFn: () =>
+            apiFetch<VoiceLinkResponse[]>(
+                `/guild-links/${guildLinkId}/voice-links`
+            ),
+        enabled: !!guildLinkId,
+    });
+}
+
+export function useCreateVoiceLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (body: CreateVoiceLinkBody) =>
+            apiFetch<VoiceLinkResponse>(
+                `/guild-links/${guildLinkId}/voice-links`,
+                { method: 'POST', body: JSON.stringify(body) }
+            ),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['voice-links', guildLinkId],
+            }),
+    });
+}
+
+export function useUpdateVoiceLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({
+            voiceLinkId,
+            ...body
+        }: UpdateVoiceLinkBody & { voiceLinkId: string }) =>
+            apiFetch<VoiceLinkResponse>(
+                `/guild-links/${guildLinkId}/voice-links/${voiceLinkId}`,
+                { method: 'PATCH', body: JSON.stringify(body) }
+            ),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['voice-links', guildLinkId],
+            }),
+    });
+}
+
+export function useDeleteVoiceLink(guildLinkId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (voiceLinkId: string) =>
+            apiFetch<void>(
+                `/guild-links/${guildLinkId}/voice-links/${voiceLinkId}`,
+                { method: 'DELETE' }
+            ),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: ['voice-links', guildLinkId],
             }),
     });
 }

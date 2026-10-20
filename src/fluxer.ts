@@ -51,6 +51,7 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
+import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 
 const startFluxerClient = async ({
     linkService,
@@ -66,6 +67,7 @@ const startFluxerClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
+    onClientCreated,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
@@ -80,6 +82,12 @@ const startFluxerClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
+    /**
+     * Called with the freshly created client before any listener is attached
+     * and before login. The voice bridge uses this to attach its transport,
+     * which must see the gateway from READY onwards.
+     */
+    onClientCreated?: (client: Client) => void;
 }): Promise<Client> => {
     const clientOptions: ClientOptions = {
         intents: 0,
@@ -107,6 +115,8 @@ const startFluxerClient = async ({
         : new Client(clientOptions);
 
     console.log();
+
+    onClientCreated?.(client);
 
     webhookService.setFluxerClient(client);
     healthCheckService.setFluxerClient(client);
@@ -168,6 +178,10 @@ const startFluxerClient = async ({
             linkService,
             categorySyncService
         )
+    );
+    commandRegistry.registerCommand(
+        'voice',
+        new VoiceFluxerCommandHandler(client, linkService, linkProvisioner)
     );
     commandRegistry.registerCommand(
         'autolink',

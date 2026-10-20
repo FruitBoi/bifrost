@@ -3,7 +3,8 @@ import { CategoryLink } from '../../src/db/entities/CategoryLink';
 import { ChannelLink } from '../../src/db/entities/ChannelLink';
 import { GuildLink } from '../../src/db/entities/GuildLink';
 import { MessageLink } from '../../src/db/entities/MessageLink';
-import { LinkService } from '../../src/services/LinkService';
+import { VoiceLink } from '../../src/db/entities/VoiceLink';
+import { LinkService, VoiceLinkListener } from '../../src/services/LinkService';
 import LinkProvisioner, {
     LinkTarget,
 } from '../../src/services/LinkProvisioner';
@@ -53,16 +54,34 @@ export function makeCategoryLink(
     };
 }
 
+export function makeVoiceLink(overrides: Partial<VoiceLink> = {}): VoiceLink {
+    return {
+        id: nextId('voicelink'),
+        guildLinkId: guildLink.id,
+        discordChannelId: 'dvoice',
+        fluxerChannelId: 'fvoice',
+        enabled: true,
+        createdAt: new Date(),
+        ...overrides,
+    };
+}
+
 /**
  * In-memory stand-in for the subset of LinkService used by ThreadSyncService,
- * CategorySyncService and LinkProvisioner. Everything is synchronous data
- * behind async methods.
+ * CategorySyncService, LinkProvisioner and the voice bridge. Everything is
+ * synchronous data behind async methods.
  */
 export class FakeLinkService {
     links: ChannelLink[] = [];
     messageLinks: MessageLink[] = [];
     guildLinks: GuildLink[] = [guildLink];
     categoryLinks: CategoryLink[] = [];
+    voiceLinks: VoiceLink[] = [];
+    voiceLinkListener: VoiceLinkListener | null = null;
+
+    setVoiceLinkListener(listener: VoiceLinkListener | null) {
+        this.voiceLinkListener = listener;
+    }
 
     async getGuildLinkById(id: string) {
         return this.guildLinks.find((g) => g.id === id) ?? null;
@@ -161,6 +180,11 @@ export class FakeLinkService {
         this.categoryLinks = this.categoryLinks.filter(
             (c) => c.guildLinkId !== id
         );
+        const voiceLinks = this.voiceLinks.filter((v) => v.guildLinkId === id);
+        this.voiceLinks = this.voiceLinks.filter((v) => v.guildLinkId !== id);
+        for (const voiceLink of voiceLinks) {
+            this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
+        }
         this.guildLinks = this.guildLinks.filter((g) => g.id !== id);
     }
 
@@ -193,7 +217,11 @@ export class FakeLinkService {
         discordCategoryId: string;
         fluxerChannelId: string;
     }) {
-        if (await this.getCategoryLinkByDiscordCategoryId(data.discordCategoryId)) {
+        if (
+            await this.getCategoryLinkByDiscordCategoryId(
+                data.discordCategoryId
+            )
+        ) {
             throw new Error('Discord category already linked');
         }
         const categoryLink = makeCategoryLink(data);
@@ -206,6 +234,77 @@ export class FakeLinkService {
         if (!categoryLink) throw new Error('Category link not found');
         this.categoryLinks = this.categoryLinks.filter((c) => c.id !== id);
         return categoryLink;
+    }
+
+    // Voice links
+
+    async getVoiceLinkById(id: string) {
+        return this.voiceLinks.find((v) => v.id === id) ?? null;
+    }
+
+    async getVoiceLinkForDiscordChannel(discordChannelId: string) {
+        return (
+            this.voiceLinks.find(
+                (v) => v.discordChannelId === discordChannelId
+            ) ?? null
+        );
+    }
+
+    async getVoiceLinkForFluxerChannel(fluxerChannelId: string) {
+        return (
+            this.voiceLinks.find(
+                (v) => v.fluxerChannelId === fluxerChannelId
+            ) ?? null
+        );
+    }
+
+    async getVoiceLinksForGuildLink(guildLinkId: string) {
+        return this.voiceLinks.filter((v) => v.guildLinkId === guildLinkId);
+    }
+
+    async getAllVoiceLinks() {
+        return [...this.voiceLinks];
+    }
+
+    async getVoiceLinksCount() {
+        return this.voiceLinks.length;
+    }
+
+    async createVoiceLink(data: {
+        guildLinkId: string;
+        discordChannelId: string;
+        fluxerChannelId: string;
+        enabled?: boolean;
+    }) {
+        if (await this.getVoiceLinkForDiscordChannel(data.discordChannelId)) {
+            throw new Error('Discord voice channel already linked');
+        }
+        if (await this.getVoiceLinkForFluxerChannel(data.fluxerChannelId)) {
+            throw new Error('Fluxer voice channel already linked');
+        }
+        const voiceLink = makeVoiceLink({
+            ...data,
+            enabled: data.enabled ?? true,
+        });
+        this.voiceLinks.push(voiceLink);
+        this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, voiceLink);
+        return voiceLink;
+    }
+
+    async setVoiceLinkEnabled(id: string, enabled: boolean) {
+        const voiceLink = await this.getVoiceLinkById(id);
+        if (!voiceLink) throw new Error('Voice link not found');
+        voiceLink.enabled = enabled;
+        this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, voiceLink);
+        return voiceLink;
+    }
+
+    async removeVoiceLink(id: string) {
+        const voiceLink = await this.getVoiceLinkById(id);
+        if (!voiceLink) throw new Error('Voice link not found');
+        this.voiceLinks = this.voiceLinks.filter((v) => v.id !== id);
+        this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
+        return voiceLink;
     }
 
     async getMessageLinkByDiscordMessageId(id: string) {
