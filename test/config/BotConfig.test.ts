@@ -129,6 +129,7 @@ describe('loadBotConfig parsing', () => {
                 mirrorChannelRenames: false,
                 unlinkWhenChannelLeaves: false,
             },
+            roles: DEFAULT_BOT_CONFIG.roles,
         });
     });
 
@@ -151,6 +152,7 @@ describe('loadBotConfig parsing', () => {
                 mirrorChannelRenames: true,
                 unlinkWhenChannelLeaves: false,
             },
+            roles: DEFAULT_BOT_CONFIG.roles,
         });
     });
 
@@ -326,5 +328,34 @@ describe('inviteBotPermissions', () => {
 
     it('returns a decimal string', () => {
         expect(inviteBotPermissions(DEFAULT_BOT_CONFIG)).toMatch(/^\d+$/);
+    });
+});
+
+describe('roles.copyAllowedRoleIds', () => {
+    it('defaults to the two documented Fluxer role IDs', () => {
+        expect(DEFAULT_BOT_CONFIG.roles.copyAllowedRoleIds).toEqual([
+            '1561105750388908139',
+            '1561105750388908112',
+        ]);
+    });
+
+    it('replaces the default list with the configured strings', () => {
+        const raw = parseBotConfigText(
+            'roles:\n  copyAllowedRoleIds:\n    - "42"\n',
+            'config.yml'
+        );
+        const { config, unknownKeys } = mergeBotConfig(raw);
+
+        expect(config.roles.copyAllowedRoleIds).toEqual(['42']);
+        expect(unknownKeys).toEqual([]);
+    });
+
+    it('rejects unquoted numeric IDs and non-lists', () => {
+        expect(() =>
+            mergeBotConfig({ roles: { copyAllowedRoleIds: [42] } })
+        ).toThrow(BotConfigError);
+        expect(() =>
+            mergeBotConfig({ roles: { copyAllowedRoleIds: 'abc' } })
+        ).toThrow(BotConfigError);
     });
 });

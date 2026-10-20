@@ -38,12 +38,23 @@ export interface BotConfig {
         /** Drop the link when a channel is moved out of a linked category. */
         unlinkWhenChannelLeaves: boolean;
     };
+    roles: {
+        /**
+         * Fluxer role IDs whose members may run the `role` command, which
+         * copies a Discord user's roles to a Fluxer member. IDs must be quoted
+         * strings: unquoted they are parsed as numbers and lose precision.
+         */
+        copyAllowedRoleIds: string[];
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
     permissions: { manageThreads: false },
     threads: { mirrorRenames: true, mirrorDeletes: false },
     categories: { mirrorChannelRenames: true, unlinkWhenChannelLeaves: true },
+    roles: {
+        copyAllowedRoleIds: ['1561105750388908139', '1561105750388908112'],
+    },
 };
 
 export const CONFIG_FILE_CANDIDATES = [
@@ -96,6 +107,16 @@ export function mergeBotConfig(
                     );
                 }
                 out[key] = merge(expected, value, dotted);
+            } else if (Array.isArray(expected)) {
+                if (
+                    !Array.isArray(value) ||
+                    value.some((item) => typeof item !== 'string')
+                ) {
+                    throw new BotConfigError(
+                        `Config "${dotted}" must be a list of strings (quote numeric IDs)`
+                    );
+                }
+                out[key] = [...value];
             } else if (typeof value !== typeof expected) {
                 throw new BotConfigError(
                     `Config "${dotted}" must be a ${typeof expected}, got ${value === null ? 'null' : typeof value}`

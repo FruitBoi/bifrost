@@ -29,3 +29,12 @@ categories:
     mirrorChannelRenames: true
     # Drop the link when a channel is moved out of a linked category.
     unlinkWhenChannelLeaves: true
+
+roles:
+    # Fluxer role IDs whose members may run `!b role <@user> <discordUserId>`,
+    # which adds every Fluxer role named like one of that Discord user's roles
+    # to the mentioned Fluxer member. Quote the IDs: unquoted numbers lose
+    # precision when parsed. Defaults to the two IDs below.
+    copyAllowedRoleIds:
+        - "1561105750388908139"
+        - "1561105750388908112"

@@ -219,6 +219,7 @@ const main = async () => {
         discordStatsService,
         fluxerStatsService,
         dbStatsService,
+        botConfig,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);

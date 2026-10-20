@@ -51,6 +51,8 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
+import RoleFluxerCommandHandler from './commands/fluxer/handlers/RoleFluxerCommandHandler';
+import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 
 const startFluxerClient = async ({
@@ -67,6 +69,7 @@ const startFluxerClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
+    botConfig,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -82,6 +85,7 @@ const startFluxerClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
+    botConfig: BotConfig;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -182,6 +186,15 @@ const startFluxerClient = async ({
     commandRegistry.registerCommand(
         'voice',
         new VoiceFluxerCommandHandler(client, linkService, linkProvisioner)
+    );
+    commandRegistry.registerCommand(
+        'role',
+        new RoleFluxerCommandHandler(
+            client,
+            linkService,
+            discordEntityResolver,
+            botConfig.roles.copyAllowedRoleIds
+        )
     );
     commandRegistry.registerCommand(
         'autolink',

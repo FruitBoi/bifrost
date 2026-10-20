@@ -16,7 +16,8 @@ export interface CommandInfo {
 
 export interface Command {
     name: string;
-    discord: CommandInfo;
+    /** Omitted for commands that only exist on Fluxer. */
+    discord?: CommandInfo;
     fluxer: CommandInfo;
 }
 
@@ -125,6 +126,14 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'role',
+        fluxer: {
+            description:
+                'Copies roles from a Discord user to the mentioned Fluxer member: every Fluxer role with the same name as one of the Discord user’s roles is added. Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
+            usageArgs: ['<@fluxerUser> <discordUserId>'],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:
@@ -160,6 +169,7 @@ function getStringCommandUsage(
     if (!command) return `Command \`${commandName}\` not found.`;
     const commandInfo =
         platform === 'discord' ? command.discord : command.fluxer;
+    if (!commandInfo) return `Command \`${commandName}\` not found.`;
     const baseMessage = `Usage: \`${COMMAND_PREFIX}${commandName} ${commandInfo.usageArgs.join(' ')}\``;
     return `${baseMessage}\n> ${commandInfo.description}`;
 }
@@ -193,6 +203,7 @@ export const getHelpMessage = (platform: CommandPlatform): string => {
     function getHelpLine(command: Command): string {
         const commandInfo =
             platform === 'discord' ? command.discord : command.fluxer;
+        if (!commandInfo) return '';
 
         const usage =
             commandInfo.usageArgs && commandInfo.usageArgs.length > 0
@@ -204,7 +215,10 @@ export const getHelpMessage = (platform: CommandPlatform): string => {
 
     const helpMessage = `
 **Available Commands:**
-${commandList.map((cmd) => getHelpLine(cmd)).join('\n')}
+${commandList
+    .map((cmd) => getHelpLine(cmd))
+    .filter(Boolean)
+    .join('\n')}
 
 Use \`${COMMAND_PREFIX}<command>\` to execute a command.
 
