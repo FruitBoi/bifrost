@@ -38,3 +38,10 @@ roles:
     copyAllowedRoleIds:
         - "1561105750388908139"
         - "1561105750388908112"
+
+meow:
+    # Answer messages that are nothing but cat noises (meow, mrrp, nya, purr
+    # and stretched or decorated variants) with a cat noise, as if chatting
+    # back. Bots and bridged messages are ignored; in a linked channel the
+    # reply is bridged like any other message.
+    enabled: true

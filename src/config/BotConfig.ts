@@ -46,6 +46,14 @@ export interface BotConfig {
          */
         copyAllowedRoleIds: string[];
     };
+    meow: {
+        /**
+         * Answer messages that consist only of cat noises (meow, mrrp, nya,
+         * purr and their stretched or decorated variants) with a cat noise,
+         * as if chatting back. See `services/meow/MeowService.ts`.
+         */
+        enabled: boolean;
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -55,6 +63,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     roles: {
         copyAllowedRoleIds: ['1561105750388908139', '1561105750388908112'],
     },
+    meow: { enabled: true },
 };
 
 export const CONFIG_FILE_CANDIDATES = [

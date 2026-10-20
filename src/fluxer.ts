@@ -55,6 +55,7 @@ import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFlu
 import RoleFluxerCommandHandler from './commands/fluxer/handlers/RoleFluxerCommandHandler';
 import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
+import MeowService from './services/meow/MeowService';
 
 const startFluxerClient = async ({
     linkService,
@@ -133,6 +134,7 @@ const startFluxerClient = async ({
     const messageTransformer = new FluxerMessageTransformer(
         new MentionBridgeService(linkService)
     );
+    const meowService = new MeowService();
     const messageRelay = new FluxerToDiscordMessageRelay({
         linkService,
         webhookService,
@@ -438,6 +440,27 @@ const startFluxerClient = async ({
                 (await message.resolveChannel().catch(() => null));
             if (channel instanceof TextChannel || channel?.isThread()) {
                 await messageRelay.relayMessage(message);
+            }
+        }
+
+        // Cat-noise conversation (issue #4): meow back at anyone who meows at
+        // us, then bridge our half of the exchange too (our own messages are
+        // otherwise skipped at the top of this handler).
+        if (
+            botConfig.meow.enabled &&
+            message.guildId &&
+            !message.author.bot &&
+            !message.webhookId &&
+            meowService.shouldReply(message.content, message.channelId)
+        ) {
+            try {
+                const reply = await message.reply(
+                    meowService.reply(message.content),
+                    { ping: false }
+                );
+                await messageRelay.relayMessage(reply);
+            } catch (error) {
+                logger.error('❌ Failed to meow back:', error);
             }
         }
     });

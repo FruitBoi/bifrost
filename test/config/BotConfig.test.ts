@@ -130,6 +130,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            meow: DEFAULT_BOT_CONFIG.meow,
         });
     });
 
@@ -153,6 +154,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            meow: DEFAULT_BOT_CONFIG.meow,
         });
     });
 

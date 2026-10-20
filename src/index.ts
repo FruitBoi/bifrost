@@ -339,6 +339,7 @@ const main = async () => {
             discordStatsService,
             fluxerStatsService,
             dbStatsService,
+            botConfig,
         }),
         connectFluxer(),
     ]);
