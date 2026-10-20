@@ -133,7 +133,7 @@ export function createVoiceRouter({
                     .sort((a, b) => (a.position ?? -1) - (b.position ?? -1))
                     .map((c) => ({ id: c.id, name: c.name ?? c.id }));
             } catch (err) {
-                logger.warn('Could not list Fluxer voice channels:', err);
+                logger.warn('⚠️ Could not list Fluxer voice channels:', err);
             }
         }
 
@@ -228,7 +228,7 @@ export function createVoiceRouter({
                 res.status(409).json({ error: message });
                 return;
             }
-            logger.error('Failed to create voice link via dashboard:', err);
+            logger.error('❌ Failed to create voice link via dashboard:', err);
             res.status(500).json({ error: message });
         }
     });
@@ -262,7 +262,10 @@ export function createVoiceRouter({
                 );
                 res.json(response);
             } catch (err) {
-                logger.error('Failed to update voice link via dashboard:', err);
+                logger.error(
+                    '❌ Failed to update voice link via dashboard:',
+                    err
+                );
                 res.status(500).json({ error: (err as Error).message });
             }
         }
@@ -284,7 +287,10 @@ export function createVoiceRouter({
                 await linkService.removeVoiceLink(voiceLink.id);
                 res.status(204).end();
             } catch (err) {
-                logger.error('Failed to remove voice link via dashboard:', err);
+                logger.error(
+                    '❌ Failed to remove voice link via dashboard:',
+                    err
+                );
                 res.status(500).json({ error: (err as Error).message });
             }
         }

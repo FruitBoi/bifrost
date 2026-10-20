@@ -116,7 +116,7 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                         message,
                         `Failed to unlink guild: ${(err as Error).message}`
                     );
-                    logger.error('Unlink guild failed:', err);
+                    logger.error('❌ Unlink guild failed:', err);
                 }
                 return;
             }
@@ -151,7 +151,7 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     message,
                     `Failed to unlink: ${(err as Error).message}`
                 );
-                logger.error('Unlink failed:', err);
+                logger.error('❌ Unlink failed:', err);
             }
             return;
         }

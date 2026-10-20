@@ -166,13 +166,13 @@ const startDiscordClient = async ({
     );
 
     client.once(Events.ClientReady, () => {
-        logger.info(`Discord bot logged in as ${client.user?.tag}`);
+        logger.info(`💬 Discord bot logged in as ${client.user?.tag}`);
 
         if (queueService) {
             queueService
                 .drain(webhookService, linkService)
                 .catch((err) =>
-                    logger.error('Startup queue drain error:', err)
+                    logger.error('❌ Startup queue drain error:', err)
                 );
             queueService.startDrainInterval(webhookService, linkService);
         }
@@ -184,7 +184,7 @@ const startDiscordClient = async ({
     });
 
     client.on(Events.Error, (error) => {
-        logger.error('Discord client error:', error);
+        logger.error('❌ Discord client error:', error);
     });
 
     client.on(Events.ChannelCreate, async (channel) => {
@@ -192,7 +192,7 @@ const startDiscordClient = async ({
         try {
             await categorySyncService.handleDiscordChannelCreate(channel);
         } catch (error) {
-            logger.error('Error handling Discord channel creation:', error);
+            logger.error('❌ Error handling Discord channel creation:', error);
         }
     });
 
@@ -204,7 +204,7 @@ const startDiscordClient = async ({
                 newChannel
             );
         } catch (error) {
-            logger.error('Error handling Discord channel update:', error);
+            logger.error('❌ Error handling Discord channel update:', error);
         }
     });
 
@@ -212,7 +212,7 @@ const startDiscordClient = async ({
         try {
             await categorySyncService.handleDiscordChannelDelete(channel);
         } catch (error) {
-            logger.error('Error handling Discord channel deletion:', error);
+            logger.error('❌ Error handling Discord channel deletion:', error);
         }
     });
 
@@ -224,7 +224,7 @@ const startDiscordClient = async ({
         try {
             await threadSyncService.resolveDiscordThread(thread, 'auto');
         } catch (error) {
-            logger.error('Error handling Discord thread creation:', error);
+            logger.error('❌ Error handling Discord thread creation:', error);
         }
     });
 
@@ -236,7 +236,7 @@ const startDiscordClient = async ({
                 newThread
             );
         } catch (error) {
-            logger.error('Error handling Discord thread update:', error);
+            logger.error('❌ Error handling Discord thread update:', error);
         }
     });
 
@@ -244,7 +244,7 @@ const startDiscordClient = async ({
         try {
             await threadSyncService.handleDiscordThreadDelete(thread.id);
         } catch (error) {
-            logger.error('Error handling Discord thread deletion:', error);
+            logger.error('❌ Error handling Discord thread deletion:', error);
         }
     });
 
@@ -259,7 +259,10 @@ const startDiscordClient = async ({
         try {
             linkService.deleteMessageLink(messageLink.id);
         } catch (error) {
-            logger.error('Error deleting message link from database:', error);
+            logger.error(
+                '❌ Error deleting message link from database:',
+                error
+            );
         }
 
         const channelLink = await linkService.getChannelLinkById(
@@ -283,7 +286,7 @@ const startDiscordClient = async ({
             .catch(() => null);
         if (!msg) {
             logger.error(
-                'Could not find linked Fluxer message to delete for Discord message ID:',
+                '❌ Could not find linked Fluxer message to delete for Discord message ID:',
                 message.id
             );
             return;
@@ -292,7 +295,7 @@ const startDiscordClient = async ({
         try {
             await msg.delete();
         } catch (error) {
-            logger.error('Error deleting message from Fluxer:', error);
+            logger.error('❌ Error deleting message from Fluxer:', error);
         }
     });
 
@@ -321,7 +324,7 @@ const startDiscordClient = async ({
         );
         if (!webhook) {
             logger.warn(
-                `No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message update`
+                `⚠️ No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message update`
             );
             return;
         }
@@ -342,7 +345,7 @@ const startDiscordClient = async ({
                 linkedChannel.fluxerThreadId
             );
         } catch (error) {
-            logger.error('Error editing message via Fluxer webhook:', error);
+            logger.error('❌ Error editing message via Fluxer webhook:', error);
         }
     });
 
@@ -387,7 +390,7 @@ const startDiscordClient = async ({
                 await handler.handleCommand(message, command, ...args);
             } catch (error) {
                 logger.error(
-                    `Error executing discord command "${command}":`,
+                    `❌ Error executing discord command "${command}":`,
                     error
                 );
             }
@@ -397,7 +400,7 @@ const startDiscordClient = async ({
                     .delete()
                     .catch((err) =>
                         logger.error(
-                            'Failed to delete invocation message:',
+                            '❌ Failed to delete invocation message:',
                             err
                         )
                     );

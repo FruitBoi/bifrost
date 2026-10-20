@@ -173,7 +173,7 @@ export default class FluxerEntityResolver implements EntityResolver<
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.warn(
-                `Could not fetch Fluxer emojis for guild ${id}, relaying without emoji resolution:`,
+                `⚠️ Could not fetch Fluxer emojis for guild ${id}, relaying without emoji resolution:`,
                 err
             );
             this.emojiCache.set(id, [], EMOJI_FAILURE_TTL_SECONDS);

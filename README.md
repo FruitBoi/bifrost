@@ -85,7 +85,7 @@ Thread bridging ships as three migrations. `00003-add-thread-links` adds `channe
 
 ## Voice
 
-A **voice link** bridges a Discord voice channel with a Fluxer voice channel. While the bridge is live, the bot sits in both channels and plays the mixed audio of each side into the other, so each side hears everyone on the other side as one extra participant. Voice bridging is **off by default** and is switched on with `BF_ENABLE_VOICE_BRIDGE=true`; without it the voice packages are never loaded and the commands below report that the feature is disabled.
+A **voice link** bridges a Discord voice channel with a Fluxer voice channel. While the bridge is live, the bot sits in both channels and plays the mixed audio of each side into the other, so each side hears everyone on the other side as one extra participant. **You link a pair of channels once**: the link is stored in the database and the bot joins both channels on its own whenever someone enters either of them, so nobody has to run a command before a voice chat. Voice bridging is **off by default** and is switched on with `BF_ENABLE_VOICE_BRIDGE=true`; without it the voice packages are never loaded and the commands below report that the feature is disabled.
 
 Two constraints follow from how both platforms work:
 
@@ -94,7 +94,8 @@ Two constraints follow from how both platforms work:
 
 ### Lifecycle
 
-- The bridge joins both channels as soon as a person (not a bot) is in either linked channel, and leaves both after they have been empty for `BF_VOICE_LEAVE_GRACE_MS` (default 30 seconds).
+- A voice link is created once and persists; there is nothing to re-run when people come and go.
+- The bridge joins both channels automatically as soon as a person (not a bot) is in either linked channel, leaves both after they have been empty for `BF_VOICE_LEAVE_GRACE_MS` (default 30 seconds), and comes back by itself the next time someone enters.
 - Users who self-mute or deafen are left out of the mix for the other side; everyone else is mixed in as they speak.
 - If either voice connection drops while people are still present, the bridge leaves the other side too and rejoins with a short backoff. After a few failed attempts it gives up until someone joins again.
 - Disabling or removing a voice link while its bridge is live disconnects the bridge immediately.
@@ -103,7 +104,7 @@ Two constraints follow from how both platforms work:
 
 From either platform (the first ID is a voice channel on the platform you run the command on, the second one is on the other platform):
 
-- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — links the two voice channels immediately, no confirmation step.
+- `!b voice <voiceChannelId> <otherPlatformVoiceChannelId>` — links the two voice channels immediately, no confirmation step. Run it once per channel pair; from then on the bot joins by itself whenever someone is in either channel.
 - `!b voice unlink <voiceChannelId>` — removes the link. Confirm with `!b voice confirm`.
 - `!b voice on <voiceChannelId>` / `!b voice off <voiceChannelId>` — enables or disables a link without removing it.
 - `!b voice` — lists the server's voice links and whether they are enabled. `!b list` shows them too, marked with 🔊.
@@ -145,7 +146,6 @@ You can find a guide on how to use the hosted bot here: https://bifrost-bot.com/
 
 You can find a guide on how to self-host the bot using Docker here: https://bifrost-bot.com/docs/self-hosting/
 
-## License
 ### Environment variables
 
 Secrets, database settings and feature flags are read from environment variables (or an `.env` file); [.env.example](.env.example) lists every variable with a short description. Behavioural switches that are not secrets live in the optional configuration file described next.
@@ -177,5 +177,6 @@ threads:
     mirrorDeletes: true
 ```
 
+## License
 
 This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.

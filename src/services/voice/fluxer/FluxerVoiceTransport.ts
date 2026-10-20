@@ -17,8 +17,14 @@ import {
 import {
     AudioFrame,
     AudioSource,
+    ConnectionState,
     LocalAudioTrack,
+    type RemoteParticipant,
+    type RemoteTrack,
+    type RemoteTrackPublication,
     type Room,
+    RoomEvent,
+    TrackKind,
     TrackPublishOptions,
     TrackSource,
 } from '@livekit/rtc-node';
@@ -32,6 +38,7 @@ import type {
     VoiceSession,
     VoiceTransport,
 } from '../VoiceTransport';
+import { identityRefersTo, mapIdentityToUserId } from './identity';
 
 /** Interleaved samples per 20 ms stereo frame. */
 const FRAME_SAMPLES = SAMPLES_PER_FRAME * CHANNELS;
@@ -39,6 +46,8 @@ const FRAME_SAMPLES = SAMPLES_PER_FRAME * CHANNELS;
 const MAX_QUEUED_PLAYOUT_MS = 400;
 /** Cap on per-participant PCM waiting to fill a 20 ms frame (~200 ms). */
 const MAX_PENDING_SAMPLES = FRAME_SAMPLES * 10;
+/** Warn if remote participants exist but nothing was received by then. */
+const NO_AUDIO_WARNING_MS = 5_000;
 
 // @fluxerjs/types is not a direct dependency; derive the payload types from core.
 type VoiceStatesSyncData = ClientEvents[typeof Events.VoiceStatesSync][0];
@@ -52,6 +61,16 @@ interface CachedVoiceState {
     isBot: boolean;
 }
 
+/** Receive-side counters for one session; see {@link FluxerVoiceSession.stats}. */
+export interface FluxerVoiceSessionStats {
+    /** Decoded PCM frames received from LiveKit (all participants). */
+    framesIn: number;
+    /** 20 ms Opus packets emitted as `audio` events. */
+    packetsOut: number;
+    /** Remote participants currently in the LiveKit room (bot excluded). */
+    participants: number;
+}
+
 /**
  * {@link VoiceTransport} for @fluxerjs/core using @fluxerjs/voice.
  *
@@ -62,8 +81,12 @@ interface CachedVoiceState {
  *
  * Audio path (LiveKit, which is what Fluxer currently routes voice through):
  * - Receive: `LiveKitRtcConnection` decodes remote tracks to 48 kHz mono
- *   10 ms PCM (`audioFrame` events). We upmix to stereo, re-chunk to 20 ms
- *   and encode with @discordjs/opus so the session emits Opus packets.
+ *   10 ms PCM (`audioFrame` events), but only for participant identities we
+ *   explicitly request. We request every remote participant the LiveKit
+ *   room reports (not just the ones in our gateway voice-state cache), map
+ *   identities back to Fluxer user IDs best-effort, upmix to stereo,
+ *   re-chunk to 20 ms and encode with @discordjs/opus so the session emits
+ *   Opus packets.
  * - Send: `LiveKitRtcConnection.playOpus` is not implemented upstream and
  *   `play()` only accepts WebM/Opus, so we publish our own LiveKit audio
  *   track (`AudioSource` 48 kHz stereo) on the connection's room and decode
@@ -211,23 +234,35 @@ export default class FluxerVoiceTransport
     }
 }
 
+/** One remote LiveKit participant we receive (or expect to receive) audio from. */
 interface InboundParticipant {
+    /** LiveKit participant identity (the key of {@link FluxerVoiceSession.inbound}). */
+    identity: string;
+    /** Fluxer user ID when the identity could be mapped, else the raw identity. */
+    sourceId: string;
+    /** Whether `sourceId` is a Fluxer user ID we know of. */
+    mapped: boolean;
     subscription: LiveKitReceiveSubscription | null;
     encoder: OpusEncoder | null;
     pending: Int16Array;
     warnedFormat: boolean;
+    framesIn: number;
 }
 
 export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
     readonly platform = 'fluxer' as const;
 
+    /** Keyed by LiveKit identity, not Fluxer user ID. */
     private readonly inbound = new Map<string, InboundParticipant>();
     private readonly outboundDecoder = new OpusEncoder(SAMPLE_RATE, CHANNELS);
-    private readonly outboundSamples = new Int16Array(FRAME_SAMPLES);
+    private room: Room | null = null;
     private audioSource: AudioSource | null = null;
     private audioTrack: LocalAudioTrack | null = null;
     private udpOutbound: PassThrough | null = null;
+    private noAudioTimer: NodeJS.Timeout | null = null;
     private closed = false;
+    private framesIn = 0;
+    private packetsOut = 0;
     private sentFrames = 0;
     private droppedFrames = 0;
 
@@ -243,8 +278,15 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
             if (!inChannel) this.close('moved');
             return;
         }
-        if (inChannel && !update.isBot) this.subscribe(update.userId);
-        else if (!inChannel) this.unsubscribe(update.userId);
+        if (this.room) {
+            // The LiveKit room drives subscriptions; the voice state only
+            // helps us tie identities to user IDs, so refresh the mapping.
+            if (inChannel) this.remapUnmappedIdentities();
+        } else if (inChannel && !update.isBot) {
+            this.requestAudio(update.userId, 'voice state');
+        } else if (!inChannel) {
+            this.dropIdentity(update.userId);
+        }
         this.emit('participantUpdate', update);
     };
 
@@ -254,13 +296,66 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
 
     private readonly onConnectionError = (err: Error): void => {
         logger.warn(
-            `[FluxerVoice] Connection error in ${this.channelId}: ${err.message}`
+            `[FluxerVoice] ⚠️ Connection error in ${this.channelId}: ${err.message}`
         );
         this.emit('error', err);
     };
 
     private readonly onServerLeave = (): void => this.close('serverLeave');
     private readonly onDisconnect = (): void => this.close('disconnected');
+
+    private readonly onRoomParticipantConnected = (
+        participant: RemoteParticipant
+    ): void => {
+        const identity = participant.identity;
+        const mapped = this.resolveSource(identity);
+        logger.info(
+            `[FluxerVoice] 📡 Participant "${identity}" joined LiveKit room for ${this.channelId} (${describeMapping(mapped)})`
+        );
+        this.requestAudio(identity, 'participantConnected');
+    };
+
+    private readonly onRoomParticipantDisconnected = (
+        participant: RemoteParticipant
+    ): void => {
+        const identity = participant.identity;
+        logger.info(
+            `[FluxerVoice] 👋 Participant "${identity}" left LiveKit room for ${this.channelId}`
+        );
+        this.dropIdentity(identity);
+    };
+
+    private readonly onRoomTrackPublished = (
+        publication: RemoteTrackPublication,
+        participant: RemoteParticipant
+    ): void => {
+        if (publication.kind !== TrackKind.KIND_AUDIO) return;
+        logger.debug(
+            `[FluxerVoice] 📡 Audio track ${publication.sid} published by "${participant.identity}" in ${this.channelId}`
+        );
+        this.requestAudio(participant.identity, 'trackPublished');
+    };
+
+    private readonly onRoomTrackSubscribed = (
+        track: RemoteTrack,
+        publication: RemoteTrackPublication,
+        participant: RemoteParticipant
+    ): void => {
+        if (track.kind !== TrackKind.KIND_AUDIO) return;
+        logger.debug(
+            `[FluxerVoice] 📡 Subscribed to audio track ${publication.sid} of "${participant.identity}" in ${this.channelId}`
+        );
+        // The upstream connection only pumps requested identities; make sure
+        // this one is requested (no-op when it already is).
+        this.requestAudio(participant.identity, 'trackSubscribed');
+    };
+
+    private readonly onRoomReconnected = (): void => {
+        logger.info(
+            `[FluxerVoice] 🔗 LiveKit room reconnected for ${this.channelId}; re-scanning participants`
+        );
+        this.scanRoom('reconnect');
+    };
 
     constructor(
         private readonly transport: FluxerVoiceTransport,
@@ -281,13 +376,35 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
         if (conn instanceof LiveKitRtcConnection) {
             conn.on('serverLeave', this.onServerLeave);
             conn.on('audioFrame', this.onAudioFrame);
-            for (const p of this.participants()) {
-                if (!p.isBot) this.subscribe(p.userId);
+
+            const room = getRoom(conn);
+            this.room = room;
+            if (room) {
+                this.attachRoom(room);
+                if (room.isConnected) {
+                    this.scanRoom('join');
+                } else {
+                    logger.warn(
+                        `[FluxerVoice] ⚠️ LiveKit room for ${this.channelId} not connected yet at init (state ${describeState(room)}); subscribing once it connects`
+                    );
+                    room.once(RoomEvent.Connected, () =>
+                        this.scanRoom('connected')
+                    );
+                }
+            } else {
+                logger.warn(
+                    `[FluxerVoice] ⚠️ Cannot reach the LiveKit room on this @fluxerjs/voice connection; falling back to voice-state driven subscriptions for ${this.channelId}`
+                );
+                for (const p of this.participants()) {
+                    if (!p.isBot) this.requestAudio(p.userId, 'voice state');
+                }
             }
+
             await this.publishTrack(conn);
+            this.armNoAudioWarning();
         } else {
             logger.warn(
-                `[FluxerVoice] Channel ${this.channelId} uses the legacy UDP voice connection; receiving audio is not supported there (send-only)`
+                `[FluxerVoice] ⚠️ Channel ${this.channelId} uses the legacy UDP voice connection; receiving audio is not supported there (send-only)`
             );
             this.udpOutbound = new PassThrough({ objectMode: true });
             conn.playOpus(this.udpOutbound);
@@ -298,6 +415,17 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
 
     participants(): VoiceParticipant[] {
         return this.transport.listParticipants(this.guildId, this.channelId);
+    }
+
+    /** Receive-side counters, for diagnostics. */
+    stats(): FluxerVoiceSessionStats {
+        return {
+            framesIn: this.framesIn,
+            packetsOut: this.packetsOut,
+            participants: this.room
+                ? this.remoteIdentities().length
+                : this.inbound.size,
+        };
     }
 
     sendOpus(packet: OpusPacket): void {
@@ -369,6 +497,193 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
         this.finish('left');
     }
 
+    // ------------------------------------------------------------------
+    // Room-driven receive subscriptions
+    // ------------------------------------------------------------------
+
+    private attachRoom(room: Room): void {
+        room.on(
+            RoomEvent.ParticipantConnected,
+            this.onRoomParticipantConnected
+        );
+        room.on(
+            RoomEvent.ParticipantDisconnected,
+            this.onRoomParticipantDisconnected
+        );
+        room.on(RoomEvent.TrackPublished, this.onRoomTrackPublished);
+        room.on(RoomEvent.TrackSubscribed, this.onRoomTrackSubscribed);
+        room.on(RoomEvent.Reconnected, this.onRoomReconnected);
+    }
+
+    private detachRoom(room: Room): void {
+        room.off(
+            RoomEvent.ParticipantConnected,
+            this.onRoomParticipantConnected
+        );
+        room.off(
+            RoomEvent.ParticipantDisconnected,
+            this.onRoomParticipantDisconnected
+        );
+        room.off(RoomEvent.TrackPublished, this.onRoomTrackPublished);
+        room.off(RoomEvent.TrackSubscribed, this.onRoomTrackSubscribed);
+        room.off(RoomEvent.Reconnected, this.onRoomReconnected);
+    }
+
+    /** Log the room and request audio for every remote participant in it. */
+    private scanRoom(why: string): void {
+        const room = this.room;
+        if (!room || this.closed) return;
+        const localIdentity = room.localParticipant?.identity ?? '(none)';
+        const botId = this.transport.botUserId() ?? '(unknown)';
+        const remotes = [...room.remoteParticipants.values()];
+        const known = this.knownUserIds();
+
+        logger.info(
+            `[FluxerVoice] 🔗 LiveKit room "${room.name ?? '?'}" for ${this.channelId} (${why}; state ${describeState(room)}); local identity "${localIdentity}", bot user ${botId}${
+                localIdentity === botId
+                    ? ' (identity == user id)'
+                    : identityRefersTo(localIdentity, botId)
+                      ? ' (identity embeds user id)'
+                      : ' (identity format differs from user id!)'
+            }; ${remotes.length} remote participant(s); ${known.size} user(s) in voice-state cache`
+        );
+
+        for (const participant of remotes) {
+            const identity = participant.identity;
+            const audioTracks = [
+                ...participant.trackPublications.values(),
+            ].filter((pub) => pub.kind === TrackKind.KIND_AUDIO);
+            const subscribedTracks = audioTracks.filter(
+                (pub) => pub.subscribed
+            );
+            const mapped = this.resolveSource(identity);
+            logger.info(
+                `[FluxerVoice] 📡 Remote participant "${identity}": ${describeMapping(mapped)}; ${audioTracks.length} audio track(s), ${subscribedTracks.length} subscribed`
+            );
+            this.requestAudio(identity, why);
+        }
+    }
+
+    /**
+     * Ask the upstream connection to pump audio for `identity`. Idempotent
+     * per identity; skips the bot's own identity.
+     */
+    private requestAudio(identity: string, why: string): void {
+        if (this.closed) return;
+        const conn = this.connection;
+        if (!(conn instanceof LiveKitRtcConnection)) return;
+        if (this.isSelfIdentity(identity)) return;
+
+        const existing = this.inbound.get(identity);
+        if (existing?.subscription) return;
+
+        const subscription = conn.subscribeParticipantAudio(identity, {
+            autoResubscribe: true,
+        });
+        const { sourceId, mapped } = this.resolveSource(identity);
+        this.inbound.set(identity, {
+            identity,
+            sourceId,
+            mapped,
+            subscription,
+            encoder: existing?.encoder ?? null,
+            pending: existing?.pending ?? new Int16Array(0),
+            warnedFormat: existing?.warnedFormat ?? false,
+            framesIn: existing?.framesIn ?? 0,
+        });
+        logger.debug(
+            `[FluxerVoice] 🎧 Requested audio from "${identity}" (${why}) in ${this.channelId}`
+        );
+    }
+
+    private dropIdentity(identity: string): void {
+        const entry = this.inbound.get(identity);
+        if (!entry) return;
+        this.inbound.delete(identity);
+        entry.subscription?.stop();
+    }
+
+    /** Re-run identity mapping for entries that could not be mapped yet. */
+    private remapUnmappedIdentities(): void {
+        for (const entry of this.inbound.values()) {
+            if (entry.mapped) continue;
+            const { sourceId, mapped } = this.resolveSource(entry.identity);
+            if (!mapped) continue;
+            logger.info(
+                `[FluxerVoice] 🎧 Identity "${entry.identity}" now maps to user ${sourceId} in ${this.channelId}`
+            );
+            entry.sourceId = sourceId;
+            entry.mapped = true;
+        }
+    }
+
+    /** Fluxer user IDs we believe are in this channel (bot excluded). */
+    private knownUserIds(): Set<string> {
+        const ids = new Set<string>();
+        for (const p of this.participants()) ids.add(p.userId);
+        return ids;
+    }
+
+    private resolveSource(identity: string): {
+        sourceId: string;
+        mapped: boolean;
+    } {
+        const userId = mapIdentityToUserId(identity, this.knownUserIds());
+        return userId
+            ? { sourceId: userId, mapped: true }
+            : { sourceId: identity, mapped: false };
+    }
+
+    private isSelfIdentity(identity: string): boolean {
+        const local = this.room?.localParticipant?.identity;
+        if (local && identity === local) return true;
+        return identityRefersTo(identity, this.transport.botUserId());
+    }
+
+    private remoteIdentities(): string[] {
+        const room = this.room;
+        if (!room) return [];
+        return [...room.remoteParticipants.keys()].filter(
+            (identity) => !this.isSelfIdentity(identity)
+        );
+    }
+
+    private armNoAudioWarning(): void {
+        if (this.noAudioTimer) clearTimeout(this.noAudioTimer);
+        this.noAudioTimer = setTimeout(() => {
+            this.noAudioTimer = null;
+            if (this.closed || this.framesIn > 0) return;
+            const remotes = this.remoteIdentities();
+            if (remotes.length === 0) return;
+            const details = remotes
+                .map((identity) => {
+                    const entry = this.inbound.get(identity);
+                    const participant =
+                        this.room?.remoteParticipants.get(identity);
+                    const audioTracks = participant
+                        ? [...participant.trackPublications.values()].filter(
+                              (pub) => pub.kind === TrackKind.KIND_AUDIO
+                          )
+                        : [];
+                    const subscribed = audioTracks.filter(
+                        (pub) => pub.subscribed
+                    ).length;
+                    return `"${identity}" (${
+                        entry?.subscription ? 'requested' : 'NOT requested'
+                    }, ${audioTracks.length} audio track(s), ${subscribed} subscribed)`;
+                })
+                .join(', ');
+            logger.warn(
+                `[FluxerVoice] ⚠️ No audio received from LiveKit ${NO_AUDIO_WARNING_MS / 1000}s after joining ${this.channelId} although ${remotes.length} remote participant(s) are present: ${details}. If nobody spoke this is fine; otherwise the track subscription is not delivering frames.`
+            );
+        }, NO_AUDIO_WARNING_MS);
+        this.noAudioTimer.unref();
+    }
+
+    // ------------------------------------------------------------------
+    // Outbound track
+    // ------------------------------------------------------------------
+
     private async publishTrack(conn: LiveKitRtcConnection): Promise<void> {
         const room = getRoom(conn);
         if (!room?.isConnected || !room.localParticipant) {
@@ -383,9 +698,15 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
         );
         const options = new TrackPublishOptions();
         options.source = TrackSource.SOURCE_MICROPHONE;
-        await room.localParticipant.publishTrack(track, options);
+        const publication = await room.localParticipant.publishTrack(
+            track,
+            options
+        );
         this.audioSource = source;
         this.audioTrack = track;
+        logger.info(
+            `[FluxerVoice] 📡 Published bridge audio track ${publication.sid ?? track.sid ?? '?'} to LiveKit room for ${this.channelId}`
+        );
     }
 
     private async unpublishTrack(): Promise<void> {
@@ -412,64 +733,54 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
         await Promise.allSettled([source?.close(), track?.close()]);
     }
 
-    private subscribe(userId: string): void {
-        if (this.closed) return;
-        const conn = this.connection;
-        if (!(conn instanceof LiveKitRtcConnection)) return;
-        if (userId === this.transport.botUserId()) return;
-        const existing = this.inbound.get(userId);
-        if (existing?.subscription) return;
-
-        // LiveKit participant identity is the Fluxer user ID (this is what
-        // VoiceManager.subscribeChannelParticipants passes through as well).
-        const subscription = conn.subscribeParticipantAudio(userId, {
-            autoResubscribe: true,
-        });
-        this.inbound.set(userId, {
-            subscription,
-            encoder: existing?.encoder ?? null,
-            pending: existing?.pending ?? new Int16Array(0),
-            warnedFormat: existing?.warnedFormat ?? false,
-        });
-    }
-
-    private unsubscribe(userId: string): void {
-        const entry = this.inbound.get(userId);
-        if (!entry) return;
-        this.inbound.delete(userId);
-        entry.subscription?.stop();
-    }
+    // ------------------------------------------------------------------
+    // Inbound audio
+    // ------------------------------------------------------------------
 
     /**
      * Convert a decoded LiveKit frame (48 kHz, mono or stereo, any length)
-     * into 20 ms stereo Opus packets.
+     * into 20 ms stereo Opus packets emitted under the mapped source id.
      */
     private handleAudioFrame(frame: LiveKitAudioFrame): void {
         if (this.closed) return;
-        const userId = frame.participantId;
-        if (userId === this.transport.botUserId()) return;
+        const identity = frame.participantId;
+        if (this.isSelfIdentity(identity)) return;
 
-        let entry = this.inbound.get(userId);
+        let entry = this.inbound.get(identity);
         if (!entry) {
-            // A participant we did not ask for (identity mismatch or a late
-            // voice state). Still bridge it, but note it once.
-            logger.debug(
-                `[FluxerVoice] Audio from unexpected participant ${userId} in ${this.channelId}`
+            // Audio for an identity we never requested (upstream behaviour
+            // changed, or a race with ParticipantDisconnected). Bridge it
+            // anyway; the mixer only needs a stable key.
+            const { sourceId, mapped } = this.resolveSource(identity);
+            logger.info(
+                `[FluxerVoice] 🎧 Audio from unrequested participant "${identity}" in ${this.channelId} (${describeMapping({ sourceId, mapped })}); bridging it anyway`
             );
             entry = {
+                identity,
+                sourceId,
+                mapped,
                 subscription: null,
                 encoder: null,
                 pending: new Int16Array(0),
                 warnedFormat: false,
+                framesIn: 0,
             };
-            this.inbound.set(userId, entry);
+            this.inbound.set(identity, entry);
+        }
+
+        this.framesIn++;
+        entry.framesIn++;
+        if (entry.framesIn === 1) {
+            logger.info(
+                `[FluxerVoice] 🎧 First audio frame from "${identity}" in ${this.channelId}: ${frame.sampleRate} Hz, ${frame.channels} ch, ${frame.samples.length} samples/frame, track ${frame.trackSid ?? '?'}; emitting as source ${entry.sourceId}${entry.mapped ? '' : ' (raw identity, no user id match)'}`
+            );
         }
 
         if (frame.sampleRate !== SAMPLE_RATE) {
             if (!entry.warnedFormat) {
                 entry.warnedFormat = true;
                 logger.warn(
-                    `[FluxerVoice] Unsupported sample rate ${frame.sampleRate} from ${userId}; dropping audio`
+                    `[FluxerVoice] ⚠️ Unsupported sample rate ${frame.sampleRate} from "${identity}"; dropping audio`
                 );
             }
             return;
@@ -480,7 +791,7 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
             if (!entry.warnedFormat) {
                 entry.warnedFormat = true;
                 logger.warn(
-                    `[FluxerVoice] Unsupported channel count ${frame.channels} from ${userId}; dropping audio`
+                    `[FluxerVoice] ⚠️ Unsupported channel count ${frame.channels} from "${identity}"; dropping audio`
                 );
             }
             return;
@@ -511,10 +822,11 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
                         chunk.byteLength
                     )
                 );
-                this.emit('audio', userId, packet);
+                this.packetsOut++;
+                this.emit('audio', entry.sourceId, packet);
             } catch (err) {
                 logger.debug(
-                    `[FluxerVoice] Encode failed for ${userId}: ${
+                    `[FluxerVoice] Encode failed for "${identity}": ${
                         err instanceof Error ? err.message : String(err)
                     }`
                 );
@@ -533,6 +845,10 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------
+
     private close(reason: string): void {
         if (this.closed) return;
         this.closed = true;
@@ -542,6 +858,10 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
     }
 
     private teardown(): void {
+        if (this.noAudioTimer) {
+            clearTimeout(this.noAudioTimer);
+            this.noAudioTimer = null;
+        }
         this.transport.off('participantUpdate', this.onParticipantUpdate);
         const conn = this.connection;
         conn.off('error', this.onConnectionError);
@@ -550,7 +870,13 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
             conn.off('serverLeave', this.onServerLeave);
             conn.off('audioFrame', this.onAudioFrame);
         }
-        for (const userId of [...this.inbound.keys()]) this.unsubscribe(userId);
+        if (this.room) {
+            this.detachRoom(this.room);
+            this.room = null;
+        }
+        for (const identity of [...this.inbound.keys()]) {
+            this.dropIdentity(identity);
+        }
         if (this.udpOutbound) {
             this.udpOutbound.end();
             this.udpOutbound = null;
@@ -558,8 +884,8 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
     }
 
     private finish(reason: string): void {
-        logger.debug(
-            `[FluxerVoice] Session ${this.channelId} closed (${reason}); sent ${this.sentFrames} frames, dropped ${this.droppedFrames}`
+        logger.info(
+            `[FluxerVoice] 👋 Session ${this.channelId} closed (${reason}); received ${this.framesIn} frames → ${this.packetsOut} packets, sent ${this.sentFrames} frames, dropped ${this.droppedFrames}`
         );
         this.emit('closed', reason);
     }
@@ -567,10 +893,25 @@ export class FluxerVoiceSession extends EventEmitter implements VoiceSession {
 
 /**
  * `LiveKitRtcConnection.room` is private upstream but is the only handle to
- * the LiveKit room we can publish on. Read it reflectively.
+ * the LiveKit room we can publish on and enumerate participants from. Read
+ * it reflectively.
  */
 function getRoom(conn: LiveKitRtcConnection): Room | null {
     return (conn as unknown as { room: Room | null }).room ?? null;
+}
+
+function describeState(room: Room): string {
+    const state = room.connectionState;
+    return `${ConnectionState[state] ?? state}${room.isConnected ? '' : ', not connected'}`;
+}
+
+function describeMapping(mapping: {
+    sourceId: string;
+    mapped: boolean;
+}): string {
+    return mapping.mapped
+        ? `maps to user ${mapping.sourceId}`
+        : 'no known user id, bridging under raw identity';
 }
 
 /** Upmix mono to interleaved stereo; pass stereo through; null otherwise. */

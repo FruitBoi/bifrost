@@ -159,7 +159,7 @@ export default class ThreadsDiscordCommandHandler extends DiscordCommandHandler 
                         .setTimestamp(),
                 ],
             });
-            logger.error('Threads toggle failed:', err);
+            logger.error('❌ Threads toggle failed:', err);
         }
     }
 }

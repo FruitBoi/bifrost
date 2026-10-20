@@ -166,7 +166,7 @@ const main = async () => {
                   .createOpusMixer,
           }
         : null;
-    if (voice) logger.info('[VoiceBridge] Voice bridging is enabled');
+    if (voice) logger.info('[VoiceBridge] 🔊 Voice bridging is enabled');
 
     let discordVoiceTransport: VoiceTransport | null = null;
     let fluxerVoiceTransport: VoiceTransport | null = null;
@@ -179,7 +179,7 @@ const main = async () => {
         try {
             await bridge.stop();
         } catch (err) {
-            logger.error('[VoiceBridge] Error while stopping bridge:', err);
+            logger.error('[VoiceBridge] ❌ Error while stopping bridge:', err);
         }
     };
 
@@ -196,9 +196,12 @@ const main = async () => {
         });
         try {
             await voiceBridge.start();
-            logger.info('[VoiceBridge] Bridge service started');
+            logger.info('[VoiceBridge] ✅ Bridge service started');
         } catch (err) {
-            logger.error('[VoiceBridge] Failed to start bridge service:', err);
+            logger.error(
+                '[VoiceBridge] ❌ Failed to start bridge service:',
+                err
+            );
         }
     };
 
@@ -231,7 +234,7 @@ const main = async () => {
         fluxerRestartState = 'restarting';
         fluxerRestartAttempts++;
         logger.warn(
-            `[Fluxer] Restarting client (attempt #${fluxerRestartAttempts})...`
+            `[Fluxer] 🔁 Restarting client (attempt #${fluxerRestartAttempts})...`
         );
         healthCheckService.resetFluxerDownCount();
         await stopVoiceBridge();
@@ -243,13 +246,13 @@ const main = async () => {
         try {
             fluxerClientRef.current = await startFluxerClient(fluxerArgs);
             logger.info(
-                `[Fluxer] Client restarted successfully (attempt #${fluxerRestartAttempts})`
+                `[Fluxer] ✅ Client restarted successfully (attempt #${fluxerRestartAttempts})`
             );
             fluxerRestartState = 'idle';
             await startVoiceBridge();
         } catch (err) {
             logger.error(
-                `[Fluxer] Restart #${fluxerRestartAttempts} failed:`,
+                `[Fluxer] ❌ Restart #${fluxerRestartAttempts} failed:`,
                 err
             );
             enterFluxerBackoff();
@@ -260,12 +263,12 @@ const main = async () => {
         fluxerRestartState = 'backoff';
         healthCheckService.resetFluxerDownCount();
         logger.warn(
-            `[Fluxer] Entering ${FLUXER_BACKOFF_MS / 60_000}-minute backoff before next restart`
+            `[Fluxer] ⚠️ Entering ${FLUXER_BACKOFF_MS / 60_000}-minute backoff before next restart`
         );
         setTimeout(() => {
             fluxerRestartState = 'idle';
             doFluxerRestart().catch((err) =>
-                logger.error('[Fluxer] Restart after backoff failed:', err)
+                logger.error('[Fluxer] ❌ Restart after backoff failed:', err)
             );
         }, FLUXER_BACKOFF_MS);
     };
@@ -293,7 +296,7 @@ const main = async () => {
             return;
         }
         doFluxerRestart().catch((err) =>
-            logger.error('[Fluxer] Restart error:', err)
+            logger.error('[Fluxer] ❌ Restart error:', err)
         );
     });
 
@@ -304,18 +307,18 @@ const main = async () => {
         DISCORD_APP_ID,
         perms
     );
-    logger.info(`Discord Bot Invite Link: ${discordBotInviteLink}`);
+    logger.info(`🔗 Discord Bot Invite Link: ${discordBotInviteLink}`);
     const fluxerBotInviteLink = generateFluxerBotInviteLink(
         FLUXER_APP_ID,
         perms
     );
-    logger.info(`Fluxer Bot Invite Link: ${fluxerBotInviteLink}`);
+    logger.info(`🔗 Fluxer Bot Invite Link: ${fluxerBotInviteLink}`);
 
     const connectFluxer = async () => {
         try {
             fluxerClientRef.current = await startFluxerClient(fluxerArgs);
         } catch (err) {
-            logger.error('[Fluxer] Initial connection failed:', err);
+            logger.error('[Fluxer] ❌ Initial connection failed:', err);
             enterFluxerBackoff();
         }
     };
@@ -343,7 +346,9 @@ const main = async () => {
         await healthCheckService.pushFluxerHealthStatus();
     }, 30_000);
 
-    logger.info('Both Discord and Fluxer clients have started successfully.');
+    logger.info(
+        '🚀 Both Discord and Fluxer clients have started successfully.'
+    );
 
     if (voice) {
         discordVoiceTransport = new voice.DiscordVoiceTransport(discordClient);
@@ -363,7 +368,7 @@ const main = async () => {
             dbStatsService,
         });
         webApp.listen(WEB_PORT, () => {
-            logger.info(`Web dashboard listening on port ${WEB_PORT}`);
+            logger.info(`🖥️ Web dashboard listening on port ${WEB_PORT}`);
         });
     }
 };

@@ -30,7 +30,7 @@ router.get('/discord/callback', async (req, res) => {
         req.session.discord = await discordOAuth.completeLogin(code);
         res.redirect('/');
     } catch (err) {
-        logger.error('Discord OAuth callback failed:', err);
+        logger.error('❌ Discord OAuth callback failed:', err);
         res.status(500).send('Discord login failed.');
     }
 });
@@ -57,7 +57,7 @@ router.get('/fluxer/callback', async (req, res) => {
         req.session.fluxer = await fluxerOAuth.completeLogin(code);
         res.redirect('/');
     } catch (err) {
-        logger.error('Fluxer OAuth callback failed:', err);
+        logger.error('❌ Fluxer OAuth callback failed:', err);
         res.status(500).send('Fluxer login failed.');
     }
 });
@@ -86,7 +86,7 @@ router.get('/me', (req, res) => {
 router.post('/logout', (req, res) => {
     req.session.destroy((err) => {
         if (err) {
-            logger.error('Session destroy failed:', err);
+            logger.error('❌ Session destroy failed:', err);
             res.status(500).json({ error: 'Logout failed' });
             return;
         }

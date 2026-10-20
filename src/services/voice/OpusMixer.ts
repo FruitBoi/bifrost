@@ -45,7 +45,8 @@ interface Source {
  * FRAME_MS a drift-corrected timer calls {@link tick}, which pops at most one
  * frame per source, sums them, soft-clips, encodes once and emits `frame`.
  * When no source contributes, a cached encoded silence frame is emitted so
- * the consumer keeps its cadence.
+ * the consumer keeps its cadence; the `frame` event's second argument says
+ * whether that happened, so consumers can count voiced vs. silent output.
  */
 export default class OpusMixer extends EventEmitter implements AudioMixer {
     private readonly encoder = new OpusEncoder(SAMPLE_RATE, CHANNELS);
@@ -139,7 +140,7 @@ export default class OpusMixer extends EventEmitter implements AudioMixer {
         }
 
         if (active === 0) {
-            this.emit('frame', this.getSilenceFrame());
+            this.emit('frame', this.getSilenceFrame(), true);
             return;
         }
 
@@ -158,7 +159,12 @@ export default class OpusMixer extends EventEmitter implements AudioMixer {
             );
             return;
         }
-        this.emit('frame', encoded);
+        this.emit('frame', encoded, false);
+    }
+
+    /** True if `packet` is the cached silence frame this mixer emits when idle. */
+    isSilenceFrame(packet: OpusPacket): boolean {
+        return this.silenceFrame !== null && packet === this.silenceFrame;
     }
 
     // Global `performance` (not the perf_hooks import) so fake timers can drive it.

@@ -55,18 +55,71 @@ conn.emit('audioFrame', {
 ```
 
 for every frame. So the receive path delivers **decoded PCM, 48 kHz, mono,
-10 ms (480 samples)**, not Opus. Frames are only pumped for participants that
-were requested via `conn.subscribeParticipantAudio(participantId, {
-autoResubscribe })`; `autoResubscribe: true` keeps the request alive across
-`TrackUnsubscribed` / `ParticipantDisconnected`. `VoiceManager.
-subscribeChannelParticipants(channelId)` is the bulk helper; we do our own
-loop so we can skip bots.
+10 ms (480 samples)**, not Opus.
 
-`FluxerVoiceSession` therefore: upmixes mono to stereo, accumulates two 10 ms
-frames into one 20 ms frame per participant, encodes with a per-participant
-`@discordjs/opus` `OpusEncoder(48000, 2)`, and emits `audio(userId, packet)`.
-Frames at a sample rate other than 48 kHz are dropped with a one-time warning
-(the AudioStream is asked for 48 kHz so this should not occur).
+**Frames are only pumped for identities that were explicitly requested.**
+`subscribeParticipantTrack` returns early unless
+`requestedSubscriptions.has(participant.identity)` (the `TrackSubscribed`
+handler never passes `autoSubscribe`), and `requestedSubscriptions` is only
+filled by `conn.subscribeParticipantAudio(participantId, { autoResubscribe })`.
+The LiveKit room itself is joined with `autoSubscribe: true`, so the SFU
+_does_ deliver every audio track; the package just ignores the ones nobody
+asked for. `autoResubscribe: true` keeps a request alive across
+`TrackUnsubscribed` / `ParticipantDisconnected`.
+
+#### Subscription strategy (why Discord heard silence)
+
+The first implementation requested audio only for the Fluxer user IDs in
+our own gateway voice-state cache (`transport.listParticipants`, fed by
+`VoiceStatesSync` / `VoiceStateUpdate`). That silently fails in two ways,
+either of which produces exactly "Fluxer hears Discord, Discord hears
+nothing":
+
+1. the LiveKit identity is not the bare Fluxer user ID (e.g.
+   `userId:connectionId`), so the request key never matches a participant;
+2. the voice-state cache is empty or stale at join time (`VoiceStatesSync`
+   only fires from GUILD_CREATE payloads that carry `voice_states`;
+   `VoiceStateUpdate` requires the gateway to send it; states for people
+   already in the channel may arrive after `join()` resolves).
+
+`FluxerVoiceSession` now drives subscriptions **from the LiveKit room**,
+which is the source of truth for who is actually publishing audio:
+
+- `VoiceManager.join()` resolves only after `conn.connect()` →
+  `room.connect()` finished, so at `init()` the room is connected and
+  `room.remoteParticipants` is populated (rtc-node fills it from the
+  connect callback before `connect()` resolves). We reach the room with the
+  same reflective `getRoom(conn)` accessor the send path already uses.
+- On init we iterate `room.remoteParticipants` and call
+  `subscribeParticipantAudio(identity, { autoResubscribe: true })` for every
+  identity that is not the bot's (compared against both
+  `room.localParticipant.identity` and `transport.botUserId()`).
+- We also listen on the room for `ParticipantConnected`, `TrackPublished`
+  and `TrackSubscribed` (all three request audio for that identity;
+  requesting is idempotent per identity), `ParticipantDisconnected` (stops
+  our subscription) and `Reconnected` (re-scans the room). rtc-node sets
+  `publication.track` _before_ emitting `TrackSubscribed`, and the
+  package's own `TrackSubscribed` handler is registered first, so by the
+  time our handler calls `subscribeParticipantAudio` the track is there and
+  the pump starts immediately.
+- If `getRoom(conn)` ever returns null (upstream renamed the field) we fall
+  back to the old voice-state driven requests and log a warning.
+- Gateway `participantUpdate` events are no longer used to subscribe or
+  unsubscribe (when the room is reachable); they are forwarded to the bridge
+  unchanged and used to refresh identity → user ID mappings.
+
+The session then upmixes mono to stereo, accumulates two 10 ms frames into
+one 20 ms frame per identity, encodes with a per-identity `@discordjs/opus`
+`OpusEncoder(48000, 2)`, and emits `audio(sourceId, packet)` where
+`sourceId` is the mapped Fluxer user ID when possible (see below). Frames at
+a sample rate other than 48 kHz are dropped with a one-time warning (the
+AudioStream is asked for 48 kHz so this should not occur).
+
+`FluxerVoiceSession.stats()` returns
+`{ framesIn: number; packetsOut: number; participants: number }`: decoded
+PCM frames received from LiveKit, 20 ms Opus packets emitted as `audio`
+events, and the number of remote participants currently in the LiveKit room
+(bot excluded).
 
 ### Send path (LiveKit)
 
@@ -118,12 +171,60 @@ on it are send-only (logged as a warning).
 `participant.identity`, and the package's own
 `subscribeChannelParticipants` passes Fluxer **user IDs** from gateway voice
 states straight into `subscribeParticipantAudio(participantId)`. So the
-package assumes LiveKit identity == Fluxer user ID. We rely on the same
-assumption. **Unverified live.** If the identity turns out to be prefixed or
-otherwise different, inbound audio shows up as `audioFrame` events for a
-participantId we never asked for — `FluxerVoiceSession.handleAudioFrame`
-still bridges it and logs `Audio from unexpected participant` at debug so
-this is diagnosable.
+package assumes LiveKit identity == Fluxer user ID. **This is still
+unverified live**: nothing in `@fluxerjs/core`, `@fluxerjs/voice` or
+`@fluxerjs/types` reveals how Fluxer mints LiveKit tokens, so the identity
+format is unknown until we see it in logs. Note also that the old
+"unexpected participant" fallback in `handleAudioFrame` could never fire:
+the package emits no `audioFrame` at all for identities that were not
+requested, so an identity mismatch produced silence, not a debug line.
+
+We no longer depend on the assumption. Subscriptions are keyed by LiveKit
+identity (above), and `src/services/voice/fluxer/identity.ts` maps an
+identity back to a Fluxer user ID best-effort for the bridge's mute/leave
+bookkeeping (`setSourceMuted` / `removeSource` in `VoiceBridgeService` are
+keyed by user ID):
+
+1. if the identity equals a user ID in the channel's voice states, use it;
+2. else split on `:`, `-`, `_`, `.`, `/` and use the first token that is a
+   known user ID;
+3. else emit audio under the raw identity string. The mixer only needs a
+   stable key; mute mapping simply will not apply to that source.
+
+Audio is never dropped because an identity is unfamiliar. The mapping is
+re-evaluated whenever a voice state for the channel arrives, so an identity
+that could not be mapped at join time (empty cache) is upgraded to the user
+ID later (`Identity "…" now maps to user …`). The bot's own identity is
+recognised via `room.localParticipant.identity` and via the same
+token-matching against `transport.botUserId()`.
+
+#### Log lines to look for in the next live test
+
+All at INFO unless noted, all tagged `[FluxerVoice]`:
+
+- `🔗 LiveKit room "<name>" for <channelId> (join; state CONN_CONNECTED); local identity "<id>", bot user <id> (identity == user id | identity embeds user id | identity format differs from user id!); N remote participant(s); M user(s) in voice-state cache`
+    - This line answers the identity question: compare the local identity
+      with the bot user ID. `M` tells whether the voice-state cache was
+      populated at join time.
+- `📡 Remote participant "<identity>": maps to user <id> | no known user id, bridging under raw identity; N audio track(s), S subscribed` — one per
+  remote participant at join and on reconnect.
+- `📡 Published bridge audio track <sid> to LiveKit room for <channelId>`
+- `📡 Participant "<identity>" joined LiveKit room …` / `👋 Participant "<identity>" left LiveKit room …`
+- `🎧 First audio frame from "<identity>" in <channelId>: 48000 Hz, 1 ch, 480 samples/frame, track <sid>; emitting as source <id>` — the key line:
+  if it appears, Fluxer audio is reaching the session and the remaining
+  suspect is the Discord send path.
+- `🎧 Audio from unrequested participant …` — should not appear; means the
+  package started pumping something we did not request.
+- WARN `⚠️ No audio received from LiveKit 5s after joining <channelId> although N remote participant(s) are present: "<identity>" (requested | NOT requested, N audio track(s), S subscribed), …` — fires once per
+  session. "requested, 1 audio track, 1 subscribed" with no frames points
+  at the AudioStream pump; "0 audio track(s)" means the client is not
+  publishing (muted, or the Fluxer client publishes only while speaking).
+  If nobody spoke in those 5 s the warning is benign.
+- `👋 Session <channelId> closed (<reason>); received F frames → P packets, sent S frames, dropped D` — end-of-session totals from `stats()`.
+- DEBUG: `🎧 Requested audio from "<identity>" (<why>)`, `📡 Audio track … published by …`, `📡 Subscribed to audio track …`.
+
+The package itself also prints `[voice LiveKitRtc] connected to room` via
+`console.error`, and `VOICE_DEBUG=1` adds per-frame output.
 
 ### Voice states
 
@@ -266,7 +367,12 @@ the libraries are not tested upstream on 20. Moving the image to
   outbound backlog capped at 50 frames; inbound subscriptions created on
   `receiver.speaking 'start'` with `EndBehaviorType.Manual`; reconnect dance
   (`Signalling`/`Connecting` within 5 s, else destroy and `closed`).
-- `src/services/voice/fluxer/FluxerVoiceTransport.ts`: described above.
+- `src/services/voice/fluxer/FluxerVoiceTransport.ts`: described above;
+  receive subscriptions are driven by the LiveKit room's participant and
+  track events, inbound state is keyed by LiveKit identity, and
+  `FluxerVoiceSession.stats()` exposes receive counters.
+- `src/services/voice/fluxer/identity.ts`: pure identity → user ID mapping
+  helpers (unit-tested in `test/services/voice/FluxerIdentity.test.ts`).
 
 ## Still to verify live (with real bot tokens)
 
@@ -288,19 +394,25 @@ Discord:
 Fluxer:
 
 1. Construct `FluxerVoiceTransport` before `client.login()` and confirm
-   `VoiceStatesSync` populates `listParticipants` after READY.
+   `VoiceStatesSync` populates `listParticipants` after READY. The
+   `🔗 LiveKit room …` join line reports `M user(s) in voice-state cache`;
+   `0` while people are in the channel means the cache is not being fed
+   (the bridge's occupancy counting in `VoiceBridgeService` relies on it,
+   even though audio no longer does).
 2. Join a voice channel and confirm `voiceManager.join` resolves with a
-   `LiveKitRtcConnection` (log `conn instanceof LiveKitRtcConnection`). If
-   it resolves with the legacy `VoiceConnection`, receive is unsupported and
-   this document's assumptions need revisiting.
-3. Confirm `publishTrack` succeeds and the bot shows an audio track in the
-   channel (other clients see it "speaking" when the mixer carries sound).
-   This validates the reflective `room` access.
-4. Have a human speak; confirm `audioFrame` events arrive with
-   `sampleRate 48000, channels 1, samples.length 480`, and that
-   `participantId` equals the speaker's Fluxer user ID (check for the
-   `Audio from unexpected participant` debug line, which indicates an
-   identity mismatch).
+   `LiveKitRtcConnection`. If the legacy UDP warning
+   (`⚠️ Channel … uses the legacy UDP voice connection`) appears instead,
+   receive is unsupported and this document's assumptions need revisiting.
+3. Confirm `📡 Published bridge audio track …` is logged and the bot shows
+   an audio track in the channel (other clients see it "speaking" when the
+   mixer carries sound). This validates the reflective `room` access.
+4. Have a human speak; confirm `🎧 First audio frame from "<identity>" …:
+48000 Hz, 1 ch, 480 samples/frame` appears and note whether the identity
+   maps to the speaker's Fluxer user ID (`emitting as source <userId>`) or
+   is bridged under the raw identity. If the `⚠️ No audio received from
+LiveKit 5s after joining` warning fires while someone is talking, read
+   its per-identity `requested / audio track(s) / subscribed` breakdown to
+   locate where the chain breaks (see "Log lines to look for").
 5. Confirm the resulting Opus packets decode cleanly on the Discord side (no
    `Dropping undecodable packet` lines from the mixer).
 6. Confirm `leave()` unpublishes the track and the bot disappears from the

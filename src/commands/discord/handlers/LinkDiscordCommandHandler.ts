@@ -111,7 +111,7 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                     message,
                     `Failed to link guild: ${(err as Error).message}`
                 );
-                logger.error('Link guild failed:', err);
+                logger.error('❌ Link guild failed:', err);
             }
             return;
         }
@@ -207,7 +207,7 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
                 message,
                 `Failed to link: ${(err as Error).message}`
             );
-            logger.error('Link failed:', err);
+            logger.error('❌ Link failed:', err);
         }
     }
 }

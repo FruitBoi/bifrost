@@ -154,7 +154,7 @@ export default class ThreadsFluxerCommandHandler extends FluxerCommandHandler {
                         .setTimestamp(),
                 ],
             });
-            logger.error('Threads toggle failed:', err);
+            logger.error('❌ Threads toggle failed:', err);
         }
     }
 }

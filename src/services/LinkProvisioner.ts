@@ -233,7 +233,7 @@ export default class LinkProvisioner {
                 .deleteDiscordWebhook(id, token)
                 .catch((err) =>
                     logger.error(
-                        'Failed to delete Discord webhook during guild unlink:',
+                        '❌ Failed to delete Discord webhook during guild unlink:',
                         err
                     )
                 );
@@ -243,7 +243,7 @@ export default class LinkProvisioner {
                 .deleteFluxerWebhook(id, token)
                 .catch((err) =>
                     logger.error(
-                        'Failed to delete Fluxer webhook during guild unlink:',
+                        '❌ Failed to delete Fluxer webhook during guild unlink:',
                         err
                     )
                 );
@@ -309,7 +309,7 @@ export default class LinkProvisioner {
                   );
         await remove.catch((err) =>
             logger.error(
-                `Failed to clean up ${platform} webhook after link failure:`,
+                `❌ Failed to clean up ${platform} webhook after link failure:`,
                 err
             )
         );
@@ -327,7 +327,7 @@ export default class LinkProvisioner {
                     link.discordWebhookToken
                 )
                 .catch((err) =>
-                    logger.error('Failed to delete Discord webhook:', err)
+                    logger.error('❌ Failed to delete Discord webhook:', err)
                 );
         }
         if (
@@ -341,7 +341,7 @@ export default class LinkProvisioner {
                     link.fluxerWebhookToken
                 )
                 .catch((err) =>
-                    logger.error('Failed to delete Fluxer webhook:', err)
+                    logger.error('❌ Failed to delete Fluxer webhook:', err)
                 );
         }
     }

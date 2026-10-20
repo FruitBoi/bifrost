@@ -119,7 +119,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
 
         if (isFluxerApiBlocked()) {
             logger.debug(
-                `Fluxer API blocked, queueing message ${message.id} without sending`
+                `📬 Fluxer API blocked, queueing message ${message.id} without sending`
             );
             await this.queueService?.enqueue(
                 'discord_to_fluxer',
@@ -156,7 +156,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
             });
         } catch (error) {
             if (isFluxerApiBlockError(error)) markFluxerApiBlocked();
-            logger.error('Error relaying message to Fluxer:', error);
+            logger.error('❌ Error relaying message to Fluxer:', error);
             this.metricsService?.messageRelayErrors.inc({
                 direction: 'discord_to_fluxer',
             });

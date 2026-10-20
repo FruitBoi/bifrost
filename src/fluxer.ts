@@ -194,12 +194,12 @@ const startFluxerClient = async ({
     );
 
     client.once(Events.Ready, () => {
-        logger.info('Fluxer bot is ready!');
+        logger.info('🌊 Fluxer bot is ready!');
         healthCheckService.pushFluxerHealthStatus();
     });
 
     client.on(Events.Error, (error) => {
-        logger.error('Fluxer client error:', error);
+        logger.error('❌ Fluxer client error:', error);
     });
 
     client.on(Events.ChannelDelete, async (channel) => {
@@ -207,7 +207,7 @@ const startFluxerClient = async ({
         try {
             await categorySyncService.handleFluxerChannelDelete(channel.id);
         } catch (error) {
-            logger.error('Error handling Fluxer channel deletion:', error);
+            logger.error('❌ Error handling Fluxer channel deletion:', error);
         }
     });
 
@@ -215,7 +215,7 @@ const startFluxerClient = async ({
         try {
             await threadSyncService.resolveFluxerThread(thread, 'auto');
         } catch (error) {
-            logger.error('Error handling Fluxer thread creation:', error);
+            logger.error('❌ Error handling Fluxer thread creation:', error);
         }
     });
 
@@ -226,7 +226,7 @@ const startFluxerClient = async ({
                 newThread
             );
         } catch (error) {
-            logger.error('Error handling Fluxer thread update:', error);
+            logger.error('❌ Error handling Fluxer thread update:', error);
         }
     });
 
@@ -234,7 +234,7 @@ const startFluxerClient = async ({
         try {
             await threadSyncService.handleFluxerThreadDelete(thread.id);
         } catch (error) {
-            logger.error('Error handling Fluxer thread deletion:', error);
+            logger.error('❌ Error handling Fluxer thread deletion:', error);
         }
     });
 
@@ -247,7 +247,10 @@ const startFluxerClient = async ({
         try {
             linkService.deleteMessageLink(messageLink.id);
         } catch (error) {
-            logger.error('Error deleting message link from database:', error);
+            logger.error(
+                '❌ Error deleting message link from database:',
+                error
+            );
         }
 
         const channelLink = await linkService.getChannelLinkById(
@@ -269,7 +272,7 @@ const startFluxerClient = async ({
             .catch(() => null);
         if (!msg) {
             logger.error(
-                'Could not find linked Discord message to delete for Fluxer message ID:',
+                '❌ Could not find linked Discord message to delete for Fluxer message ID:',
                 message.id
             );
             return;
@@ -278,7 +281,7 @@ const startFluxerClient = async ({
         try {
             await msg.delete();
         } catch (error) {
-            logger.error('Error deleting message from Discord:', error);
+            logger.error('❌ Error deleting message from Discord:', error);
         }
     });
 
@@ -296,7 +299,7 @@ const startFluxerClient = async ({
                 ? await updatedMessage.fetch()
                 : updatedMessage;
         } catch (error) {
-            logger.error('Error fetching updated Fluxer message:', error);
+            logger.error('❌ Error fetching updated Fluxer message:', error);
             return;
         }
         if (newMessage.webhookId) return;
@@ -317,7 +320,7 @@ const startFluxerClient = async ({
         );
         if (!webhook) {
             logger.warn(
-                `No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message update`
+                `⚠️ No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message update`
             );
             return;
         }
@@ -338,7 +341,10 @@ const startFluxerClient = async ({
                 linkedChannel.discordThreadId
             );
         } catch (error) {
-            logger.error('Error editing message via Discord webhook:', error);
+            logger.error(
+                '❌ Error editing message via Discord webhook:',
+                error
+            );
         }
     });
 
@@ -387,7 +393,7 @@ const startFluxerClient = async ({
                 await handler.handleCommand(message, command, ...args);
             } catch (error) {
                 logger.error(
-                    `Error executing fluxer command "${command}":`,
+                    `❌ Error executing fluxer command "${command}":`,
                     error
                 );
             }
@@ -397,7 +403,7 @@ const startFluxerClient = async ({
                     .delete()
                     .catch((err: unknown) =>
                         logger.error(
-                            'Failed to delete invocation message:',
+                            '❌ Failed to delete invocation message:',
                             err
                         )
                     );

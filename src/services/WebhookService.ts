@@ -65,7 +65,7 @@ export class WebhookService {
             const webhook = await channel.createWebhook({ name });
             return { id: webhook.id, token: webhook.token! };
         } catch (error: unknown) {
-            logger.error('Error creating Discord webhook:', error);
+            logger.error('❌ Error creating Discord webhook:', error);
             throw error;
         }
     }
@@ -90,7 +90,10 @@ export class WebhookService {
             });
             return webhookClient;
         } catch (error: unknown) {
-            logger.error('Error getting or creating Discord webhook:', error);
+            logger.error(
+                '❌ Error getting or creating Discord webhook:',
+                error
+            );
             throw error;
         }
     }
@@ -125,7 +128,10 @@ export class WebhookService {
 
             return { messageId: id };
         } catch (error: unknown) {
-            logger.error('Error sending message via Discord webhook:', error);
+            logger.error(
+                '❌ Error sending message via Discord webhook:',
+                error
+            );
             throw error;
         }
     }
@@ -153,7 +159,10 @@ export class WebhookService {
                 threadId: threadId ?? undefined,
             });
         } catch (error: unknown) {
-            logger.error('Error editing message via Discord webhook:', error);
+            logger.error(
+                '❌ Error editing message via Discord webhook:',
+                error
+            );
             throw error;
         }
     }
@@ -173,7 +182,7 @@ export class WebhookService {
             const webhook = await channel.createWebhook({ name });
             return { id: webhook.id, token: webhook.token! };
         } catch (error: unknown) {
-            logger.error('Error creating Fluxer webhook:', error);
+            logger.error('❌ Error creating Fluxer webhook:', error);
             throw error;
         }
     }
@@ -190,7 +199,7 @@ export class WebhookService {
             );
             await webhook.delete();
         } catch (error) {
-            logger.error('Error deleting Discord webhook:', error);
+            logger.error('❌ Error deleting Discord webhook:', error);
             throw error;
         }
     }
@@ -208,7 +217,7 @@ export class WebhookService {
             );
             await webhook.delete();
         } catch (error) {
-            logger.error('Error deleting Fluxer webhook:', error);
+            logger.error('❌ Error deleting Fluxer webhook:', error);
             throw error;
         }
     }
@@ -229,7 +238,7 @@ export class WebhookService {
             );
             return webhook;
         } catch (error: unknown) {
-            logger.error('Error getting or creating Fluxer webhook:', error);
+            logger.error('❌ Error getting or creating Fluxer webhook:', error);
             throw error;
         }
     }
@@ -326,7 +335,7 @@ export class WebhookService {
 
             return { messageId: msg.id };
         } catch (error: unknown) {
-            logger.error('Error sending message via Fluxer webhook:', error);
+            logger.error('❌ Error sending message via Fluxer webhook:', error);
             throw error;
         }
     }
@@ -362,7 +371,7 @@ export class WebhookService {
                 auth: false,
             });
         } catch (error: unknown) {
-            logger.error('Error editing message via Fluxer webhook:', error);
+            logger.error('❌ Error editing message via Fluxer webhook:', error);
             throw error;
         }
     }

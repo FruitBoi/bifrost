@@ -160,6 +160,31 @@ describe('OpusMixer', () => {
         const pcm = new OpusEncoder(SAMPLE_RATE, CHANNELS).decode(frames[0]);
         expect(pcm.length).toBe(FRAME_BYTES);
         expect(peak(pcm)).toBeLessThan(50);
+        expect(mixer.isSilenceFrame(frames[0])).toBe(true);
+    });
+
+    it('flags silence frames with silent=true and voiced frames with false', () => {
+        mixer = new OpusMixer();
+        const flags: (boolean | undefined)[] = [];
+        const packets: Buffer[] = [];
+        mixer.on('frame', (packet, silent) => {
+            packets.push(packet);
+            flags.push(silent);
+        });
+
+        mixer.tick(); // nothing queued: silence
+        for (const p of encodedSine(440, 6000, JITTER_TARGET_FRAMES)) {
+            mixer.push('a', p);
+        }
+        mixer.tick(); // primed: voiced
+        mixer.setSourceMuted('a', true);
+        mixer.push('a', encodedSine(440, 6000, 1)[0]);
+        mixer.tick(); // only a muted source contributed: silence again
+
+        expect(flags).toEqual([true, false, true]);
+        expect(mixer.isSilenceFrame(packets[0])).toBe(true);
+        expect(mixer.isSilenceFrame(packets[1])).toBe(false);
+        expect(mixer.isSilenceFrame(packets[2])).toBe(true);
     });
 
     it('also emits silence when a source exists but is still buffering', () => {

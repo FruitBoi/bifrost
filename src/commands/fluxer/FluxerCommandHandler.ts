@@ -44,14 +44,14 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
             const guild = message.guild ?? (await message.resolveGuild());
             if (!guild) {
                 logger.warn(
-                    `Could not resolve Fluxer guild ${message.guildId} for member lookup`
+                    `⚠️ Could not resolve Fluxer guild ${message.guildId} for member lookup`
                 );
             }
             authorMember =
                 (await guild?.fetchMember(message.author.id)) || null;
         } catch (error) {
             logger.error(
-                'Error fetching member for FluxerCommandHandler:',
+                '❌ Error fetching member for FluxerCommandHandler:',
                 error
             );
         }
@@ -94,7 +94,7 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
         try {
             guild ??= await message.resolveGuild();
         } catch (error) {
-            logger.error('Error resolving guild for requireOwner:', error);
+            logger.error('❌ Error resolving guild for requireOwner:', error);
         }
         if (
             (guild as unknown as FluxerGuildWithOwner)?.ownerId !==

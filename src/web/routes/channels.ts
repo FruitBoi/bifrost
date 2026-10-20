@@ -233,7 +233,7 @@ export function createChannelsRouter({
                         parentName: discordChannelNames.get(t.parentId!)!,
                     }));
             } catch (err) {
-                logger.warn('Could not list active Discord threads:', err);
+                logger.warn('⚠️ Could not list active Discord threads:', err);
             }
         }
 
@@ -253,7 +253,7 @@ export function createChannelsRouter({
                         parentName: fluxerChannelNames.get(t.parentId!)!,
                     }));
             } catch (err) {
-                logger.warn('Could not list active Fluxer threads:', err);
+                logger.warn('⚠️ Could not list active Fluxer threads:', err);
             }
         }
 
@@ -493,7 +493,7 @@ export function createChannelsRouter({
                 });
             } catch (err) {
                 logger.error(
-                    `Autolink failed for #${match.discord.name} ↔ #${match.fluxer.name}:`,
+                    `❌ Autolink failed for #${match.discord.name} ↔ #${match.fluxer.name}:`,
                     err
                 );
                 results.push({
@@ -565,7 +565,10 @@ export function createChannelsRouter({
             });
             res.status(201).json({ id: channelLink.id });
         } catch (err) {
-            logger.error('Failed to create channel link via dashboard:', err);
+            logger.error(
+                '❌ Failed to create channel link via dashboard:',
+                err
+            );
             res.status(500).json({ error: (err as Error).message });
         }
     });
@@ -599,7 +602,10 @@ export function createChannelsRouter({
                 autoSyncThreads: updated.autoSyncThreads,
             });
         } catch (err) {
-            logger.error('Failed to update channel link via dashboard:', err);
+            logger.error(
+                '❌ Failed to update channel link via dashboard:',
+                err
+            );
             res.status(500).json({ error: (err as Error).message });
         }
     });
@@ -660,7 +666,10 @@ export function createChannelsRouter({
             };
             res.status(201).json(response);
         } catch (err) {
-            logger.error('Failed to create category link via dashboard:', err);
+            logger.error(
+                '❌ Failed to create category link via dashboard:',
+                err
+            );
             res.status(400).json({ error: (err as Error).message });
         }
     });
@@ -694,7 +703,10 @@ export function createChannelsRouter({
             await categorySyncService.removeCategoryLink(categoryLink);
             res.status(204).end();
         } catch (err) {
-            logger.error('Failed to remove category link via dashboard:', err);
+            logger.error(
+                '❌ Failed to remove category link via dashboard:',
+                err
+            );
             res.status(500).json({ error: (err as Error).message });
         }
     });

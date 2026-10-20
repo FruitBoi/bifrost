@@ -191,7 +191,7 @@ export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
                 successCount++;
             } catch (err: unknown) {
                 logger.error(
-                    `Autolink failed for #${proposal.discord.name} ↔ #${proposal.fluxer.name}:`,
+                    `❌ Autolink failed for #${proposal.discord.name} ↔ #${proposal.fluxer.name}:`,
                     err
                 );
                 errors.push(

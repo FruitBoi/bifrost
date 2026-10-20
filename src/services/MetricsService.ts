@@ -74,7 +74,7 @@ export default class MetricsService {
         });
 
         server.listen(port, () => {
-            logger.info(`Metrics server listening on port ${port}`);
+            logger.info(`📈 Metrics server listening on port ${port}`);
         });
     }
 }

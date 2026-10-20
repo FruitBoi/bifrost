@@ -152,7 +152,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                     message,
                     `Failed to unlink category: ${(err as Error).message}`
                 );
-                logger.error('Category unlink failed:', err);
+                logger.error('❌ Category unlink failed:', err);
             }
             return;
         }
@@ -197,7 +197,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                     message,
                     `Failed to list category links: ${(err as Error).message}`
                 );
-                logger.error('Error listing category links:', err);
+                logger.error('❌ Error listing category links:', err);
             }
             return;
         }
@@ -305,7 +305,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
                 message,
                 `Failed to link category \`${discordCategoryId}\`: ${(err as Error).message}`
             );
-            logger.error('Category link failed:', err);
+            logger.error('❌ Category link failed:', err);
         }
     }
 }

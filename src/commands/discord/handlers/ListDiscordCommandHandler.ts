@@ -123,7 +123,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
         if (args[0]?.toLowerCase() === 'all') {
             if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
                 logger.warn(
-                    `[list all] Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                    `[list all] ⚠️ Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
                 );
                 await message.reply({
                     embeds: [
@@ -241,7 +241,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                             ],
                         });
                         logger.error(
-                            'Failed to DM %list all output to Discord user:',
+                            '❌ Failed to DM %list all output to Discord user:',
                             message.author.id
                         );
                     }
@@ -258,7 +258,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                             .setTimestamp(),
                     ],
                 });
-                logger.error('Error listing all links:', err);
+                logger.error('❌ Error listing all links:', err);
             }
             return;
         }
@@ -267,7 +267,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
             const serverId = args[0];
             if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
                 logger.warn(
-                    `[list] Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                    `[list] ⚠️ Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
                 );
                 // Fall through to normal list behaviour
             } else {
@@ -395,7 +395,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                                 .setTimestamp(),
                         ],
                     });
-                    logger.error('Error listing links by server ID:', err);
+                    logger.error('❌ Error listing links by server ID:', err);
                 }
                 return;
             }
@@ -510,7 +510,7 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                         .setTimestamp(),
                 ],
             });
-            logger.error('Error listing channel links:', err);
+            logger.error('❌ Error listing channel links:', err);
         }
     }
 }

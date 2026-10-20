@@ -237,7 +237,7 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
                 message,
                 `Failed to bridge category: ${(err as Error).message}`
             );
-            logger.error('Category link failed:', err);
+            logger.error('❌ Category link failed:', err);
         }
     }
 
@@ -312,7 +312,7 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
                 message,
                 `Failed to remove category link: ${(err as Error).message}`
             );
-            logger.error('Category unlink failed:', err);
+            logger.error('❌ Category unlink failed:', err);
         }
     }
 }

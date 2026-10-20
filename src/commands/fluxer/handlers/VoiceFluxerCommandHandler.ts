@@ -288,7 +288,8 @@ export default class VoiceFluxerCommandHandler extends FluxerCommandHandler {
             await this.replyEmbed(
                 message,
                 `Linked voice channel 🔊 <#${voiceLink.fluxerChannelId}> with Discord voice channel 🔊 **${discord.name}** (\`${voiceLink.discordChannelId}\`).\n` +
-                    `Only one voice link per server pair can be live at a time; the bridge joins whichever linked channel gets visitors first.`,
+                    `Only one voice link per server pair can be live at a time; the bridge joins whichever linked channel gets visitors first.\n` +
+                    `This is a one-time setup: the link is saved, and the bot joins both channels on its own whenever someone enters either of them.`,
                 EmbedColors.Success
             );
         } catch (err: unknown) {

@@ -136,7 +136,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
         if (args[0]?.toLowerCase() === 'all') {
             if (!FLUXER_OWNER_ID || message.author.id !== FLUXER_OWNER_ID) {
                 logger.warn(
-                    `[list all] Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                    `[list all] ⚠️ Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
                 );
                 await message.reply({
                     embeds: [
@@ -257,7 +257,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                             ],
                         });
                         logger.error(
-                            'Failed to DM %list all output to Fluxer user:',
+                            '❌ Failed to DM %list all output to Fluxer user:',
                             message.author.id
                         );
                     }
@@ -274,7 +274,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                             .setTimestamp(),
                     ],
                 });
-                logger.error('Error listing all links:', err);
+                logger.error('❌ Error listing all links:', err);
             }
             return;
         }
@@ -283,7 +283,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
             const serverId = args[0];
             if (!FLUXER_OWNER_ID || message.author.id !== FLUXER_OWNER_ID) {
                 logger.warn(
-                    `[list] Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                    `[list] ⚠️ Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
                 );
                 // Fall through to normal list behaviour
             } else {
@@ -416,7 +416,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                                 .setTimestamp(),
                         ],
                     });
-                    logger.error('Error listing links by server ID:', err);
+                    logger.error('❌ Error listing links by server ID:', err);
                 }
                 return;
             }
@@ -525,7 +525,7 @@ export default class ListFluxerCommandHandler extends FluxerCommandHandler {
                         .setTimestamp(),
                 ],
             });
-            logger.error('Error listing channel links:', err);
+            logger.error('❌ Error listing channel links:', err);
         }
     }
 }

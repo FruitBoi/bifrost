@@ -6,6 +6,7 @@ import {
     VoiceLinkListener,
 } from '../../../src/services/LinkService';
 import VoiceBridgeService from '../../../src/services/voice/VoiceBridgeService';
+import logger from '../../../src/utils/logging/logger';
 import { guildLink, nextId } from '../../helpers/fakes';
 import { FakeVoiceTransport, createFakeMixer } from '../../helpers/voiceFakes';
 
@@ -58,6 +59,8 @@ function setup(
         links?: VoiceLink[];
         leaveGraceMs?: number;
         joinRetryBackoffMs?: number[];
+        statsIntervalMs?: number;
+        silentSideWarnMs?: number;
     } = {}
 ) {
     const link = options.links?.[0] ?? makeVoiceLink();
@@ -72,6 +75,8 @@ function setup(
         createMixer: mixers.factory,
         leaveGraceMs: options.leaveGraceMs,
         joinRetryBackoffMs: options.joinRetryBackoffMs,
+        statsIntervalMs: options.statsIntervalMs,
+        silentSideWarnMs: options.silentSideWarnMs,
     });
 
     const joinAlice = async () => {
@@ -107,7 +112,13 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
 });
+
+/** Messages logged at `level` so far (first argument of each call). */
+function logged(spy: ReturnType<typeof vi.spyOn>): string[] {
+    return spy.mock.calls.map((call) => String(call[0]));
+}
 
 describe('joining', () => {
     it('joins both sides when a human enters the Discord side of an enabled link', async () => {
@@ -584,6 +595,145 @@ describe('link changes', () => {
         await flush();
 
         expect(t.discord.joinCalls).toHaveLength(1);
+    });
+});
+
+describe('diagnostics', () => {
+    const statsLines = (spy: ReturnType<typeof vi.spyOn>) =>
+        logged(spy).filter((m) => m.includes('📊'));
+
+    it('logs who is on each side (and the bot ids) when the bridge goes live', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup();
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, 'fvoice', {
+            userId: 'fred',
+            selfMute: true,
+        });
+        await t.service.start();
+        await flush();
+
+        const line = logged(info).find((m) => m.includes('participants:'));
+        expect(line).toBe(
+            `[VoiceBridge] 👥 link ${t.link.id} participants: Discord [alice] · Fluxer [fred (muted)] · bots D=dbot F=fbot`
+        );
+    });
+
+    it('logs per-direction deltas every stats interval and stops on teardown', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ statsIntervalMs: 15_000, leaveGraceMs: 1_000 });
+        await t.service.start();
+        await t.joinAlice();
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        const [toFluxer, toDiscord] = t.mixers;
+        const discordSession = t.discord.sessions[0];
+        const fluxerSession = t.fluxer.sessions[0];
+
+        discordSession.simulateAudio('alice', pkt('a1'));
+        discordSession.simulateAudio('alice', pkt('a2'));
+        discordSession.simulateAudio('alice', pkt('a3'));
+        discordSession.simulateAudio('dbot', pkt('ignored'));
+        toFluxer.emitFrame(pkt('s'), true);
+        toFluxer.emitFrame(pkt('v1'), false);
+        toFluxer.emitFrame(pkt('v2')); // no flag: counted as voiced
+        fluxerSession.simulateAudio('fred', pkt('f1'));
+        toDiscord.emitFrame(pkt('s'), true);
+        toDiscord.emitFrame(pkt('s'), true);
+
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(statsLines(info)).toEqual([]);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(statsLines(info)).toEqual([
+            `[VoiceBridge] 📊 link ${t.link.id}: Discord→Fluxer in=3 out=3 (2 voiced) · Fluxer→Discord in=1 out=2 (0 voiced) · participants D=1 F=1`,
+        ]);
+
+        // Deltas, not totals: a quiet interval reports zeros.
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(statsLines(info)).toHaveLength(2);
+        expect(statsLines(info)[1]).toBe(
+            `[VoiceBridge] 📊 link ${t.link.id}: Discord→Fluxer in=0 out=0 (0 voiced) · Fluxer→Discord in=0 out=0 (0 voiced) · participants D=1 F=1`
+        );
+
+        // Everyone leaves; after the grace period the interval must be gone.
+        t.discord.setParticipant(DGUILD, null, { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await flush();
+        expect(t.service.status().live).toHaveLength(0);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(statsLines(info)).toHaveLength(2);
+    });
+
+    it('appends session stats() when a transport exposes them', async () => {
+        const info = vi.spyOn(logger, 'info');
+        const t = setup({ statsIntervalMs: 15_000 });
+        await t.service.start();
+        await t.joinAlice();
+        t.fluxer.sessions[0].statsOverride = {
+            framesIn: 0,
+            packetsOut: 750,
+            participants: 2,
+        };
+
+        await vi.advanceTimersByTimeAsync(15_000);
+
+        expect(statsLines(info)).toEqual([
+            `[VoiceBridge] 📊 link ${t.link.id}: Discord→Fluxer in=0 out=0 (0 voiced) · Fluxer→Discord in=0 out=0 (0 voiced) · participants D=1 F=0 · Fluxer session framesIn=0 packetsOut=750 participants=2`,
+        ]);
+    });
+
+    it('warns once when a side with unmuted people has sent no audio after the warn delay', async () => {
+        const warn = vi.spyOn(logger, 'warn');
+        const t = setup({ silentSideWarnMs: 10_000 });
+        await t.service.start();
+        await t.joinAlice();
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'gina' });
+
+        // Discord audio flows, Fluxer audio never arrives: today's bug.
+        t.discord.sessions[0].simulateAudio('alice', pkt('a1'));
+
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(logged(warn)).toEqual([]);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(logged(warn)).toEqual([
+            `[VoiceBridge] ⚠️ link ${t.link.id}: no audio received from Fluxer in the first 10000 ms although 2 unmuted participant(s) are there (fred, gina); Fluxer→Discord is silent — check the fluxer transport's receive path`,
+        ]);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(logged(warn)).toHaveLength(1);
+    });
+
+    it('does not warn when audio arrived from every populated side, or when the silent side is muted', async () => {
+        const warn = vi.spyOn(logger, 'warn');
+        const t = setup({ silentSideWarnMs: 10_000 });
+        await t.service.start();
+        await t.joinAlice();
+        t.fluxer.setParticipant(FGUILD, 'fvoice', {
+            userId: 'fred',
+            selfMute: true,
+        });
+
+        t.discord.sessions[0].simulateAudio('alice', pkt('a1'));
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        expect(logged(warn)).toEqual([]);
+    });
+
+    it('cancels the silent-side check when the bridge leaves before it fires', async () => {
+        const warn = vi.spyOn(logger, 'warn');
+        const t = setup({ silentSideWarnMs: 10_000 });
+        await t.service.start();
+        await t.joinAlice();
+
+        t.service.onVoiceLinkChanged(t.link.id, null);
+        await flush();
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        expect(logged(warn)).toEqual([]);
     });
 });
 

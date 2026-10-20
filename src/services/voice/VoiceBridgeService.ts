@@ -23,6 +23,10 @@ export interface VoiceBridgeServiceOptions {
     leaveGraceMs?: number;
     /** Delays between successive join attempts after a failure or a drop. */
     joinRetryBackoffMs?: number[];
+    /** How often a live bridge logs its per-direction audio counters. */
+    statsIntervalMs?: number;
+    /** How long after going live a side with people but no audio is flagged. */
+    silentSideWarnMs?: number;
 }
 
 export interface LiveVoiceBridge {
@@ -41,6 +45,8 @@ export interface VoiceBridgeStatus {
 
 const DEFAULT_LEAVE_GRACE_MS = 30_000;
 const DEFAULT_JOIN_RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000];
+const DEFAULT_STATS_INTERVAL_MS = 15_000;
+const DEFAULT_SILENT_SIDE_WARN_MS = 10_000;
 
 /**
  * idle (no entry in `bridges`) → joining → live → leaving → idle.
@@ -48,13 +54,34 @@ const DEFAULT_JOIN_RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000];
  */
 type BridgeState = 'joining' | 'live' | 'leaving';
 
+/** Cumulative audio counters of one side since it was wired. */
+interface SideCounters {
+    /** `audio` packets received from this side's session. */
+    audioIn: number;
+    /** Mixer frames sent to the other side. */
+    framesOut: number;
+    /** Sent frames that were not the mixer's silence frame. */
+    voicedOut: number;
+}
+
+/** Optional per-session counters a transport may expose (duck-typed). */
+interface SessionStats {
+    framesIn: number;
+    packetsOut: number;
+    participants: number;
+}
+
 /** One side of a live bridge: the session we sit in and what it feeds. */
 interface BridgeSide {
+    platform: VoicePlatform;
     session: VoiceSession;
     /** Mixer this side's participants feed; its output goes to the other side. */
     mixer: AudioMixer;
     /** Non-bot participants currently in this side's channel. */
     participants: Map<string, VoiceParticipant>;
+    counters: SideCounters;
+    /** Snapshot of `counters` at the previous stats report. */
+    reported: SideCounters;
     /** Removes every listener this side registered. */
     detach: () => void;
 }
@@ -69,6 +96,8 @@ interface Bridge {
     retryAttempt: number;
     retryTimer: NodeJS.Timeout | null;
     leaveTimer: NodeJS.Timeout | null;
+    statsTimer: NodeJS.Timeout | null;
+    silentSideTimer: NodeJS.Timeout | null;
     discord: BridgeSide | null;
     fluxer: BridgeSide | null;
 }
@@ -82,6 +111,10 @@ interface Bridge {
  * bot is in, the sessions' own participant events drive mute mapping and the
  * auto-leave grace timer. Only one bridge per guild link can be live, since
  * a bot can only sit in one voice channel per guild on each platform.
+ *
+ * While live, every bridge counts the audio flowing in each direction and
+ * logs the deltas periodically, so a one-way audio problem shows up in the
+ * logs as a direction with `in=0` or `out=0`.
  */
 export default class VoiceBridgeService implements VoiceLinkListener {
     private readonly linkService: LinkService;
@@ -91,6 +124,8 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     private readonly metrics: MetricsService | null;
     private readonly leaveGraceMs: number;
     private readonly joinRetryBackoffMs: number[];
+    private readonly statsIntervalMs: number;
+    private readonly silentSideWarnMs: number;
 
     /** Every known voice link, kept current through onVoiceLinkChanged. */
     private readonly links = new Map<string, VoiceLink>();
@@ -104,9 +139,9 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     private readonly onFluxerUpdate = (update: VoiceParticipantUpdate) =>
         this.handleTransportUpdate('fluxer', update);
     private readonly onDiscordError = (err: Error) =>
-        logger.error('[VoiceBridge] Discord voice transport error', err);
+        logger.error('[VoiceBridge] ❌ Discord voice transport error', err);
     private readonly onFluxerError = (err: Error) =>
-        logger.error('[VoiceBridge] Fluxer voice transport error', err);
+        logger.error('[VoiceBridge] ❌ Fluxer voice transport error', err);
 
     constructor(options: VoiceBridgeServiceOptions) {
         this.linkService = options.linkService;
@@ -118,6 +153,10 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         this.joinRetryBackoffMs = [
             ...(options.joinRetryBackoffMs ?? DEFAULT_JOIN_RETRY_BACKOFF_MS),
         ];
+        this.statsIntervalMs =
+            options.statsIntervalMs ?? DEFAULT_STATS_INTERVAL_MS;
+        this.silentSideWarnMs =
+            options.silentSideWarnMs ?? DEFAULT_SILENT_SIDE_WARN_MS;
     }
 
     // ---------------------------------------------------------------------
@@ -138,14 +177,14 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         try {
             links = await this.linkService.getAllVoiceLinks();
         } catch (err) {
-            logger.error('[VoiceBridge] Failed to load voice links', err);
+            logger.error('[VoiceBridge] ❌ Failed to load voice links', err);
         }
         for (const link of links) {
             this.links.set(link.id, link);
         }
 
         logger.info(
-            `[VoiceBridge] Started with ${links.length} voice link(s), ${links.filter((l) => l.enabled).length} enabled`
+            `[VoiceBridge] ✅ Started with ${links.length} voice link(s), ${links.filter((l) => l.enabled).length} enabled`
         );
 
         await Promise.all(
@@ -253,14 +292,14 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             );
         } catch (err) {
             logger.error(
-                `[VoiceBridge] Failed to load guild link ${link.guildLinkId} for voice link ${link.id}`,
+                `[VoiceBridge] ❌ Failed to load guild link ${link.guildLinkId} for voice link ${link.id}`,
                 err
             );
             return;
         }
         if (!guildLink) {
             logger.warn(
-                `[VoiceBridge] Voice link ${link.id} references missing guild link ${link.guildLinkId}`
+                `[VoiceBridge] ⚠️ Voice link ${link.id} references missing guild link ${link.guildLinkId}`
             );
             return;
         }
@@ -274,7 +313,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         const other = this.bridgeForGuildLink(link.guildLinkId);
         if (other) {
             logger.info(
-                `[VoiceBridge] Skipping voice link ${link.id}: voice link ${other.link.id} of the same guild link is already ${other.state}`
+                `[VoiceBridge] ⏭️ Skipping voice link ${link.id}: voice link ${other.link.id} of the same guild link is already ${other.state}`
             );
             return;
         }
@@ -290,6 +329,8 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             retryAttempt: 0,
             retryTimer: null,
             leaveTimer: null,
+            statsTimer: null,
+            silentSideTimer: null,
             discord: null,
             fluxer: null,
         };
@@ -330,7 +371,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
                 .some((p) => this.isHuman(p));
         } catch (err) {
             logger.error(
-                `[VoiceBridge] Failed to list ${transport.platform} participants of ${channelId}`,
+                `[VoiceBridge] ❌ Failed to list ${transport.platform} participants of ${channelId}`,
                 err
             );
             return false;
@@ -361,11 +402,15 @@ export default class VoiceBridgeService implements VoiceLinkListener {
 
         if (!this.humansPresent(link, guildLink)) {
             logger.info(
-                `[VoiceBridge] Not joining voice link ${link.id}: both channels are empty`
+                `[VoiceBridge] 👋 Not joining voice link ${link.id}: both channels are empty`
             );
             this.bridges.delete(link.id);
             return;
         }
+
+        logger.info(
+            `[VoiceBridge] 🔗 Joining voice link ${link.id}: Discord ${link.discordChannelId} + Fluxer ${link.fluxerChannelId}`
+        );
 
         let discordSession: VoiceSession;
         try {
@@ -430,8 +475,12 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         this.metrics?.voiceBridgeJoins.inc({ result: 'success' });
         this.updateLiveGauge();
         logger.info(
-            `[VoiceBridge] Bridge live for voice link ${link.id}: Discord ${link.discordChannelId} <-> Fluxer ${link.fluxerChannelId}`
+            `[VoiceBridge] 🎙️ Bridge live for voice link ${link.id}: Discord ${link.discordChannelId} <-> Fluxer ${link.fluxerChannelId}`
         );
+        logger.info(
+            `[VoiceBridge] 👥 link ${link.id} participants: ${this.describeParticipants(bridge)} · bots D=${this.discord.botUserId() ?? '?'} F=${this.fluxer.botUserId() ?? '?'}`
+        );
+        this.startDiagnostics(bridge);
 
         this.reconcileOccupancy(bridge);
     }
@@ -443,7 +492,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     ) {
         this.metrics?.voiceBridgeJoins.inc({ result: 'failure' });
         logger.error(
-            `[VoiceBridge] Failed to join ${platform} voice channel for voice link ${bridge.link.id}`,
+            `[VoiceBridge] ❌ Failed to join ${platform} voice channel for voice link ${bridge.link.id}`,
             err
         );
         this.scheduleRetry(bridge);
@@ -453,7 +502,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         const attempt = bridge.retryAttempt;
         if (attempt >= this.joinRetryBackoffMs.length) {
             logger.warn(
-                `[VoiceBridge] Giving up on voice link ${bridge.link.id} after ${attempt} retr${attempt === 1 ? 'y' : 'ies'}; will try again when someone joins`
+                `[VoiceBridge] ⚠️ Giving up on voice link ${bridge.link.id} after ${attempt} retr${attempt === 1 ? 'y' : 'ies'}; will try again when someone joins`
             );
             this.bridges.delete(bridge.link.id);
             this.updateLiveGauge();
@@ -464,7 +513,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         bridge.retryAttempt = attempt + 1;
         bridge.state = 'joining';
         logger.info(
-            `[VoiceBridge] Retrying voice link ${bridge.link.id} in ${delay} ms (attempt ${attempt + 1}/${this.joinRetryBackoffMs.length})`
+            `[VoiceBridge] 🔁 Retrying voice link ${bridge.link.id} in ${delay} ms (attempt ${attempt + 1}/${this.joinRetryBackoffMs.length})`
         );
         bridge.retryTimer = setTimeout(() => {
             bridge.retryTimer = null;
@@ -512,32 +561,39 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         target: VoiceSession
     ): BridgeSide {
         const side: BridgeSide = {
+            platform,
             session,
             mixer,
             participants: new Map(),
+            counters: { audioIn: 0, framesOut: 0, voicedOut: 0 },
+            reported: { audioIn: 0, framesOut: 0, voicedOut: 0 },
             detach: () => undefined,
         };
 
         const onAudio = (userId: string, packet: OpusPacket) => {
             if (this.isBotUser(userId)) return;
+            side.counters.audioIn++;
             try {
                 mixer.push(userId, packet);
             } catch (err) {
                 logger.error(
-                    `[VoiceBridge] Mixer rejected ${platform} audio for voice link ${bridge.link.id}`,
+                    `[VoiceBridge] ❌ Mixer rejected ${platform} audio for voice link ${bridge.link.id}`,
                     err
                 );
             }
         };
-        const onFrame = (packet: OpusPacket) => {
+        const onFrame = (packet: OpusPacket, silent?: boolean) => {
             try {
                 target.sendOpus(packet);
             } catch (err) {
                 logger.error(
-                    `[VoiceBridge] Failed to send audio to ${target.platform} for voice link ${bridge.link.id}`,
+                    `[VoiceBridge] ❌ Failed to send audio to ${target.platform} for voice link ${bridge.link.id}`,
                     err
                 );
+                return;
             }
+            side.counters.framesOut++;
+            if (silent !== true) side.counters.voicedOut++;
         };
         const onParticipant = (update: VoiceParticipantUpdate) =>
             this.handleSessionParticipant(bridge, side, update);
@@ -545,12 +601,12 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             void this.handleClosed(bridge, platform, reason);
         const onSessionError = (err: Error) =>
             logger.error(
-                `[VoiceBridge] ${platform} session error for voice link ${bridge.link.id}`,
+                `[VoiceBridge] ❌ ${platform} session error for voice link ${bridge.link.id}`,
                 err
             );
         const onMixerError = (err: Error) =>
             logger.error(
-                `[VoiceBridge] Mixer error (${platform} side) for voice link ${bridge.link.id}`,
+                `[VoiceBridge] ❌ Mixer error (${platform} side) for voice link ${bridge.link.id}`,
                 err
             );
 
@@ -580,7 +636,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             }
         } catch (err) {
             logger.error(
-                `[VoiceBridge] Failed to read ${platform} participants for voice link ${bridge.link.id}`,
+                `[VoiceBridge] ❌ Failed to read ${platform} participants for voice link ${bridge.link.id}`,
                 err
             );
         }
@@ -597,17 +653,30 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         if (update.isBot || this.isBotUser(update.userId)) return;
 
         if (update.channelId === side.session.channelId) {
+            const known = side.participants.get(update.userId);
+            const muted = update.selfMute || update.selfDeaf;
+            if (!known) {
+                logger.info(
+                    `[VoiceBridge] 🔗 ${update.userId} joined the ${side.platform} side of voice link ${bridge.link.id}${muted ? ' (muted)' : ''}`
+                );
+            } else if ((known.selfMute || known.selfDeaf) !== muted) {
+                logger.info(
+                    `[VoiceBridge] ${muted ? '🔇' : '🔊'} ${update.userId} ${muted ? 'muted' : 'unmuted'} on the ${side.platform} side of voice link ${bridge.link.id}`
+                );
+            }
             side.participants.set(update.userId, {
                 userId: update.userId,
                 isBot: update.isBot,
                 selfMute: update.selfMute,
                 selfDeaf: update.selfDeaf,
             });
-            side.mixer.setSourceMuted(
-                update.userId,
-                update.selfMute || update.selfDeaf
-            );
+            side.mixer.setSourceMuted(update.userId, muted);
         } else {
+            if (side.participants.has(update.userId)) {
+                logger.info(
+                    `[VoiceBridge] 👋 ${update.userId} left the ${side.platform} side of voice link ${bridge.link.id}`
+                );
+            }
             side.participants.delete(update.userId);
             side.mixer.removeSource(update.userId);
         }
@@ -629,7 +698,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         if (this.humanCount(bridge) === 0) {
             if (bridge.leaveTimer) return;
             logger.info(
-                `[VoiceBridge] Both channels of voice link ${bridge.link.id} are empty; leaving in ${this.leaveGraceMs} ms`
+                `[VoiceBridge] 👋 Both channels of voice link ${bridge.link.id} are empty; leaving in ${this.leaveGraceMs} ms`
             );
             bridge.leaveTimer = setTimeout(() => {
                 bridge.leaveTimer = null;
@@ -639,9 +708,121 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             clearTimeout(bridge.leaveTimer);
             bridge.leaveTimer = null;
             logger.info(
-                `[VoiceBridge] Someone returned to voice link ${bridge.link.id}; staying`
+                `[VoiceBridge] 🔗 Someone returned to voice link ${bridge.link.id}; staying`
             );
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Diagnostics
+    // ---------------------------------------------------------------------
+
+    /**
+     * Arms the periodic stats report and the one-shot "people but no audio"
+     * check for a bridge that just went live. Both are cleared by
+     * {@link clearTimers} when the bridge drops or leaves.
+     */
+    private startDiagnostics(bridge: Bridge) {
+        bridge.statsTimer = setInterval(
+            () => this.logStats(bridge),
+            this.statsIntervalMs
+        );
+        bridge.silentSideTimer = setTimeout(() => {
+            bridge.silentSideTimer = null;
+            this.warnSilentSides(bridge);
+        }, this.silentSideWarnMs);
+    }
+
+    /** One INFO line per bridge with the counter deltas since the last report. */
+    private logStats(bridge: Bridge) {
+        if (bridge.state !== 'live' || !bridge.discord || !bridge.fluxer) {
+            return;
+        }
+        const d = this.takeDelta(bridge.discord);
+        const f = this.takeDelta(bridge.fluxer);
+
+        let line =
+            `[VoiceBridge] 📊 link ${bridge.link.id}: ` +
+            `Discord→Fluxer in=${d.audioIn} out=${d.framesOut} (${d.voicedOut} voiced) · ` +
+            `Fluxer→Discord in=${f.audioIn} out=${f.framesOut} (${f.voicedOut} voiced) · ` +
+            `participants D=${bridge.discord.participants.size} F=${bridge.fluxer.participants.size}`;
+
+        for (const side of [bridge.discord, bridge.fluxer]) {
+            const stats = this.sessionStats(side.session);
+            if (!stats) continue;
+            const label = side.platform === 'discord' ? 'Discord' : 'Fluxer';
+            line += ` · ${label} session framesIn=${stats.framesIn} packetsOut=${stats.packetsOut} participants=${stats.participants}`;
+        }
+
+        logger.info(line);
+    }
+
+    private takeDelta(side: BridgeSide): SideCounters {
+        const { counters, reported } = side;
+        const delta: SideCounters = {
+            audioIn: counters.audioIn - reported.audioIn,
+            framesOut: counters.framesOut - reported.framesOut,
+            voicedOut: counters.voicedOut - reported.voicedOut,
+        };
+        side.reported = { ...counters };
+        return delta;
+    }
+
+    /** Reads `session.stats()` if the transport happens to provide one. */
+    private sessionStats(session: VoiceSession): SessionStats | null {
+        const candidate = (session as unknown as { stats?: unknown }).stats;
+        if (typeof candidate !== 'function') return null;
+        try {
+            const stats = (candidate as () => unknown).call(session);
+            if (!stats || typeof stats !== 'object') return null;
+            const { framesIn, packetsOut, participants } =
+                stats as Partial<SessionStats>;
+            return {
+                framesIn: Number(framesIn ?? 0),
+                packetsOut: Number(packetsOut ?? 0),
+                participants: Number(participants ?? 0),
+            };
+        } catch (err) {
+            logger.debug(
+                `[VoiceBridge] ⚠️ ${session.platform} session stats() threw: ${
+                    err instanceof Error ? err.message : String(err)
+                }`
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Flags a side that has unmuted people in it but has not delivered a
+     * single `audio` packet since the bridge went live: that is the shape
+     * of a one-way audio bug, and it is otherwise invisible.
+     */
+    private warnSilentSides(bridge: Bridge) {
+        if (bridge.state !== 'live') return;
+        for (const side of [bridge.discord, bridge.fluxer]) {
+            if (!side || side.counters.audioIn > 0) continue;
+            const unmuted = [...side.participants.values()].filter(
+                (p) => !p.selfMute && !p.selfDeaf
+            );
+            if (unmuted.length === 0) continue;
+            const other = side.platform === 'discord' ? 'Fluxer' : 'Discord';
+            const self = side.platform === 'discord' ? 'Discord' : 'Fluxer';
+            logger.warn(
+                `[VoiceBridge] ⚠️ link ${bridge.link.id}: no audio received from ${self} in the first ${this.silentSideWarnMs} ms although ${unmuted.length} unmuted participant(s) are there (${unmuted.map((p) => p.userId).join(', ')}); ${self}→${other} is silent — check the ${side.platform} transport's receive path`
+            );
+        }
+    }
+
+    private describeParticipants(bridge: Bridge): string {
+        const list = (side: BridgeSide | null) => {
+            if (!side || side.participants.size === 0) return '[]';
+            const ids = [...side.participants.values()].map(
+                (p) =>
+                    `${p.userId}${p.selfDeaf ? ' (deaf)' : p.selfMute ? ' (muted)' : ''}`
+            );
+            return `[${ids.join(', ')}]`;
+        };
+        return `Discord ${list(bridge.discord)} · Fluxer ${list(bridge.fluxer)}`;
     }
 
     // ---------------------------------------------------------------------
@@ -657,7 +838,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
 
         const humans = this.humanCount(bridge);
         logger.warn(
-            `[VoiceBridge] ${platform} voice session closed for voice link ${bridge.link.id}: ${reason}`
+            `[VoiceBridge] ⚠️ ${platform} voice session closed for voice link ${bridge.link.id}: ${reason}`
         );
 
         bridge.state = 'joining';
@@ -672,7 +853,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         const current = this.links.get(bridge.link.id);
         if (!this.started || !current?.enabled || humans === 0) {
             logger.info(
-                `[VoiceBridge] Not reconnecting voice link ${bridge.link.id}: ${
+                `[VoiceBridge] 👋 Not reconnecting voice link ${bridge.link.id}: ${
                     humans === 0
                         ? 'nobody left in either channel'
                         : 'link no longer enabled'
@@ -700,7 +881,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
 
         if (wasLive) {
             logger.info(
-                `[VoiceBridge] Leaving voice link ${bridge.link.id}: ${reason}`
+                `[VoiceBridge] 👋 Leaving voice link ${bridge.link.id}: ${reason}`
             );
         }
 
@@ -724,6 +905,14 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             clearTimeout(bridge.leaveTimer);
             bridge.leaveTimer = null;
         }
+        if (bridge.statsTimer) {
+            clearInterval(bridge.statsTimer);
+            bridge.statsTimer = null;
+        }
+        if (bridge.silentSideTimer) {
+            clearTimeout(bridge.silentSideTimer);
+            bridge.silentSideTimer = null;
+        }
     }
 
     /** Detaches listeners, stops mixers and leaves both sessions. Idempotent. */
@@ -740,7 +929,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
                 side.mixer.stop();
             } catch (err) {
                 logger.error(
-                    `[VoiceBridge] Failed to stop mixer for voice link ${bridge.link.id}`,
+                    `[VoiceBridge] ❌ Failed to stop mixer for voice link ${bridge.link.id}`,
                     err
                 );
             }
@@ -754,7 +943,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             await session.leave();
         } catch (err) {
             logger.error(
-                `[VoiceBridge] Failed to leave ${session.platform} voice channel ${session.channelId}`,
+                `[VoiceBridge] ❌ Failed to leave ${session.platform} voice channel ${session.channelId}`,
                 err
             );
         }

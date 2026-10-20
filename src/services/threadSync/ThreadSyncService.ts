@@ -218,7 +218,7 @@ export default class ThreadSyncService {
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.error(
-                `Failed to create Fluxer counterpart for Discord thread ${thread.id}:`,
+                `❌ Failed to create Fluxer counterpart for Discord thread ${thread.id}:`,
                 err
             );
             return null;
@@ -252,7 +252,7 @@ export default class ThreadSyncService {
             );
         } catch (err) {
             logger.error(
-                `Failed to create Discord counterpart for Fluxer thread ${thread.id}:`,
+                `❌ Failed to create Discord counterpart for Fluxer thread ${thread.id}:`,
                 err
             );
             return null;
@@ -295,7 +295,7 @@ export default class ThreadSyncService {
                 return await starter.startThread({ name, autoArchiveDuration });
             } catch (err) {
                 logger.warn(
-                    `Could not start Fluxer thread from bridged message ${starterLink.fluxerMessageId}, creating a standalone thread instead:`,
+                    `⚠️ Could not start Fluxer thread from bridged message ${starterLink.fluxerMessageId}, creating a standalone thread instead:`,
                     err
                 );
             }
@@ -350,7 +350,7 @@ export default class ThreadSyncService {
                 }
             } catch (err) {
                 logger.warn(
-                    `Could not start Discord thread from bridged message ${starterLink.discordMessageId}, creating a standalone thread instead:`,
+                    `⚠️ Could not start Discord thread from bridged message ${starterLink.discordMessageId}, creating a standalone thread instead:`,
                     err
                 );
             }
@@ -394,7 +394,7 @@ export default class ThreadSyncService {
                 },
             });
             logger.info(
-                `Bridged thread: discord=${discordThreadId} ↔ fluxer=${fluxerThreadId} (under channel link ${parentLink.linkId})`
+                `🧵 Bridged thread: discord=${discordThreadId} ↔ fluxer=${fluxerThreadId} (under channel link ${parentLink.linkId})`
             );
             return link;
         } catch (err) {
@@ -407,7 +407,7 @@ export default class ThreadSyncService {
                     fluxerThreadId
                 ));
             if (existing) return existing;
-            logger.error('Failed to persist thread link:', err);
+            logger.error('❌ Failed to persist thread link:', err);
             return null;
         }
     }
@@ -448,7 +448,7 @@ export default class ThreadSyncService {
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.error(
-                `Failed to rename Fluxer thread ${link.fluxerThreadId}:`,
+                `❌ Failed to rename Fluxer thread ${link.fluxerThreadId}:`,
                 err
             );
         }
@@ -485,7 +485,7 @@ export default class ThreadSyncService {
             await discordThread.setName(name, 'Renamed on Fluxer');
         } catch (err) {
             logger.error(
-                `Failed to rename Discord thread ${link.discordThreadId}:`,
+                `❌ Failed to rename Discord thread ${link.discordThreadId}:`,
                 err
             );
         }
@@ -509,14 +509,14 @@ export default class ThreadSyncService {
             .removeLink(link)
             .catch((err) =>
                 logger.error(
-                    'Failed to remove link after Discord thread deletion:',
+                    '❌ Failed to remove link after Discord thread deletion:',
                     err
                 )
             );
         this.bridgeCreated.delete(`discord:${threadId}`);
         if (link.fluxerThreadId)
             this.bridgeCreated.delete(`fluxer:${link.fluxerThreadId}`);
-        logger.info(`Discord thread ${threadId} deleted; link removed.`);
+        logger.info(`🧵 Discord thread ${threadId} deleted; link removed.`);
 
         if (this.botConfig.threads.mirrorDeletes && link.fluxerThreadId) {
             await this.deleteFluxerThread(link.fluxerThreadId, threadId);
@@ -532,14 +532,14 @@ export default class ThreadSyncService {
             .removeLink(link)
             .catch((err) =>
                 logger.error(
-                    'Failed to remove link after Fluxer thread deletion:',
+                    '❌ Failed to remove link after Fluxer thread deletion:',
                     err
                 )
             );
         this.bridgeCreated.delete(`fluxer:${threadId}`);
         if (link.discordThreadId)
             this.bridgeCreated.delete(`discord:${link.discordThreadId}`);
-        logger.info(`Fluxer thread ${threadId} deleted; link removed.`);
+        logger.info(`🧵 Fluxer thread ${threadId} deleted; link removed.`);
 
         if (this.botConfig.threads.mirrorDeletes && link.discordThreadId) {
             await this.deleteDiscordThread(link.discordThreadId, threadId);

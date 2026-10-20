@@ -11,9 +11,10 @@ export interface AudioMixerEvents {
     /**
      * One mixed 20 ms Opus frame, emitted every FRAME_MS while started.
      * Implementations emit an encoded silence frame when no source is active
-     * so the consumer keeps a steady cadence.
+     * so the consumer keeps a steady cadence; `silent` is true for exactly
+     * those frames (consumers may treat a missing flag as "voiced").
      */
-    frame: (packet: OpusPacket) => void;
+    frame: (packet: OpusPacket, silent?: boolean) => void;
     error: (err: Error) => void;
 }
 

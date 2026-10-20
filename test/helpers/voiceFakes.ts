@@ -136,6 +136,15 @@ export class FakeVoiceSession extends EventEmitter implements VoiceSession {
     readonly sent: OpusPacket[] = [];
     left = false;
     leaveCalls = 0;
+    /**
+     * When set, exposed as the optional `stats()` the bridge duck-types on
+     * real sessions and appends to its periodic stats line.
+     */
+    statsOverride: {
+        framesIn: number;
+        packetsOut: number;
+        participants: number;
+    } | null = null;
 
     constructor(
         private readonly transport: FakeVoiceTransport,
@@ -144,6 +153,13 @@ export class FakeVoiceSession extends EventEmitter implements VoiceSession {
     ) {
         super();
         this.platform = transport.platform;
+    }
+
+    /** Only defined while `statsOverride` is set, like a transport that may or may not expose it. */
+    get stats(): (() => NonNullable<typeof this.statsOverride>) | undefined {
+        const stats = this.statsOverride;
+        if (!stats) return undefined;
+        return () => stats;
     }
 
     participants(): VoiceParticipant[] {
@@ -203,8 +219,13 @@ export class FakeMixer extends EventEmitter implements AudioMixer {
         this.stopped = true;
     }
 
-    emitFrame(packet: OpusPacket) {
-        this.emit('frame', packet);
+    /**
+     * Emits one output frame. `silent` mirrors OpusMixer's second `frame`
+     * argument; leaving it out emits a frame the bridge counts as voiced.
+     */
+    emitFrame(packet: OpusPacket, silent?: boolean) {
+        if (silent === undefined) this.emit('frame', packet);
+        else this.emit('frame', packet, silent);
     }
 
     /** Last mute state recorded for a source, or undefined if never set. */

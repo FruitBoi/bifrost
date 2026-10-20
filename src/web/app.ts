@@ -120,7 +120,7 @@ export function createWebApp({
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _next
     ) => {
-        logger.error('Unhandled error in web dashboard request:', err);
+        logger.error('❌ Unhandled error in web dashboard request:', err);
         res.status(500).json({ error: 'Internal server error' });
     };
     app.use(errorHandler);

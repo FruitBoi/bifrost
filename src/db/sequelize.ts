@@ -20,14 +20,14 @@ if (DB_DIALECT === 'postgres') {
         dialect: 'postgres',
         logging: false,
     });
-    logger.info('Using PostgreSQL database');
+    logger.info('🗄️ Using PostgreSQL database');
 } else {
     sequelize = new Sequelize({
         dialect: 'sqlite',
         storage: path.join(CONFIG_PATH, 'data.sqlite'),
         logging: false,
     });
-    logger.info('Using SQLite database');
+    logger.info('🗄️ Using SQLite database');
 }
 
 export default sequelize;

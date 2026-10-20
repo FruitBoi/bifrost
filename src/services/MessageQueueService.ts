@@ -60,7 +60,7 @@ export default class MessageQueueService {
             payload: JSON.stringify(payload),
         });
         logger.debug(
-            `Queued message for retry: direction=${direction} sourceMessageId=${sourceMessageId}`
+            `📬 Queued message for retry: direction=${direction} sourceMessageId=${sourceMessageId}`
         );
     }
 
@@ -75,7 +75,7 @@ export default class MessageQueueService {
         });
         if (expired > 0) {
             logger.info(
-                `Message queue: discarded ${expired} expired entr${expired === 1 ? 'y' : 'ies'} (TTL exceeded)`
+                `📬 Message queue: discarded ${expired} expired entr${expired === 1 ? 'y' : 'ies'} (TTL exceeded)`
             );
         }
 
@@ -83,7 +83,7 @@ export default class MessageQueueService {
         if (pending.length === 0) return;
 
         logger.info(
-            `Message queue: attempting to drain ${pending.length} pending entr${pending.length === 1 ? 'y' : 'ies'}`
+            `📬 Message queue: attempting to drain ${pending.length} pending entr${pending.length === 1 ? 'y' : 'ies'}`
         );
 
         for (const entry of pending) {
@@ -103,7 +103,7 @@ export default class MessageQueueService {
                 );
                 if (!channelLink) {
                     logger.warn(
-                        `Queue drain: channel link ${entry.channelLinkId} no longer exists, discarding entry`
+                        `⚠️ Queue drain: channel link ${entry.channelLinkId} no longer exists, discarding entry`
                     );
                     await entry.destroy();
                     continue;
@@ -152,7 +152,7 @@ export default class MessageQueueService {
 
                 await entry.destroy();
                 logger.info(
-                    `Queue drain: relayed queued message ${entry.id} (${entry.direction})`
+                    `📬 Queue drain: relayed queued message ${entry.id} (${entry.direction})`
                 );
             } catch (err) {
                 if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
@@ -161,7 +161,7 @@ export default class MessageQueueService {
                     lastError: String(err),
                 });
                 logger.warn(
-                    `Queue drain: retry failed for entry ${entry.id} (attempt ${entry.retryCount + 1}): ${err}`
+                    `⚠️ Queue drain: retry failed for entry ${entry.id} (attempt ${entry.retryCount + 1}): ${err}`
                 );
             }
         }
@@ -174,7 +174,7 @@ export default class MessageQueueService {
     ): void {
         this.drainInterval = setInterval(() => {
             this.drain(webhookService, linkService).catch((err) =>
-                logger.error('Queue drain interval error:', err)
+                logger.error('❌ Queue drain interval error:', err)
             );
         }, intervalMs);
     }

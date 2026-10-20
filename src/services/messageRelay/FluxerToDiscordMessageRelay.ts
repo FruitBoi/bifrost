@@ -117,7 +117,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
             );
             if (!webhook) {
                 logger.warn(
-                    `No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message`
+                    `⚠️ No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message`
                 );
                 return;
             }
@@ -141,7 +141,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
                 direction: 'fluxer_to_discord',
             });
         } catch (error) {
-            logger.error('Error relaying message to Discord:', error);
+            logger.error('❌ Error relaying message to Discord:', error);
             this.metricsService?.messageRelayErrors.inc({
                 direction: 'fluxer_to_discord',
             });

@@ -194,7 +194,7 @@ export default class CategorySyncService {
         });
         const result = await this.syncCategory(categoryLink);
         logger.info(
-            `Category link ${categoryLink.id}: bridged ${result.linked.length} channel(s), skipped ${result.skipped.length}, failed ${result.failed.length}`
+            `📁 Category link ${categoryLink.id}: bridged ${result.linked.length} channel(s), skipped ${result.skipped.length}, failed ${result.failed.length}`
         );
         return { categoryLink, result };
     }
@@ -291,13 +291,13 @@ export default class CategorySyncService {
                 categoryLinkId: categoryLink.id,
             });
             logger.info(
-                `Category link ${categoryLink.id}: bridged #${channel.name} (${channel.id}) ↔ Fluxer thread ${thread.id} (link ${link.linkId})`
+                `📁 Category link ${categoryLink.id}: bridged #${channel.name} (${channel.id}) ↔ Fluxer thread ${thread.id} (link ${link.linkId})`
             );
             return { ...base, threadId: thread.id };
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.error(
-                `Category link ${categoryLink.id}: failed to bridge #${channel.name} (${channel.id}):`,
+                `❌ Category link ${categoryLink.id}: failed to bridge #${channel.name} (${channel.id}):`,
                 err
             );
             return { ...base, reason: (err as Error).message };
@@ -321,7 +321,7 @@ export default class CategorySyncService {
                 removedLinks++;
             } catch (err) {
                 logger.error(
-                    `Category link ${categoryLink.id}: failed to remove link ${link.linkId}:`,
+                    `❌ Category link ${categoryLink.id}: failed to remove link ${link.linkId}:`,
                     err
                 );
             }
@@ -388,7 +388,7 @@ export default class CategorySyncService {
                         .removeLink(link)
                         .catch((err) =>
                             logger.error(
-                                'Failed to remove link after channel left its category:',
+                                '❌ Failed to remove link after channel left its category:',
                                 err
                             )
                         );
@@ -430,7 +430,7 @@ export default class CategorySyncService {
         } catch (err) {
             if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
             logger.error(
-                `Failed to rename Fluxer thread ${link.fluxerThreadId} after channel rename:`,
+                `❌ Failed to rename Fluxer thread ${link.fluxerThreadId} after channel rename:`,
                 err
             );
         }
@@ -452,7 +452,7 @@ export default class CategorySyncService {
             if (categoryLink) {
                 await this.linkService.removeCategoryLink(categoryLink.id);
                 logger.info(
-                    `Discord category ${channel.id} deleted; category link removed (its links were kept).`
+                    `📁 Discord category ${channel.id} deleted; category link removed (its links were kept).`
                 );
             }
             return;
@@ -465,11 +465,11 @@ export default class CategorySyncService {
             .removeLink(link)
             .catch((err) =>
                 logger.error(
-                    'Failed to remove link after Discord channel deletion:',
+                    '❌ Failed to remove link after Discord channel deletion:',
                     err
                 )
             );
-        logger.info(`Discord channel ${channel.id} deleted; link removed.`);
+        logger.info(`🔗 Discord channel ${channel.id} deleted; link removed.`);
     }
 
     /**
@@ -484,7 +484,7 @@ export default class CategorySyncService {
                 .removeLink(link)
                 .catch((err) =>
                     logger.error(
-                        'Failed to remove link after Fluxer channel deletion:',
+                        '❌ Failed to remove link after Fluxer channel deletion:',
                         err
                     )
                 );
@@ -494,7 +494,7 @@ export default class CategorySyncService {
         for (const categoryLink of categoryLinks) {
             await this.removeCategoryLink(categoryLink).catch((err) =>
                 logger.error(
-                    'Failed to remove category link after Fluxer channel deletion:',
+                    '❌ Failed to remove category link after Fluxer channel deletion:',
                     err
                 )
             );

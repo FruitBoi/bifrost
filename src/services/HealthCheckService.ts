@@ -94,7 +94,7 @@ export default class HealthCheckService {
             const application = await this.fluxerClient.fetchApplication();
             markFluxerApiOk();
             logger.debug(
-                `Fluxer /applications/@me response: ${JSON.stringify(application)}`
+                `🌊 Fluxer /applications/@me response: ${JSON.stringify(application)}`
             );
             const isReady = this.fluxerClient.isReady();
             if (!isReady) {
@@ -120,7 +120,7 @@ export default class HealthCheckService {
                     shardStatuses.push(`shards type: ${typeof ws?.shards}`);
                 }
                 logger.debug(
-                    `Fluxer client not yet ready — guilds cached: ${guilds}, user: ${userId}, ` +
+                    `🌊 Fluxer client not yet ready — guilds cached: ${guilds}, user: ${userId}, ` +
                         `aborted: ${aborted}, gateway: ${gatewayUrl}, shardCount: ${shardCount}, ` +
                         `shards: [${shardStatuses.join(' | ')}]`
                 );
@@ -134,7 +134,7 @@ export default class HealthCheckService {
             if (isFluxerApiBlockError(err)) {
                 const cooldownMin = Math.round(markFluxerApiBlocked() / 60_000);
                 logger.warn(
-                    `Fluxer API blocked this IP — pausing Fluxer API calls for ~${cooldownMin} min`
+                    `⚠️ Fluxer API blocked this IP — pausing Fluxer API calls for ~${cooldownMin} min`
                 );
             }
             return {
@@ -158,12 +158,14 @@ export default class HealthCheckService {
         const parts = redacted.pathname.split('/');
         parts[parts.length - 1] = '[REDACTED]';
         redacted.pathname = parts.join('/');
-        logger.debug(`Health push → ${redacted.toString()}`);
+        logger.debug(`💓 Health push → ${redacted.toString()}`);
 
         try {
             const res = await fetch(url, { method: 'GET' });
             const body = await res.text();
-            logger.debug(`Health push response: HTTP ${res.status} — ${body}`);
+            logger.debug(
+                `💓 Health push response: HTTP ${res.status} — ${body}`
+            );
 
             if (!res.ok) {
                 let errDetail = '';
@@ -177,7 +179,7 @@ export default class HealthCheckService {
                     /* body wasn't JSON */
                 }
                 logger.error(
-                    `Health push failed: HTTP ${res.status} from ${redacted}${errDetail}`
+                    `❌ Health push failed: HTTP ${res.status} from ${redacted}${errDetail}`
                 );
                 return;
             }
@@ -188,19 +190,21 @@ export default class HealthCheckService {
                     const msg = json.msg ?? 'unknown error';
                     if (msg.toLowerCase().includes('not found')) {
                         logger.warn(
-                            `Health push rejected — monitor not found at ${redacted}`
+                            `⚠️ Health push rejected — monitor not found at ${redacted}`
                         );
                     } else {
-                        logger.error(`Health push rejected — ${msg}`);
+                        logger.error(`❌ Health push rejected — ${msg}`);
                     }
                 }
             } catch {
                 logger.warn(
-                    `Health push: unexpected non-JSON response from ${redacted}`
+                    `⚠️ Health push: unexpected non-JSON response from ${redacted}`
                 );
             }
         } catch (err) {
-            logger.error(`Failed to push health status to ${redacted}: ${err}`);
+            logger.error(
+                `❌ Failed to push health status to ${redacted}: ${err}`
+            );
         }
     }
 
@@ -248,10 +252,10 @@ export default class HealthCheckService {
         const ping = Date.now() - start;
 
         if (healthStatus.healthy) {
-            logger.info(`Discord health status: UP`);
+            logger.info(`💓 Discord health status: UP`);
         } else {
             logger.warn(
-                `Discord health status: DOWN${healthStatus.message ? ` - ${healthStatus.message}` : ''}`
+                `⚠️ Discord health status: DOWN${healthStatus.message ? ` - ${healthStatus.message}` : ''}`
             );
         }
         this.metricsService?.discordUp.set(healthStatus.healthy ? 1 : 0);
@@ -263,7 +267,7 @@ export default class HealthCheckService {
 
         // Trigger queue drain on recovery
         if (healthStatus.healthy && this.lastDiscordHealthy === false) {
-            logger.info('Discord recovered — triggering queue drain');
+            logger.info('💓 Discord recovered — triggering queue drain');
             this.onDiscordRecovered?.();
         }
         this.lastDiscordHealthy = healthStatus.healthy;
@@ -305,15 +309,15 @@ export default class HealthCheckService {
 
         if (healthStatus.healthy) {
             this.fluxerConsecutiveDowns = 0;
-            logger.info(`Fluxer health status: UP`);
+            logger.info(`💓 Fluxer health status: UP`);
         } else {
             this.fluxerConsecutiveDowns++;
             logger.warn(
-                `Fluxer health status: DOWN${healthStatus.message ? ` - ${healthStatus.message}` : ''} (consecutive: ${this.fluxerConsecutiveDowns})`
+                `⚠️ Fluxer health status: DOWN${healthStatus.message ? ` - ${healthStatus.message}` : ''} (consecutive: ${this.fluxerConsecutiveDowns})`
             );
             const platformStatus = await this.getFluxerPlatformStatus();
             if (platformStatus) {
-                logger.warn(`Fluxer platform status: ${platformStatus}`);
+                logger.warn(`⚠️ Fluxer platform status: ${platformStatus}`);
             }
             if (!isFluxerApiBlocked()) {
                 this.onFluxerDown?.(this.fluxerConsecutiveDowns);
@@ -328,7 +332,7 @@ export default class HealthCheckService {
 
         // Trigger queue drain on recovery
         if (healthStatus.healthy && this.lastFluxerHealthy === false) {
-            logger.info('Fluxer recovered — triggering queue drain');
+            logger.info('💓 Fluxer recovered — triggering queue drain');
             this.onFluxerRecovered?.();
         }
         this.lastFluxerHealthy = healthStatus.healthy;
