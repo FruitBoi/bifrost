@@ -9,6 +9,7 @@ import * as threadLinks from '../../src/db/migrations/00003-add-thread-links';
 import * as locationLinks from '../../src/db/migrations/00004-location-links';
 import * as categoryLinks from '../../src/db/migrations/00005-category-links';
 import * as voiceLinks from '../../src/db/migrations/00006-voice-links';
+import * as messageLinkAuthors from '../../src/db/migrations/00007-message-link-authors';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
@@ -44,6 +45,11 @@ const umzug = new Umzug({
             name: '00006-voice-links.js',
             up: voiceLinks.up,
             down: voiceLinks.down,
+        },
+        {
+            name: '00007-message-link-authors.js',
+            up: messageLinkAuthors.up,
+            down: messageLinkAuthors.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -586,6 +592,110 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(await voice.getVoiceLinksCount()).toBe(0);
     });
 
+    it('00007 adds message_links.sourcePlatform/sourceAuthorId, and rolls back cleanly', async () => {
+        const MESSAGE_LINK_INDEXES = [
+            'message_links_discord_message_id',
+            'message_links_fluxer_message_id',
+            'message_links_guild_link_id',
+        ];
+        const indexNames = async (table: string) =>
+            (await showIndexes(table)).map((i) => i.name);
+
+        expect(await executed()).toContain('00007-message-link-authors.js');
+        const cols = await qi.describeTable('message_links');
+        expect(cols.sourcePlatform).toMatchObject({ allowNull: true });
+        expect(cols.sourceAuthorId).toMatchObject({ allowNull: true });
+
+        // The repository round-trips the source, and leaves it null when the
+        // caller does not know it.
+        const messages = new SequelizeMessageLinkRepository();
+        await messages.createMessageLink('g1', 'c1', 'dm-src', 'fm-src', {
+            platform: 'fluxer',
+            authorId: 'fu-1',
+        });
+        await messages.createMessageLink('g1', 'c1', 'dm-nosrc', 'fm-nosrc');
+        expect(
+            await messages.getMessageLinkByDiscordMessageId('dm-src')
+        ).toMatchObject({
+            guildLinkId: 'g1',
+            channelLinkId: 'c1',
+            discordMessageId: 'dm-src',
+            fluxerMessageId: 'fm-src',
+            sourcePlatform: 'fluxer',
+            sourceAuthorId: 'fu-1',
+        });
+        expect(
+            await messages.getMessageLinkByFluxerMessageId('fm-nosrc')
+        ).toMatchObject({
+            discordMessageId: 'dm-nosrc',
+            sourcePlatform: null,
+            sourceAuthorId: null,
+        });
+        // Rows from before the migration have no source either.
+        expect(
+            await messages.getMessageLinkByDiscordMessageId('dm')
+        ).toMatchObject({ sourcePlatform: null, sourceAuthorId: null });
+        const countBefore = await messages.getMessageLinksCount();
+
+        // Roll back: columns gone, rows and every index still present.
+        await umzug.down({ to: '00007-message-link-authors.js' });
+        expect(await executed()).toEqual([
+            '00001-baseline.js',
+            '00002-add-channel-link-indexes.js',
+            '00003-add-thread-links.js',
+            '00004-location-links.js',
+            '00005-category-links.js',
+            '00006-voice-links.js',
+        ]);
+        const after = await qi.describeTable('message_links');
+        expect(after.sourcePlatform).toBeUndefined();
+        expect(after.sourceAuthorId).toBeUndefined();
+        expect(after.discordMessageId).toBeDefined();
+        expect(await indexNames('message_links')).toEqual(
+            expect.arrayContaining(MESSAGE_LINK_INDEXES)
+        );
+        const unique = (await showIndexes('message_links')).find(
+            (i) => i.name === 'message_links_discord_message_id'
+        );
+        expect(unique!.unique).toBe(true);
+        await expect(
+            qi.bulkInsert('message_links', [
+                {
+                    id: 'm-dup-7',
+                    guildLinkId: 'g1',
+                    channelLinkId: 'c1',
+                    discordMessageId: 'dm-src',
+                    fluxerMessageId: 'fm-other-7',
+                    createdAt: now,
+                },
+            ])
+        ).rejects.toThrow();
+        expect(
+            (await select<{ id: string }>('SELECT id FROM message_links'))
+                .length
+        ).toBe(countBefore);
+
+        await umzug.up();
+        expect(await executed()).toContain('00007-message-link-authors.js');
+        expect(
+            (await qi.describeTable('message_links')).sourceAuthorId
+        ).toBeDefined();
+        // The rebuild kept the rows; the dropped columns come back empty.
+        expect(await messages.getMessageLinksCount()).toBe(countBefore);
+        expect(
+            await messages.getMessageLinkByDiscordMessageId('dm-src')
+        ).toMatchObject({ sourcePlatform: null, sourceAuthorId: null });
+
+        for (const discordMessageId of ['dm-src', 'dm-nosrc']) {
+            const link =
+                await messages.getMessageLinkByDiscordMessageId(
+                    discordMessageId
+                );
+            await messages.deleteMessageLink(link!.id);
+        }
+        expect(await messages.getMessageLinksCount()).toBe(countBefore - 2);
+    });
+
     it('rolls 00004 back to the thread_links schema and re-applies', async () => {
         await umzug.down({ to: '00004-location-links.js' });
         expect(await executed()).toEqual([
@@ -652,6 +762,7 @@ describe('migrations 00003 + 00004 on an existing SQLite database', () => {
         expect(await executed()).toContain('00004-location-links.js');
         expect(await executed()).toContain('00005-category-links.js');
         expect(await executed()).toContain('00006-voice-links.js');
+        expect(await executed()).toContain('00007-message-link-authors.js');
         expect(
             (
                 await new SequelizeChannelLinkRepository().findByDiscordLocation(

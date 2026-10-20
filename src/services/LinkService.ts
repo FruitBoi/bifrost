@@ -8,6 +8,7 @@ import { CategoryLinkRepository } from '../db/repositories/CategoryLinkRepositor
 import { VoiceLinkRepository } from '../db/repositories/VoiceLinkRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
 import { CategoryLink } from '../db/entities/CategoryLink';
+import { MessagePlatform } from '../db/entities/MessageLink';
 import { VoiceLink } from '../db/entities/VoiceLink';
 
 /**
@@ -284,22 +285,36 @@ export class LinkService {
         );
     }
 
+    /**
+     * Records a bridged message pair. `sourcePlatform`/`sourceAuthorId` say
+     * which side holds the original message and who wrote it, so replies to
+     * the copy can ping the author. Leave `sourceAuthorId` out when the
+     * original was posted by a webhook (nobody to ping), and both out when
+     * the source is unknown.
+     */
     async createMessageLink({
         discordMessageId,
         fluxerMessageId,
         guildLinkId,
         channelLinkId,
+        sourcePlatform,
+        sourceAuthorId,
     }: {
         discordMessageId: string;
         fluxerMessageId: string;
         guildLinkId: string;
         channelLinkId: string;
+        sourcePlatform?: MessagePlatform;
+        sourceAuthorId?: string;
     }) {
         return this.messageRepo.createMessageLink(
             guildLinkId,
             channelLinkId,
             discordMessageId,
-            fluxerMessageId
+            fluxerMessageId,
+            sourcePlatform
+                ? { platform: sourcePlatform, authorId: sourceAuthorId ?? null }
+                : undefined
         );
     }
 

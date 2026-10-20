@@ -35,6 +35,14 @@ MessageLinkModel.init(
             type: DataTypes.STRING,
             allowNull: false,
         },
+        sourcePlatform: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        sourceAuthorId: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
     },
     {
         sequelize,

@@ -236,6 +236,8 @@ describe('ThreadSyncService.resolveDiscordThread (auto-create)', () => {
             channelLinkId: parent.id,
             discordMessageId: thread.id,
             fluxerMessageId: 'fm-1',
+            sourcePlatform: null,
+            sourceAuthorId: null,
             createdAt: new Date(),
         });
 
@@ -260,6 +262,8 @@ describe('ThreadSyncService.resolveDiscordThread (auto-create)', () => {
             channelLinkId: parent.id,
             discordMessageId: thread.id,
             fluxerMessageId: 'fm-1',
+            sourcePlatform: null,
+            sourceAuthorId: null,
             createdAt: new Date(),
         });
         t.fluxerStartThread.mockRejectedValueOnce(new Error('nope'));
@@ -281,6 +285,8 @@ describe('ThreadSyncService.resolveDiscordThread (auto-create)', () => {
             channelLinkId: 'some-other-link',
             discordMessageId: thread.id,
             fluxerMessageId: 'fm-1',
+            sourcePlatform: null,
+            sourceAuthorId: null,
             createdAt: new Date(),
         });
 
@@ -405,6 +411,8 @@ describe('ThreadSyncService.resolveFluxerThread (auto-create)', () => {
             channelLinkId: parent.id,
             discordMessageId: 'dm-1',
             fluxerMessageId: thread.id,
+            sourcePlatform: null,
+            sourceAuthorId: null,
             createdAt: new Date(),
         });
 
@@ -430,6 +438,8 @@ describe('ThreadSyncService.resolveFluxerThread (auto-create)', () => {
             channelLinkId: parent.id,
             discordMessageId: 'dm-1',
             fluxerMessageId: thread.id,
+            sourcePlatform: null,
+            sourceAuthorId: null,
             createdAt: new Date(),
         });
         t.discordResolver.fetchMessage.mockResolvedValueOnce({

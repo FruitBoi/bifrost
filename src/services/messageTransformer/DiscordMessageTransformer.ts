@@ -5,12 +5,13 @@ import {
     TextChannel,
 } from 'discord.js';
 import { WebhookAttachment, WebhookMessageData } from '../WebhookService';
-import MessageTransformer from './MessageTransformer';
+import MessageTransformer, { TransformOptions } from './MessageTransformer';
 import { sanitizeMentions } from '../../utils/sanitizeMentions';
 import { buildDiscordStickerUrl } from '../../utils/buildStickerUrl';
 import { getPollMessage } from '../../utils/pollMessageFormatter';
 import WebhookEmbed, { WebhookEmbedFooter } from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
+import MentionBridgeService from '../mentionBridge/MentionBridgeService';
 
 type DiscordMessage = OmitPartialGroupDMChannel<Message<boolean>>;
 
@@ -111,15 +112,87 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         return { text: 'From another server' };
     }
 
+    /**
+     * Reports `<@id>` user mentions in the raw content: they are relayed as
+     * plaintext because Discord users have no known Fluxer counterpart.
+     */
+    private logUnresolvedUserMentions(
+        message: Pick<DiscordMessage, 'content' | 'client'>
+    ): void {
+        if (!this.mentionBridge) return;
+        const ids = MentionBridgeService.extractUserMentionIds(message.content);
+        if (ids.length === 0) return;
+        this.mentionBridge.logUnresolvedUserMentions(
+            'discord',
+            ids.map((id) => ({
+                id,
+                username: message.client.users.cache.get(id)?.username ?? null,
+            }))
+        );
+    }
+
+    /**
+     * When a reply pings the author of a bridged message, resolves the Fluxer
+     * user that the relayed copy must ping. Empty when there is nobody to ping.
+     */
+    private async resolveReplyMention(
+        message: DiscordMessage,
+        referencedMessage: {
+            id: string | null;
+            author: { id: string } | null;
+        }
+    ): Promise<string[]> {
+        if (
+            !this.mentionBridge ||
+            !referencedMessage.id ||
+            !referencedMessage.author
+        )
+            return [];
+        const repliedAuthorId = referencedMessage.author.id;
+        const userId = await this.mentionBridge.resolveReplyPing({
+            platform: 'discord',
+            replierId: message.author.id,
+            repliedMessageId: referencedMessage.id,
+            repliedAuthorId,
+            replyPings: message.mentions.users.has(repliedAuthorId),
+        });
+        return userId ? [userId] : [];
+    }
+
+    private buildResult(
+        message: DiscordMessage,
+        content: string,
+        attachments: WebhookAttachment[],
+        embeds: WebhookEmbed[],
+        mentionUserIds: string[]
+    ): WebhookMessageData {
+        return {
+            content:
+                mentionUserIds.length > 0
+                    ? MentionBridgeService.applyMentions(
+                          content,
+                          mentionUserIds
+                      )
+                    : content,
+            username: message.author.username,
+            avatarURL: message.author.avatarURL() || '',
+            attachments: attachments,
+            embeds,
+            ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
+        };
+    }
+
     public async transformMessage(
         message: DiscordMessage,
-        fluxerEmojis: GeneralEmoji[] = []
+        fluxerEmojis: GeneralEmoji[] = [],
+        options: TransformOptions = {}
     ): Promise<WebhookMessageData> {
         const sanitizedContent = this.sanitizeContent(message);
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
             fluxerEmojis
         );
+        if (!options.isEdit) this.logUnresolvedUserMentions(message);
 
         const attachments = this.buildAttachments(message);
 
@@ -140,6 +213,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             : emojiReplacedContent;
 
         const embeds: WebhookEmbed[] = this.buildRichEmbeds(message);
+        let mentionUserIds: string[] = [];
 
         if (message.reference) {
             const isForwarded = message.flags.has(MessageFlags.HasSnapshot);
@@ -147,13 +221,21 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                 ? message.messageSnapshots.first()
                 : await message.fetchReference();
             if (!referencedMessage) {
-                return {
-                    content: messageContent,
-                    username: message.author.username,
-                    avatarURL: message.author.avatarURL() || '',
-                    attachments: attachments,
+                return this.buildResult(
+                    message,
+                    messageContent,
+                    attachments,
                     embeds,
-                };
+                    []
+                );
+            }
+
+            // Polls carry generated content; never prepend a mention to them.
+            if (!isForwarded && !isPollPresent) {
+                mentionUserIds = await this.resolveReplyMention(
+                    message,
+                    referencedMessage
+                );
             }
 
             if (isForwarded) {
@@ -192,12 +274,12 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             }
         }
 
-        return {
-            content: messageContent,
-            username: message.author.username,
-            avatarURL: message.author.avatarURL() || '',
-            attachments: attachments,
+        return this.buildResult(
+            message,
+            messageContent,
+            attachments,
             embeds,
-        };
+            mentionUserIds
+        );
     }
 }

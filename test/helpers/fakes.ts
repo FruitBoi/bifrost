@@ -2,7 +2,10 @@ import { vi } from 'vitest';
 import { CategoryLink } from '../../src/db/entities/CategoryLink';
 import { ChannelLink } from '../../src/db/entities/ChannelLink';
 import { GuildLink } from '../../src/db/entities/GuildLink';
-import { MessageLink } from '../../src/db/entities/MessageLink';
+import {
+    MessageLink,
+    MessagePlatform,
+} from '../../src/db/entities/MessageLink';
 import { VoiceLink } from '../../src/db/entities/VoiceLink';
 import { LinkService, VoiceLinkListener } from '../../src/services/LinkService';
 import LinkProvisioner, {
@@ -305,6 +308,26 @@ export class FakeLinkService {
         this.voiceLinks = this.voiceLinks.filter((v) => v.id !== id);
         this.voiceLinkListener?.onVoiceLinkChanged(voiceLink.id, null);
         return voiceLink;
+    }
+
+    async createMessageLink(data: {
+        discordMessageId: string;
+        fluxerMessageId: string;
+        guildLinkId: string;
+        channelLinkId: string;
+        sourcePlatform?: MessagePlatform;
+        sourceAuthorId?: string;
+    }) {
+        this.messageLinks.push({
+            id: `ml-${this.messageLinks.length + 1}`,
+            guildLinkId: data.guildLinkId,
+            channelLinkId: data.channelLinkId,
+            discordMessageId: data.discordMessageId,
+            fluxerMessageId: data.fluxerMessageId,
+            sourcePlatform: data.sourcePlatform ?? null,
+            sourceAuthorId: data.sourceAuthorId ?? null,
+            createdAt: new Date(),
+        });
     }
 
     async getMessageLinkByDiscordMessageId(id: string) {

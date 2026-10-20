@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 import { MessageLink } from '../entities/MessageLink';
-import { MessageLinkRepository } from '../repositories/MessageLinkRepository';
+import {
+    MessageLinkRepository,
+    MessageLinkSource,
+} from '../repositories/MessageLinkRepository';
 import { MessageLinkModel } from '../models/MessageLinkModel';
 
 export class SequelizeMessageLinkRepository implements MessageLinkRepository {
@@ -8,7 +11,8 @@ export class SequelizeMessageLinkRepository implements MessageLinkRepository {
         guildLinkId: string,
         channelLinkId: string,
         discordMessageId: string,
-        fluxerMessageId: string
+        fluxerMessageId: string,
+        source?: MessageLinkSource
     ): Promise<void> {
         await MessageLinkModel.create({
             id: randomUUID(),
@@ -16,6 +20,8 @@ export class SequelizeMessageLinkRepository implements MessageLinkRepository {
             channelLinkId,
             discordMessageId,
             fluxerMessageId,
+            sourcePlatform: source?.platform ?? null,
+            sourceAuthorId: source?.authorId ?? null,
         });
     }
 

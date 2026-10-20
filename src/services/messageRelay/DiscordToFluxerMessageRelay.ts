@@ -98,6 +98,10 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         if (!guildLink) return;
 
         const fluxerThreadId = linkedChannel.fluxerThreadId;
+        // A webhook/integration author has no user id to ping on Fluxer.
+        const sourceAuthorId = message.webhookId
+            ? undefined
+            : message.author.id;
 
         // Build payload before attempting send so it can be queued on failure
         let msg: WebhookMessageData;
@@ -125,7 +129,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg)
+                toSerializable(msg, sourceAuthorId)
             );
             return;
         }
@@ -149,6 +153,8 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                     fluxerMessageId: webhookMessageId,
                     guildLinkId: linkedChannel.guildLinkId,
                     channelLinkId: linkedChannel.id,
+                    sourcePlatform: 'discord',
+                    sourceAuthorId,
                 });
             }
             this.metricsService?.messagesRelayed.inc({
@@ -164,7 +170,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg)
+                toSerializable(msg, sourceAuthorId)
             );
         }
     }

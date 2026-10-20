@@ -41,6 +41,7 @@ import HealthCheckService from './services/HealthCheckService';
 import FluxerEntityResolver from './services/entityResolver/FluxerEntityResolver';
 import DiscordEntityResolver from './services/entityResolver/DiscordEntityResolver';
 import FluxerMessageTransformer from './services/messageTransformer/FluxerMessageTransformer';
+import MentionBridgeService from './services/mentionBridge/MentionBridgeService';
 import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
 import StatsFluxerCommandHandler from './commands/fluxer/handlers/StatsFluxerCommandHandler';
@@ -129,7 +130,9 @@ const startFluxerClient = async ({
     categorySyncService.setFluxerClient(client);
     fluxerStatsService.setClient(client);
 
-    const messageTransformer = new FluxerMessageTransformer();
+    const messageTransformer = new FluxerMessageTransformer(
+        new MentionBridgeService(linkService)
+    );
     const messageRelay = new FluxerToDiscordMessageRelay({
         linkService,
         webhookService,
@@ -344,7 +347,8 @@ const startFluxerClient = async ({
 
         const newMsg = await messageTransformer.transformMessage(
             newMessage,
-            discordEmojis
+            discordEmojis,
+            { isEdit: true }
         );
         try {
             await webhookService.editMessageViaDiscordWebhook(

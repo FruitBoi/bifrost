@@ -28,7 +28,35 @@ export type WebhookMessageData = {
     avatarURL: string;
     attachments?: WebhookAttachment[];
     embeds?: WebhookEmbed[];
+    /**
+     * User ids that the relayed message must really ping. Content already
+     * carries the matching `<@id>` mentions; this whitelists them for the
+     * webhook so the platform notifies those users.
+     */
+    mentionUserIds?: string[];
 };
+
+/** Discord allowed-mentions whitelist for `mentionUserIds`, or undefined to keep defaults. */
+function discordAllowedMentions(
+    data: WebhookMessageData
+): { users: string[] } | undefined {
+    return data.mentionUserIds && data.mentionUserIds.length > 0
+        ? { users: data.mentionUserIds }
+        : undefined;
+}
+
+/**
+ * Fluxer allowed-mentions whitelist for `mentionUserIds`, or undefined to keep
+ * defaults. The empty `parse` mirrors the Discord side: a bridged reply ping
+ * must never newly opt in to @everyone/@here or role pings.
+ */
+function fluxerAllowedMentions(
+    data: WebhookMessageData
+): { parse: never[]; users: string[] } | undefined {
+    return data.mentionUserIds && data.mentionUserIds.length > 0
+        ? { parse: [], users: data.mentionUserIds }
+        : undefined;
+}
 
 /** Appends `key=value` to a route that may or may not already carry a query string. */
 function appendQuery(route: string, key: string, value: string): string {
@@ -124,6 +152,7 @@ export class WebhookService {
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
                 threadId: threadId ?? undefined,
+                allowedMentions: discordAllowedMentions(data),
             });
 
             return { messageId: id };
@@ -157,6 +186,7 @@ export class WebhookService {
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
                 threadId: threadId ?? undefined,
+                allowedMentions: discordAllowedMentions(data),
             });
         } catch (error: unknown) {
             logger.error(
@@ -323,6 +353,7 @@ export class WebhookService {
                     embeds:
                         data.embeds?.map((embed) => embed.toFluxerEmbed()) ||
                         [],
+                    allowedMentions: fluxerAllowedMentions(data),
                 },
                 true
             );
@@ -351,6 +382,7 @@ export class WebhookService {
                 FluxerRoutes.webhookExecute(webhook.id, webhook.token!) +
                 `/messages/${messageId}`;
             if (threadId) route = appendQuery(route, 'thread_id', threadId);
+            const allowedMentions = fluxerAllowedMentions(data);
 
             await webhook.client.rest.patch(route, {
                 body: {
@@ -367,6 +399,9 @@ export class WebhookService {
                     embeds:
                         data.embeds?.map((embed) => embed.toFluxerEmbed()) ||
                         [],
+                    ...(allowedMentions
+                        ? { allowed_mentions: allowedMentions }
+                        : {}),
                 },
                 auth: false,
             });

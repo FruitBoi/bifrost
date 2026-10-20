@@ -22,22 +22,34 @@ export type SerializableWebhookMessageData = {
     avatarURL: string;
     attachments?: WebhookAttachment[];
     embeds?: SerializableEmbed[];
+    mentionUserIds?: string[];
+    /**
+     * Author of the original message on the source platform (implied by the
+     * entry's direction), so the link created on drain can be ping-resolved.
+     * Absent when the original was posted by a webhook or the entry predates
+     * author tracking.
+     */
+    sourceAuthorId?: string;
 };
 
 export function toSerializable(
-    data: WebhookMessageData
+    data: WebhookMessageData,
+    sourceAuthorId?: string
 ): SerializableWebhookMessageData {
     return {
         ...data,
         embeds: data.embeds?.map((e) => e.toPlainObject()),
+        ...(sourceAuthorId ? { sourceAuthorId } : {}),
     };
 }
 
 function toWebhookMessageData(
     data: SerializableWebhookMessageData
 ): WebhookMessageData {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { sourceAuthorId: _sourceAuthorId, ...rest } = data;
     return {
-        ...data,
+        ...rest,
         embeds: data.embeds?.map((e) => WebhookEmbed.fromPlainObject(e)),
     };
 }
@@ -95,9 +107,11 @@ export default class MessageQueueService {
             }
 
             try {
-                const payload = toWebhookMessageData(
-                    JSON.parse(entry.payload) as SerializableWebhookMessageData
-                );
+                const serialized = JSON.parse(
+                    entry.payload
+                ) as SerializableWebhookMessageData;
+                const payload = toWebhookMessageData(serialized);
+                const sourceAuthorId = serialized.sourceAuthorId;
                 const channelLink = await linkService.getChannelLinkById(
                     entry.channelLinkId
                 );
@@ -125,6 +139,8 @@ export default class MessageQueueService {
                         fluxerMessageId,
                         guildLinkId: channelLink.guildLinkId,
                         channelLinkId: channelLink.id,
+                        sourcePlatform: 'discord',
+                        sourceAuthorId,
                     });
                 } else {
                     const webhook = await webhookService.getDiscordWebhook(
@@ -147,6 +163,8 @@ export default class MessageQueueService {
                         fluxerMessageId: entry.sourceMessageId,
                         guildLinkId: channelLink.guildLinkId,
                         channelLinkId: channelLink.id,
+                        sourcePlatform: 'fluxer',
+                        sourceAuthorId,
                     });
                 }
 

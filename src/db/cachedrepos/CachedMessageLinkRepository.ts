@@ -1,6 +1,9 @@
 import { LRUCache } from 'lru-cache';
 import { MessageLink } from '../entities/MessageLink';
-import { MessageLinkRepository } from '../repositories/MessageLinkRepository';
+import {
+    MessageLinkRepository,
+    MessageLinkSource,
+} from '../repositories/MessageLinkRepository';
 
 export class CachedMessageLinkRepository implements MessageLinkRepository {
     private cache: LRUCache<string, MessageLink>;
@@ -35,13 +38,15 @@ export class CachedMessageLinkRepository implements MessageLinkRepository {
         guildLinkId: string,
         channelLinkId: string,
         discordMessageId: string,
-        fluxerMessageId: string
+        fluxerMessageId: string,
+        source?: MessageLinkSource
     ): Promise<void> {
         await this.repository.createMessageLink(
             guildLinkId,
             channelLinkId,
             discordMessageId,
-            fluxerMessageId
+            fluxerMessageId,
+            source
         );
 
         const created =
