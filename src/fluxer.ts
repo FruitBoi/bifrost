@@ -35,6 +35,7 @@ import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerComma
 import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxerCommandHandler';
 import { WebhookService } from './services/WebhookService';
 import FluxerToDiscordMessageRelay from './services/messageRelay/FluxerToDiscordMessageRelay';
+import FluxerToDiscordReactionRelay from './services/reactionBridge/FluxerToDiscordReactionRelay';
 import HelpFluxerCommandHandler from './commands/fluxer/handlers/HelpFluxerCommandHandler';
 import AutolinkFluxerCommandHandler from './commands/fluxer/handlers/AutolinkFluxerCommandHandler';
 import HealthCheckService from './services/HealthCheckService';
@@ -158,6 +159,13 @@ const startFluxerClient = async ({
         discordEntityResolver,
         threadSyncService,
     });
+    const reactionRelay = new FluxerToDiscordReactionRelay({
+        linkService,
+        discordEntityResolver,
+        fluxerEntityResolver,
+        metricsService,
+    });
+    reactionRelay.setFluxerClient(client);
 
     const commandRegistry = new CommandRegistry<FluxerCommandHandler>();
     commandRegistry.registerCommand(
@@ -325,6 +333,66 @@ const startFluxerClient = async ({
             logger.error('❌ Error handling Fluxer thread deletion:', error);
         }
     });
+
+    // Reaction bridging (issue #13): mirror reactions on bridged messages
+    // onto the counterpart on the other platform. Off via
+    // `reactions.enabled: false`.
+    if (botConfig.reactions.enabled) {
+        client.on(Events.MessageReactionAdd, async (payload) => {
+            try {
+                await reactionRelay.handleReactionAdd(payload);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Fluxer reaction to Discord:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionAddMany, async (payload) => {
+            try {
+                await reactionRelay.handleReactionAddMany(payload);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Fluxer reactions to Discord:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionRemove, async (payload) => {
+            try {
+                await reactionRelay.handleReactionRemove(payload);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Fluxer reaction removal to Discord:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionRemoveAll, async (payload) => {
+            try {
+                await reactionRelay.handleReactionRemoveAll(payload);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Fluxer reaction clear to Discord:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionRemoveEmoji, async (payload) => {
+            try {
+                await reactionRelay.handleReactionRemoveEmoji(payload);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Fluxer emoji clear to Discord:',
+                    error
+                );
+            }
+        });
+    }
 
     // Deletes the bridged Discord copy of the Fluxer message `messageId`
     // (and its message link), if there is one. Shared by single deletions

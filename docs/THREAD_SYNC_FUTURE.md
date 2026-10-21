@@ -65,7 +65,8 @@ By default a deleted thread only drops its link (and the shared webhook if unuse
 
 ### Pins and reactions inside threads
 
-*Rationale:* Neither pins nor reactions are bridged anywhere in Bifröst today; threads would inherit whatever channel-level support is added.
+*Status:* Reactions shipped (issue #13): they are bridged on every linked message, threads included, as one reaction from the bot per emoji; see the README's Reactions section. Pins remain future work.
+*Rationale:* Neither pins nor reactions were bridged anywhere in Bifröst before; threads would inherit whatever channel-level support is added.
 *Consideration:* Reactions need an emoji mapping (custom emojis must match by name, as for message content) and a way to attribute reactions without impersonation; pins need Manage Messages on both sides.
 
 ### Thread starter message editing

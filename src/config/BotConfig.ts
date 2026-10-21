@@ -95,6 +95,16 @@ export interface BotConfig {
          */
         triggerPrefixes: string[];
     };
+    reactions: {
+        /**
+         * Mirror reactions on bridged messages onto the counterpart message
+         * on the other platform, as a single reaction from the bot per emoji
+         * (webhooks cannot react). Custom emojis are mirrored only when the
+         * other server has one with the same name. Needs Add Reactions on
+         * both platforms. See `services/reactionBridge/`.
+         */
+        enabled: boolean;
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -108,6 +118,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     meow: { enabled: true },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
+    reactions: { enabled: true },
 };
 
 export const CONFIG_FILE_CANDIDATES = [
@@ -334,6 +345,7 @@ const PERMISSION_BITS = {
     viewChannel: 2 ** 10,
     sendMessages: 2 ** 11,
     embedLinks: 2 ** 14,
+    addReactions: 2 ** 6,
     readMessageHistory: 2 ** 16,
     manageWebhooks: 2 ** 29,
     connect: 2 ** 20,
@@ -348,14 +360,17 @@ const PERMISSION_BITS = {
  * Permission mask for the bot invite links. The base set is what channel
  * bridging always needed plus the voice bridge bits (Connect, Speak, Use
  * Voice Activity); thread bridging adds Create Public Threads and Send
- * Messages in Threads. Manage Threads is only requested when enabled in the
- * config, because it also grants deleting and archiving threads.
+ * Messages in Threads, and reaction bridging adds Add Reactions (requested
+ * even when `reactions.enabled` is off, so turning it on later needs no
+ * re-invite). Manage Threads is only requested when enabled in the config,
+ * because it also grants deleting and archiving threads.
  */
 export function inviteBotPermissions(config: BotConfig): string {
     const flags = [
         PERMISSION_BITS.viewChannel,
         PERMISSION_BITS.sendMessages,
         PERMISSION_BITS.embedLinks,
+        PERMISSION_BITS.addReactions,
         PERMISSION_BITS.readMessageHistory,
         PERMISSION_BITS.manageWebhooks,
         PERMISSION_BITS.connect,

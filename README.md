@@ -11,6 +11,7 @@
 - Sync messages between linked channels
 - Support for messages, replies, attachments, emojis¹, stickers, embeds, join messages and polls
 - Bridge messages using webhooks
+- Bridge reactions: reacting to a bridged message adds the same emoji to its counterpart on the other platform (see [Reactions](#reactions))
 - Easy setup using our hosted bot or self-hosting with Docker
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
@@ -23,7 +24,7 @@
 
 ## Threads
 
-Threads can be bridged like channels. A link always pairs two *locations*, and each side can be a text channel or a thread inside one, so channel↔channel, thread↔thread, channel↔thread and thread↔channel links are all possible. A thread does **not** have to belong to a linked channel to be linked itself. A link relays messages (send, edit and delete) in both directions; when both sides are threads, the thread name is kept in sync too. Everything else about a thread (archive state, lock state, members, pins, reactions, …) is intentionally left alone; see [docs/THREAD_SYNC_FUTURE.md](docs/THREAD_SYNC_FUTURE.md) for what could be added later.
+Threads can be bridged like channels. A link always pairs two *locations*, and each side can be a text channel or a thread inside one, so channel↔channel, thread↔thread, channel↔thread and thread↔channel links are all possible. A thread does **not** have to belong to a linked channel to be linked itself. A link relays messages (send, edit and delete) in both directions; when both sides are threads, the thread name is kept in sync too. Everything else about a thread (archive state, lock state, members, pins, …) is intentionally left alone; reactions on messages in a linked thread are bridged like anywhere else (see [Reactions](#reactions)); see [docs/THREAD_SYNC_FUTURE.md](docs/THREAD_SYNC_FUTURE.md) for what could be added later.
 
 Commands below use the default prefix `!b `. The prefix is configurable with `BF_COMMAND_PREFIX`.
 
@@ -77,7 +78,7 @@ In the web dashboard, the *Link category* dialog creates a category link and the
 
 ### Permissions
 
-Besides the permissions the bot already needs for channel bridging, thread bridging requires **Create Public Threads** and **Send Messages in Threads** on both platforms. The invite links logged at startup include these. Installations made before thread support was added must grant them to the bot's role manually or re-invite the bot.
+Besides the permissions the bot already needs for channel bridging (including **Add Reactions** for [reaction bridging](#reactions)), thread bridging requires **Create Public Threads** and **Send Messages in Threads** on both platforms. The invite links logged at startup include these. Installations made before thread support was added must grant them to the bot's role manually or re-invite the bot.
 
 **Manage Threads** is *not* requested by default. Without it the bot can rename only the threads it created itself (the counterpart threads it made for auto-sync and category links, which it owns), and it cannot delete or archive any thread. That covers the common case: a rename on the user-created side is mirrored onto the bot-created counterpart, while a rename of the bot-created thread cannot be mirrored back onto a thread the bot does not own. `threads.mirrorDeletes` needs Manage Threads and does nothing without it.
 
@@ -86,6 +87,15 @@ To opt in, set `permissions.manageThreads: true` in the [configuration file](#co
 ### Database migration
 
 Thread bridging ships as three migrations. `00003-add-thread-links` adds `channel_links.autoSyncThreads` and a `thread_links` table (the first iteration of the feature). `00004-location-links` adds the nullable `channel_links.discordThreadId` / `fluxerThreadId` columns, replaces the unique indexes on the channel ID columns with partial ones (a channel can be linked once as a channel and still own any number of thread links), converts any existing `thread_links` rows into links of their own (inheriting the parent link's webhooks and keeping their message links), and drops `thread_links`. `00005-category-links` adds the `category_links` table (one row per linked Discord category) and the nullable `channel_links.categoryLinkId` column that tags the links a category link creates. Migrations run automatically on startup, so existing databases need no manual steps; existing channel links are unchanged and simply start with the toggle off.
+
+## Reactions
+
+When someone reacts to a bridged message, the bot adds the same reaction to the counterpart message on the other platform. This works in both directions, on the original message as well as on its webhook copy, and in channels and threads alike (any message the bridge has linked).
+
+- **One reaction from the bot.** Webhooks cannot react, so the mirrored reaction is always the bot's own: the other side sees a single reaction from the bot per emoji, not one per person and no counts. It stays as long as at least one person on the source side still has that emoji; when the last one removes it (or a moderator clears that emoji or all reactions), the bot removes its reaction from the counterpart. The bot's own reactions are never bridged back, so nothing loops.
+- **Emojis.** Standard Unicode emojis are mirrored as-is. A custom emoji is mirrored only when the other server has a custom emoji with the **same name** (the same rule as for emojis inside messages); otherwise that reaction is simply not bridged.
+- **Toggle.** Reaction bridging is on by default; turn it off with `reactions.enabled: false` in the [configuration file](#configuration-file).
+- **Permissions.** The bot needs **Add Reactions** (and **Read Message History**, which bridging already requires) on both platforms. The invite links logged at startup include it; installations made before reaction bridging was added must grant it to the bot's role manually or re-invite the bot. On Discord the bot also needs the *Guild Message Reactions* gateway intent, which is requested automatically (it is not privileged).
 
 ## Voice
 
@@ -312,6 +322,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
+| `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:
 

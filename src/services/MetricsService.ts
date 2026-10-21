@@ -12,6 +12,8 @@ export default class MetricsService {
     public readonly messageRelayErrors: Counter<'direction'>;
     public readonly voiceBridgesLive: Gauge;
     public readonly voiceBridgeJoins: Counter<'result'>;
+    public readonly reactionsRelayed: Counter<'direction'>;
+    public readonly reactionRelayErrors: Counter<'direction'>;
 
     constructor(port: number) {
         this.registry = new Registry();
@@ -60,6 +62,20 @@ export default class MetricsService {
             name: 'bifrost_voice_bridge_joins_total',
             help: 'Total number of voice bridge join attempts by result',
             labelNames: ['result'],
+            registers: [this.registry],
+        });
+
+        this.reactionsRelayed = new Counter({
+            name: 'bifrost_reactions_relayed_total',
+            help: 'Total number of reaction changes successfully mirrored to the other platform',
+            labelNames: ['direction'],
+            registers: [this.registry],
+        });
+
+        this.reactionRelayErrors = new Counter({
+            name: 'bifrost_reaction_relay_errors_total',
+            help: 'Total number of reaction relay errors',
+            labelNames: ['direction'],
             registers: [this.registry],
         });
 

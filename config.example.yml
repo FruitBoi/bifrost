@@ -103,3 +103,14 @@ reminders:
     triggerPrefixes:
         - "?"
         - "!"
+
+reactions:
+    # Mirror reactions on bridged messages (channels and threads, originals and
+    # webhook copies alike) onto the counterpart message on the other platform.
+    # Webhooks cannot react, so the other side sees one reaction from the bot
+    # per emoji, not one per person; it is removed once nobody on the source
+    # side has that reaction any more. Unicode emojis are mirrored as-is, a
+    # custom emoji only when the other server has one with the same name. The
+    # bot needs Add Reactions on both platforms; installations invited before
+    # reaction bridging must grant it to the bot's role or re-invite the bot.
+    enabled: true

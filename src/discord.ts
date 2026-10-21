@@ -24,6 +24,7 @@ import ListDiscordCommandHandler from './commands/discord/handlers/ListDiscordCo
 import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDiscordCommandHandler';
 import { WebhookService } from './services/WebhookService';
 import DiscordToFluxerMessageRelay from './services/messageRelay/DiscordToFluxerMessageRelay';
+import DiscordToFluxerReactionRelay from './services/reactionBridge/DiscordToFluxerReactionRelay';
 import HelpDiscordCommandHandler from './commands/discord/handlers/HelpDiscordCommandHandler';
 import AutolinkDiscordCommandHandler from './commands/discord/handlers/AutolinkDiscordCommandHandler';
 import HealthCheckService from './services/HealthCheckService';
@@ -91,8 +92,16 @@ const startDiscordClient = async ({
             GatewayIntentBits.GuildMessages,
             GatewayIntentBits.MessageContent,
             GatewayIntentBits.GuildVoiceStates,
+            GatewayIntentBits.GuildMessageReactions,
         ],
-        partials: [Partials.Message, Partials.Channel],
+        // Reaction/User partials: without them discord.js drops reaction
+        // events on uncached messages and removals by uncached users.
+        partials: [
+            Partials.Message,
+            Partials.Channel,
+            Partials.Reaction,
+            Partials.User,
+        ],
         presence: {
             status: 'online',
             activities: [
@@ -122,6 +131,11 @@ const startDiscordClient = async ({
         queueService,
         fluxerEntityResolver,
         threadSyncService,
+    });
+    const reactionRelay = new DiscordToFluxerReactionRelay({
+        linkService,
+        fluxerEntityResolver,
+        metricsService,
     });
 
     const commandRegistry = new CommandRegistry<DiscordCommandHandler>();
@@ -381,6 +395,52 @@ const startDiscordClient = async ({
             }
         }
     });
+
+    // Reaction bridging (issue #13): mirror reactions on bridged messages
+    // onto the counterpart on the other platform. Off via
+    // `reactions.enabled: false`.
+    if (botConfig.reactions.enabled) {
+        client.on(Events.MessageReactionAdd, async (reaction, user) => {
+            try {
+                await reactionRelay.handleReactionAdd(reaction, user);
+            } catch (error) {
+                logger.error('❌ Error mirroring Discord reaction add:', error);
+            }
+        });
+
+        client.on(Events.MessageReactionRemove, async (reaction, user) => {
+            try {
+                await reactionRelay.handleReactionRemove(reaction, user);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Discord reaction removal:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionRemoveAll, async (message) => {
+            try {
+                await reactionRelay.handleReactionRemoveAll(message);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Discord reaction clear-all:',
+                    error
+                );
+            }
+        });
+
+        client.on(Events.MessageReactionRemoveEmoji, async (reaction) => {
+            try {
+                await reactionRelay.handleReactionRemoveEmoji(reaction);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring Discord reaction emoji clear:',
+                    error
+                );
+            }
+        });
+    }
 
     client.on(Events.MessageUpdate, async (_oldMessage, newMessage) => {
         if (newMessage.webhookId) return;

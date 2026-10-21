@@ -135,6 +135,7 @@ describe('loadBotConfig parsing', () => {
             clean: DEFAULT_BOT_CONFIG.clean,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
+            reactions: DEFAULT_BOT_CONFIG.reactions,
         });
     });
 
@@ -161,6 +162,7 @@ describe('loadBotConfig parsing', () => {
             clean: DEFAULT_BOT_CONFIG.clean,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
+            reactions: DEFAULT_BOT_CONFIG.reactions,
         });
     });
 
@@ -318,7 +320,7 @@ describe('inviteBotPermissions', () => {
     it('requests the base set without Manage Threads by default', () => {
         const mask = inviteBotPermissions(DEFAULT_BOT_CONFIG);
 
-        expect(mask).toBe('309811301376');
+        expect(mask).toBe('309811301440');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(0n);
     });
 
@@ -328,11 +330,24 @@ describe('inviteBotPermissions', () => {
             permissions: { manageThreads: true },
         });
 
-        expect(mask).toBe('326991170560');
+        expect(mask).toBe('326991170624');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(MANAGE_THREADS);
         expect(BigInt(mask) - MANAGE_THREADS).toBe(
             BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG))
         );
+    });
+
+    it('always requests Add Reactions for reaction bridging', () => {
+        const ADD_REACTIONS = 1n << 6n;
+        const off = inviteBotPermissions({
+            ...DEFAULT_BOT_CONFIG,
+            reactions: { enabled: false },
+        });
+
+        expect(
+            BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG)) & ADD_REACTIONS
+        ).toBe(ADD_REACTIONS);
+        expect(BigInt(off) & ADD_REACTIONS).toBe(ADD_REACTIONS);
     });
 
     it('returns a decimal string', () => {
@@ -350,6 +365,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'clean',
             'meow',
             'reminders',
+            'reactions',
         ]);
     });
 });
@@ -614,5 +630,31 @@ describe('reminders', () => {
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('reminders.triggerPrefixes');
         expect(attempt).toThrow('list of strings');
+    });
+});
+
+describe('reactions', () => {
+    it('defaults to enabled', () => {
+        expect(DEFAULT_BOT_CONFIG.reactions).toEqual({ enabled: true });
+    });
+
+    it('merges reactions.enabled: false from a YAML file', () => {
+        write('config.yml', 'reactions:\n  enabled: false\n');
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            reactions: { enabled: false },
+        });
+    });
+
+    it('rejects a non-boolean enabled flag', () => {
+        const attempt = () => mergeBotConfig({ reactions: { enabled: 'no' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('reactions.enabled');
+        expect(attempt).toThrow('boolean');
     });
 });
