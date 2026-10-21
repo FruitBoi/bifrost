@@ -102,6 +102,57 @@ export default abstract class DiscordCommandHandler extends CommandHandler<
         return true;
     }
 
+    /**
+     * Checks that the author holds at least one of `roleIds` (e.g. the
+     * configured `roles.moderator` IDs), replying with an error embed when
+     * they do not or when their member cannot be fetched. The IDs come from
+     * the config and may belong to the other platform, in which case nobody
+     * on Discord passes until a Discord role ID is configured.
+     */
+    protected async requireRole(
+        message: DiscordCommandHandlerMessage,
+        roleIds: readonly string[]
+    ): Promise<boolean> {
+        let member;
+        try {
+            member = await message.guild?.members.fetch(message.author.id);
+            if (!member) {
+                throw new Error('Member not found');
+            }
+        } catch {
+            await this.replyErrorEmbed(
+                message,
+                'Could not fetch your member information.'
+            );
+            return false;
+        }
+
+        if (!roleIds.some((id) => member.roles.cache.has(id))) {
+            await this.replyErrorEmbed(
+                message,
+                'You do not have a role that is allowed to use this command.'
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+    private async replyErrorEmbed(
+        message: DiscordCommandHandlerMessage,
+        description: string
+    ): Promise<void> {
+        await message.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setDescription(description)
+                    .setColor(EmbedColors.Error)
+                    .setFooter(this.footer(message))
+                    .setTimestamp(),
+            ],
+        });
+    }
+
     protected async requireOwner(
         message: DiscordCommandHandlerMessage
     ): Promise<boolean> {

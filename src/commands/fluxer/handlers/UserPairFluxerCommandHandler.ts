@@ -87,23 +87,7 @@ export default abstract class UserPairFluxerCommandHandler extends FluxerCommand
         }
 
         // Permission: the caller must hold one of the allowed role IDs.
-        const author = await guild
-            .fetchMember(message.author.id)
-            .catch(() => null);
-        if (!author) {
-            await this.reply(
-                message,
-                'Could not fetch your member information.',
-                EmbedColors.Error
-            );
-            return null;
-        }
-        if (!this.allowedRoleIds.some((id) => author.roles.has(id))) {
-            await this.reply(
-                message,
-                'You do not have a role that is allowed to use this command.',
-                EmbedColors.Error
-            );
+        if (!(await this.requireRole(message, this.allowedRoleIds))) {
             return null;
         }
 

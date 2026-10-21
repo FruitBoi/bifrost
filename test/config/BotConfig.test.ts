@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
     BotConfigError,
     DEFAULT_BOT_CONFIG,
+    DEPRECATED_CONFIG_KEYS,
     inviteBotPermissions,
     loadBotConfig,
     mergeBotConfig,
@@ -29,13 +30,14 @@ function write(name: string, text: string): string {
 }
 
 describe('loadBotConfig without a file', () => {
-    it('returns the defaults, no source and no unknown keys', () => {
+    it('returns the defaults, no source and no unknown or deprecated keys', () => {
         const loaded = loadBotConfig({}, dir);
 
         expect(loaded).toEqual({
             config: DEFAULT_BOT_CONFIG,
             source: null,
             unknownKeys: [],
+            deprecatedKeys: [],
         });
     });
 
@@ -130,6 +132,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            clean: DEFAULT_BOT_CONFIG.clean,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
         });
@@ -155,6 +158,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            clean: DEFAULT_BOT_CONFIG.clean,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
         });
@@ -225,10 +229,11 @@ describe('parseBotConfigText', () => {
 describe('mergeBotConfig', () => {
     it('returns a copy of the defaults for null or undefined input', () => {
         for (const raw of [null, undefined]) {
-            const { config, unknownKeys } = mergeBotConfig(raw);
+            const { config, unknownKeys, deprecatedKeys } = mergeBotConfig(raw);
             expect(config).toEqual(DEFAULT_BOT_CONFIG);
             expect(config).not.toBe(DEFAULT_BOT_CONFIG);
             expect(unknownKeys).toEqual([]);
+            expect(deprecatedKeys).toEqual([]);
         }
     });
 
@@ -335,32 +340,236 @@ describe('inviteBotPermissions', () => {
     });
 });
 
-describe('roles.copyAllowedRoleIds', () => {
-    it('defaults to the two documented Fluxer role IDs', () => {
-        expect(DEFAULT_BOT_CONFIG.roles.copyAllowedRoleIds).toEqual([
-            '1561105750388908139',
-            '1561105750388908112',
+describe('DEFAULT_BOT_CONFIG', () => {
+    it('lists the sections in file order', () => {
+        expect(Object.keys(DEFAULT_BOT_CONFIG)).toEqual([
+            'permissions',
+            'threads',
+            'categories',
+            'roles',
+            'clean',
+            'meow',
+            'reminders',
         ]);
     });
+});
 
-    it('replaces the default list with the configured strings', () => {
-        const raw = parseBotConfigText(
-            'roles:\n  copyAllowedRoleIds:\n    - "42"\n',
-            'config.yml'
-        );
-        const { config, unknownKeys } = mergeBotConfig(raw);
+describe('roles', () => {
+    it('defaults the moderator and identity groups to the documented Fluxer role IDs', () => {
+        expect(DEFAULT_BOT_CONFIG.roles).toEqual({
+            moderator: ['1561105750388908139'],
+            identity: ['1561105750388908139', '1561105750388908112'],
+        });
+    });
 
-        expect(config.roles.copyAllowedRoleIds).toEqual(['42']);
+    it('replaces the default lists with the configured strings', () => {
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig({
+            roles: { moderator: ['1', '2'], identity: ['3'] },
+        });
+
+        expect(config.roles).toEqual({
+            moderator: ['1', '2'],
+            identity: ['3'],
+        });
         expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+    });
+
+    it('keeps the other group at its default when only one is given', () => {
+        const { config } = mergeBotConfig({ roles: { moderator: ['1'] } });
+
+        expect(config.roles).toEqual({
+            moderator: ['1'],
+            identity: DEFAULT_BOT_CONFIG.roles.identity,
+        });
     });
 
     it('rejects unquoted numeric IDs and non-lists', () => {
+        for (const key of ['moderator', 'identity']) {
+            for (const value of [[42], 'abc', 42, { a: '1' }]) {
+                const attempt = () =>
+                    mergeBotConfig({ roles: { [key]: value } });
+                expect(attempt).toThrow(BotConfigError);
+                expect(attempt).toThrow(`roles.${key}`);
+            }
+        }
+    });
+
+    it('round-trips through YAML', () => {
+        const raw = parseBotConfigText(
+            [
+                'roles:',
+                '    moderator:',
+                '        - "42"',
+                '    identity:',
+                '        - "43"',
+                '        - "44"',
+            ].join('\n'),
+            'config.yml'
+        );
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig(raw);
+
+        expect(config.roles).toEqual({
+            moderator: ['42'],
+            identity: ['43', '44'],
+        });
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+    });
+});
+
+describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => {
+    it('is listed as a deprecated key', () => {
+        expect(DEPRECATED_CONFIG_KEYS).toEqual({
+            'roles.copyAllowedRoleIds': 'roles.identity',
+        });
+    });
+
+    it('is moved to roles.identity and reported', () => {
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig({
+            roles: { copyAllowedRoleIds: ['42'] },
+        });
+
+        expect(config.roles.identity).toEqual(['42']);
+        expect(config.roles.moderator).toEqual(
+            DEFAULT_BOT_CONFIG.roles.moderator
+        );
+        expect(config.roles).not.toHaveProperty('copyAllowedRoleIds');
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([
+            {
+                key: 'roles.copyAllowedRoleIds',
+                replacement: 'roles.identity',
+                applied: true,
+            },
+        ]);
+    });
+
+    it('is ignored when roles.identity is given too', () => {
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig({
+            roles: { copyAllowedRoleIds: ['42'], identity: ['7'] },
+        });
+
+        expect(config.roles.identity).toEqual(['7']);
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([
+            {
+                key: 'roles.copyAllowedRoleIds',
+                replacement: 'roles.identity',
+                applied: false,
+            },
+        ]);
+    });
+
+    it('does not disturb roles.moderator in the same mapping', () => {
+        const { config } = mergeBotConfig({
+            roles: { moderator: ['9'], copyAllowedRoleIds: ['42'] },
+        });
+
+        expect(config.roles).toEqual({ moderator: ['9'], identity: ['42'] });
+    });
+
+    it('does not mutate the raw input', () => {
+        const raw = { roles: { copyAllowedRoleIds: ['42'] } };
+
+        mergeBotConfig(raw);
+
+        expect(raw).toEqual({ roles: { copyAllowedRoleIds: ['42'] } });
+    });
+
+    it('still goes through type validation', () => {
         expect(() =>
             mergeBotConfig({ roles: { copyAllowedRoleIds: [42] } })
         ).toThrow(BotConfigError);
         expect(() =>
             mergeBotConfig({ roles: { copyAllowedRoleIds: 'abc' } })
         ).toThrow(BotConfigError);
+    });
+
+    it('is reported by loadBotConfig when read from a YAML file', () => {
+        write('config.yml', 'roles:\n  copyAllowedRoleIds:\n    - "42"\n');
+
+        const loaded = loadBotConfig({}, dir);
+
+        expect(loaded.config.roles.identity).toEqual(['42']);
+        expect(loaded.unknownKeys).toEqual([]);
+        expect(loaded.deprecatedKeys).toEqual([
+            {
+                key: 'roles.copyAllowedRoleIds',
+                replacement: 'roles.identity',
+                applied: true,
+            },
+        ]);
+    });
+});
+
+describe('clean', () => {
+    it('defaults to enabled with the ? and ! trigger prefixes', () => {
+        expect(DEFAULT_BOT_CONFIG.clean).toEqual({
+            enabled: true,
+            triggerPrefixes: ['?', '!'],
+        });
+    });
+
+    it('merges the clean section from a YAML file', () => {
+        write(
+            'config.yml',
+            'clean: { enabled: false, triggerPrefixes: ["?"] }\n'
+        );
+
+        const { config, unknownKeys, deprecatedKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            clean: { enabled: false, triggerPrefixes: ['?'] },
+        });
+    });
+
+    it('accepts an empty trigger prefix list', () => {
+        const { config } = mergeBotConfig({ clean: { triggerPrefixes: [] } });
+
+        expect(config.clean).toEqual({ enabled: true, triggerPrefixes: [] });
+    });
+
+    it('rejects a non-boolean enabled flag', () => {
+        const attempt = () => mergeBotConfig({ clean: { enabled: 'no' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('clean.enabled');
+        expect(attempt).toThrow('boolean');
+    });
+
+    it('rejects non-string trigger prefixes', () => {
+        const attempt = () =>
+            mergeBotConfig({ clean: { triggerPrefixes: [1] } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('clean.triggerPrefixes');
+        expect(attempt).toThrow('list of strings');
+    });
+
+    it('reports unknown keys inside the section', () => {
+        const { unknownKeys } = mergeBotConfig({ clean: { maxCount: 50 } });
+
+        expect(unknownKeys).toEqual(['clean.maxCount']);
+    });
+});
+
+describe('config.example.yml', () => {
+    it('parses to exactly the defaults with no unknown or deprecated keys', () => {
+        const file = path.resolve(__dirname, '../../config.example.yml');
+        const raw = parseBotConfigText(fs.readFileSync(file, 'utf8'), file);
+
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig(raw);
+
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+        expect(config).toEqual(DEFAULT_BOT_CONFIG);
+        expect(Object.keys(raw as object)).toEqual(
+            Object.keys(DEFAULT_BOT_CONFIG)
+        );
     });
 });
 

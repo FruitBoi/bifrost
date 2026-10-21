@@ -57,6 +57,7 @@ const main = async () => {
         config: botConfig,
         source: botConfigSource,
         unknownKeys,
+        deprecatedKeys,
     } = loadBotConfig();
     logger.info(
         botConfigSource
@@ -65,6 +66,13 @@ const main = async () => {
     );
     for (const key of unknownKeys) {
         logger.warn(`Config: ignoring unknown key "${key}"`);
+    }
+    for (const { key, replacement, applied } of deprecatedKeys) {
+        logger.warn(
+            applied
+                ? `Config: "${key}" is deprecated, rename it to "${replacement}"`
+                : `Config: ignoring deprecated key "${key}" because "${replacement}" is set`
+        );
     }
     if (!botConfig.permissions.manageThreads) {
         logger.info(

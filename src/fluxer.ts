@@ -63,6 +63,9 @@ import FluxerReminderDeliverer from './services/reminders/FluxerReminderDelivere
 import RemindMeFluxerCommandHandler from './commands/fluxer/handlers/RemindMeFluxerCommandHandler';
 import ReminderFluxerCommandHandler from './commands/fluxer/handlers/ReminderFluxerCommandHandler';
 import { parseReminderTrigger } from './commands/reminderTrigger';
+import CleanFluxerCommandHandler from './commands/fluxer/handlers/CleanFluxerCommandHandler';
+import { parseCommandTrigger } from './commands/commandTrigger';
+import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 
 const startFluxerClient = async ({
     linkService,
@@ -210,7 +213,7 @@ const startFluxerClient = async ({
             linkService,
             discordEntityResolver,
             threadMemberSyncService,
-            botConfig.roles.copyAllowedRoleIds
+            botConfig.roles.identity
         )
     );
     commandRegistry.registerCommand(
@@ -219,7 +222,7 @@ const startFluxerClient = async ({
             client,
             linkService,
             discordEntityResolver,
-            botConfig.roles.copyAllowedRoleIds
+            botConfig.roles.identity
         )
     );
     commandRegistry.registerCommand(
@@ -257,6 +260,16 @@ const startFluxerClient = async ({
             'rmreminder',
         ]) {
             commandRegistry.registerCommand(name, reminderHandler);
+        }
+    }
+    if (botConfig.clean.enabled) {
+        const cleanHandler = new CleanFluxerCommandHandler(
+            client,
+            botConfig.roles.moderator,
+            botConfig.clean.triggerPrefixes
+        );
+        for (const name of CLEAN_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, cleanHandler);
         }
     }
 
@@ -313,10 +326,13 @@ const startFluxerClient = async ({
         }
     });
 
-    client.on(Events.MessageDelete, async (message: PartialMessage) => {
-        const messageLink = await linkService.getMessageLinkByFluxerMessageId(
-            message.id
-        );
+    // Deletes the bridged Discord copy of the Fluxer message `messageId`
+    // (and its message link), if there is one. Shared by single deletions
+    // and bulk deletions (e.g. the `clean` command), which Fluxer emits as
+    // separate events.
+    async function mirrorFluxerMessageDelete(messageId: string) {
+        const messageLink =
+            await linkService.getMessageLinkByFluxerMessageId(messageId);
         if (!messageLink) return;
 
         try {
@@ -348,7 +364,7 @@ const startFluxerClient = async ({
         if (!msg) {
             logger.error(
                 '❌ Could not find linked Discord message to delete for Fluxer message ID:',
-                message.id
+                messageId
             );
             return;
         }
@@ -357,6 +373,23 @@ const startFluxerClient = async ({
             await msg.delete();
         } catch (error) {
             logger.error('❌ Error deleting message from Discord:', error);
+        }
+    }
+
+    client.on(Events.MessageDelete, async (message: PartialMessage) => {
+        await mirrorFluxerMessageDelete(message.id);
+    });
+
+    client.on(Events.MessageDeleteBulk, async (payload) => {
+        for (const id of payload.ids) {
+            try {
+                await mirrorFluxerMessageDelete(id);
+            } catch (error) {
+                logger.error(
+                    `❌ Error mirroring bulk deletion of Fluxer message ${id} to Discord:`,
+                    error
+                );
+            }
         }
     });
 
@@ -435,8 +468,8 @@ const startFluxerClient = async ({
         }
 
         // Runs a command handler and, when configured, deletes the
-        // invoking message. Shared by the `!b` path and the reminder
-        // short triggers (`?remindme ...`).
+        // invoking message. Shared by the `!b` path and the short
+        // triggers (`?remindme ...`, `?clean ...`).
         const runCommand = async (
             handler: FluxerCommandHandler,
             command: string,
@@ -476,6 +509,17 @@ const startFluxerClient = async ({
                   )
                 : null;
         const isReminderInvocation = reminderTrigger !== null;
+        // `?clean 10` / `!clean 10` (issue #12), handled the same way.
+        const cleanTrigger =
+            botConfig.clean.enabled && !isBotCommand
+                ? parseCommandTrigger(
+                      message.content,
+                      botConfig.clean.triggerPrefixes,
+                      CLEAN_COMMAND_NAMES
+                  )
+                : null;
+        // Short-trigger invocations are never relayed or meowed at.
+        const isShortInvocation = isReminderInvocation || cleanTrigger !== null;
 
         if (isBotCommand) {
             const { command, args } = parseCommandString(
@@ -524,9 +568,20 @@ const startFluxerClient = async ({
                     reminderTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
             }
+        } else if (cleanTrigger && !message.author.bot && !message.webhookId) {
+            const handler = commandRegistry.getCommandHandler(
+                cleanTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    cleanTrigger.command,
+                    cleanTrigger.rawArgs.split(/\s+/).filter(Boolean)
+                );
+            }
         }
 
-        if (message.guildId && !isBotCommand && !isReminderInvocation) {
+        if (message.guildId && !isBotCommand && !isShortInvocation) {
             // Thread channels are often not cached until first seen; resolve
             // once so threads are relayed just like text channels.
             const channel =
@@ -546,7 +601,7 @@ const startFluxerClient = async ({
             message.guildId &&
             !message.author.bot &&
             !message.webhookId &&
-            !isReminderInvocation &&
+            !isShortInvocation &&
             meowService.shouldReply(message.content, message.channelId)
         ) {
             try {

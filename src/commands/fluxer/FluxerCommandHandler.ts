@@ -67,11 +67,30 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
         );
     }
 
-    protected async requirePermission(
+    /** Reply to `message` with a single error-coloured embed. */
+    private async replyAccessDenied(
         message: Message,
-        permission: PermissionResolvable,
-        permissionDisplayName?: string
-    ): Promise<boolean> {
+        description: string
+    ): Promise<void> {
+        await message.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setDescription(description)
+                    .setColor(EmbedColors.Error)
+                    .setFooter(this.footer(message))
+                    .setTimestamp(),
+            ],
+        });
+    }
+
+    /**
+     * The author of `message` as a member of its guild, or null (after
+     * replying "Could not fetch your member information.") when the guild
+     * or the member cannot be resolved.
+     */
+    private async fetchAuthorMember(
+        message: Message
+    ): Promise<GuildMember | null> {
         let authorMember: GuildMember | null = null;
         try {
             const guild = message.guild ?? (await message.resolveGuild());
@@ -90,33 +109,51 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
         }
 
         if (!authorMember) {
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setDescription(
-                            'Could not fetch your member information.'
-                        )
-                        .setColor(EmbedColors.Error)
-                        .setFooter(this.footer(message))
-                        .setTimestamp(),
-                ],
-            });
-            return false;
+            await this.replyAccessDenied(
+                message,
+                'Could not fetch your member information.'
+            );
         }
+        return authorMember;
+    }
+
+    protected async requirePermission(
+        message: Message,
+        permission: PermissionResolvable,
+        permissionDisplayName?: string
+    ): Promise<boolean> {
+        const authorMember = await this.fetchAuthorMember(message);
+        if (!authorMember) return false;
 
         if (!authorMember.permissions.has(permission)) {
             const displayName = permissionDisplayName || permission;
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setDescription(
-                            `You need the \`${displayName}\` permission to use this command.`
-                        )
-                        .setColor(EmbedColors.Error)
-                        .setFooter(this.footer(message))
-                        .setTimestamp(),
-                ],
-            });
+            await this.replyAccessDenied(
+                message,
+                `You need the \`${displayName}\` permission to use this command.`
+            );
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Whether the author holds at least one of `roleIds` in the guild of
+     * `message`. Like {@link requirePermission}, a failure is reported to the
+     * author ("Could not fetch your member information." or "You do not have
+     * a role that is allowed to use this command.") and yields false.
+     */
+    protected async requireRole(
+        message: Message,
+        roleIds: readonly string[]
+    ): Promise<boolean> {
+        const authorMember = await this.fetchAuthorMember(message);
+        if (!authorMember) return false;
+
+        if (!roleIds.some((id) => authorMember.roles.has(id))) {
+            await this.replyAccessDenied(
+                message,
+                'You do not have a role that is allowed to use this command.'
+            );
             return false;
         }
         return true;

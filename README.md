@@ -17,6 +17,7 @@
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
+- Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
 
@@ -136,7 +137,7 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 
 Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with two Fluxer commands: `role`, which also copies roles and thread memberships for someone who has just moved over, and `map`, which records the mapping alone:
 
-- `!b role <@fluxerUser> <discordUserId>` — run on Fluxer, mentioning the Fluxer member and passing the ID of their Discord account. Only members holding one of the Fluxer roles listed in `roles.copyAllowedRoleIds` in the [configuration file](#configuration-file) may run it.
+- `!b role <@fluxerUser> <discordUserId>` — run on Fluxer, mentioning the Fluxer member and passing the ID of their Discord account. Only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.
 
 - `!b map <@fluxerUser> <discordUserId>` — records only the identity mapping, and only when neither account is mapped yet. If one of them already is, the existing mapping is shown and nothing changes; use `!b role` to replace it. Same permission rule as `!b role`.
 
@@ -210,6 +211,58 @@ If the bot was offline when a reminder came due, it is delivered shortly after t
 
 Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted). It runs automatically on startup.
 
+## Moderation
+
+### Clean
+
+Bifröst has a bulk-delete command modelled on [YAGPDB's `clean`](https://help.yagpdb.xyz/docs/core/all-commands/#clean): tell it how many messages to remove, optionally whose and which, and it deletes them from the current channel. It works the same on Discord and on Fluxer, and is a **moderator command** (see [Permissions](#permissions-2) below).
+
+There are three ways to run it:
+
+- `?clean 10`
+- `!clean 10`
+- `!b clean 10` (the normal bot prefix, always available)
+
+The aliases `clear` and `cl` work everywhere `clean` does (`?clear 5`, `!b cl 3`), and a space or capital after the short prefix is fine, so `? Clean 10` as typed on a phone keyboard works too. The short prefixes are set by `clean.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form, and `clean.enabled: false` switches the command off entirely.
+
+**Arguments.** `clean <num> [user]` or `clean [user] <num>`: `num` is how many messages to delete (1–100) and `user`, a mention or a user ID, limits the deletion to that user's messages. Switches can go anywhere after the command:
+
+| Switch | Effect |
+| --- | --- |
+| `-r <regex>` | Only messages whose text matches the regular expression. |
+| `-im` | Invert the regex: only messages that do **not** match. |
+| `-i` | Make the regex case-insensitive. |
+| `-ma <time>` | Max age: only messages younger than the given time. |
+| `-minage <time>` | Min age: only messages older than the given time. |
+| `-nopin` | Leave pinned messages alone. |
+| `-a` | Only messages with attachments. |
+| `-bots` | Only messages written by bots. |
+| `-from <id>` | Start at this message ID: only that message and older ones. |
+| `-to <id>` | Stop at this message ID: only that message and newer ones. |
+
+Times use the reminder [duration syntax](#duration-syntax) (`30m`, `1h30m`, `2d`; a bare number is minutes), and `0` means no limit. Wrap a value in double quotes to keep its spaces: `-r "foo bar"`.
+
+Examples:
+
+- `?clean 20 -bots` — deletes the last 20 bot messages.
+- `?clean 50 @user -ma 1h` — deletes up to 50 of that user's messages from the last hour.
+- `?clean 10 -r "^!"` — deletes the last 10 messages that start with `!`.
+- `?clear 5 -nopin` — deletes the last 5 messages that are not pinned.
+
+#### Limits
+
+- At most **100** messages are deleted per run. Without filters exactly the last `num` messages are looked at; with a user or any switch, up to `num × 50` messages are searched, and never more than the last **1000**.
+- On **Discord**, messages older than two weeks cannot be bulk-deleted, so the search stops at the first one it reaches. Fluxer has no such age limit.
+- The command message itself is never counted and is deleted as well.
+- When it is done, Bifröst posts `Deleted N message(s)! :')` (or `No messages matched.`) and removes that confirmation after 5 seconds.
+- Deleting a bridged message also deletes its copy on the other platform, just like deleting a single message does.
+- Bots cannot use the command, and it only works in servers, not in DMs.
+
+#### Permissions
+
+- **Who may run it.** The member needs at least one of the roles listed in `roles.moderator` in the [configuration file](#configuration-file). Role IDs are matched on the platform the command is run on, and the default (`1561105750388908139`) is a **Fluxer** role, so out of the box nobody can run `clean` on Discord: add a Discord role ID to `roles.moderator` to allow it there.
+- **What the bot needs.** **Manage Messages** and **Read Message History** in the channel.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -241,7 +294,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 
 **Lookup order.** If `BF_CONFIG_FILE` is set, that file is used (startup fails if it does not exist). Otherwise the bot looks for `config.yml`, `config.yaml` and `config.json`, in that order, inside `BF_CONFIG_PATH`, the directory that also holds the SQLite database (`./config` by default; in the Docker image it is `/config`, which the compose files mount from `./config` on the host). The file may be YAML or JSON; the extension decides which parser is used.
 
-**Validation.** Keys you omit keep their defaults. Unknown keys are logged as warnings and ignored. A value of the wrong type (for example `"false"` as a string instead of `false`) stops startup with the offending key path. The bot logs which file it loaded, or that it is using defaults. Edits take effect after a restart.
+**Validation.** Keys you omit keep their defaults. Unknown keys are logged as warnings and ignored. A value of the wrong type (for example `"false"` as a string instead of `false`) stops startup with the offending key path. Renamed keys (currently `roles.copyAllowedRoleIds` → `roles.identity`) still work and log a warning naming the new key. The bot logs which file it loaded, or that it is using defaults. Edits take effect after a restart.
 
 [config.example.yml](config.example.yml) contains every key with its default and a comment; copy it to `<BF_CONFIG_PATH>/config.yml` and change what you need.
 
@@ -252,7 +305,10 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
-| `roles.copyAllowedRoleIds` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run `!b role`; see [Identity mapping](#identity-mapping). Quote the IDs, unquoted numbers lose precision. |
+| `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`); see [Clean](#clean). IDs are matched on the platform the command is run on, so add a Discord role ID to allow `clean` on Discord. Quote the IDs, unquoted numbers lose precision. |
+| `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity commands `!b role` and `!b map`; see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
+| `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
+| `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |

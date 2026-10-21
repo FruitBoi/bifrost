@@ -31,18 +31,52 @@ categories:
     unlinkWhenChannelLeaves: true
 
 roles:
-    # Fluxer role IDs whose members may run `!b map <@user> <discordUserId>`
+    # Every role-based command permission lives in this one section. Each list
+    # names the role IDs whose members may run the commands of that group; a
+    # member needs at least one of them. IDs are matched on the platform the
+    # command is run on: Fluxer role IDs only ever match Fluxer members and
+    # Discord role IDs only Discord members, so list IDs from both platforms
+    # if a group should work on both. Quote the IDs: unquoted numbers lose
+    # precision when parsed.
+
+    # Moderator commands: `clean` (aliases `clear`, `cl`). The default is a
+    # Fluxer role, so nobody can run `clean` on Discord until you add a
+    # Discord role ID here.
+    moderator:
+        - "1561105750388908139"
+    # Identity commands (Fluxer only): `!b map <@user> <discordUserId>`
     # (records the identity mapping if neither account is mapped yet) and
-    # `!b role <@user> <discordUserId>`,
-    # which adds every Fluxer role named like one of that Discord user's roles
-    # to the mentioned Fluxer member, maps the two accounts to each other so
-    # pings of either are bridged to the other (one mapping per account; a
-    # re-run replaces it), and adds the member to every bridged thread the
-    # Discord user is in. Quote the IDs: unquoted numbers lose precision when
-    # parsed. Defaults to the two IDs below.
-    copyAllowedRoleIds:
+    # `!b role <@user> <discordUserId>`, which adds every Fluxer role named
+    # like one of that Discord user's roles to the mentioned Fluxer member,
+    # maps the two accounts to each other so pings of either are bridged to
+    # the other (one mapping per account; a re-run replaces it), and adds the
+    # member to every bridged thread the Discord user is in. This key used to
+    # be called `copyAllowedRoleIds`; the old name is still accepted (with a
+    # warning) and ignored if `identity` is set too.
+    identity:
         - "1561105750388908139"
         - "1561105750388908112"
+
+clean:
+    # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`
+    # messages (1-100) in the channel, or only those by the given user, and
+    # switches narrow it down (`-r <regex>`, `-ma <time>`, `-minage <time>`,
+    # `-nopin`, `-a`, `-bots`, `-from <id>`, `-to <id>`; see the README).
+    # Aliases `clear` and `cl`. It looks through the last 1000 messages at
+    # most; on Discord messages older than two weeks cannot be bulk-deleted.
+    # Works on both Discord and Fluxer, is restricted to roles.moderator, and
+    # deleted bridged messages are deleted on the other side too.
+    enabled: true
+    # Prefixes that trigger `clean` without the bot prefix, so `?clean 10` and
+    # `!clean 10 -bots` work (same for `?clear` and `?cl`). A space and a
+    # capital after the prefix, as phone keyboards add (`? Clean 10`), are
+    # accepted. The bot prefix form `!b clean ...` always works while clean is
+    # enabled. An empty list ([]) disables the shortcuts. `!` is a common
+    # prefix for other bots, so you may want to keep only "?" if they would
+    # answer too. Quote them.
+    triggerPrefixes:
+        - "?"
+        - "!"
 
 meow:
     # Answer Fluxer messages that are nothing but cat noises (meow, mrrp, nya,
@@ -63,8 +97,9 @@ reminders:
     # `?reminders`, `?reminder delete 3`, ...). A space and a capital after
     # the prefix, as phone keyboards add (`? Remindme ...`), are accepted. The
     # bot prefix form `!b remindme ...` always works while reminders are
-    # enabled. An empty list ([]) disables the shortcuts. `!` is a common prefix for other bots, so
-    # you may want to keep only "?" if they would answer too. Quote them.
+    # enabled. An empty list ([]) disables the shortcuts. `!` is a common
+    # prefix for other bots, so you may want to keep only "?" if they would
+    # answer too. Quote them.
     triggerPrefixes:
         - "?"
         - "!"

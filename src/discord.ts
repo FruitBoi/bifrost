@@ -47,6 +47,9 @@ import ReminderDiscordCommandHandler from './commands/discord/handlers/ReminderD
 import ReminderService from './services/reminders/ReminderService';
 import DiscordReminderDeliverer from './services/reminders/DiscordReminderDeliverer';
 import { parseReminderTrigger } from './commands/reminderTrigger';
+import CleanDiscordCommandHandler from './commands/discord/handlers/CleanDiscordCommandHandler';
+import { parseCommandTrigger } from './commands/commandTrigger';
+import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
@@ -206,6 +209,18 @@ const startDiscordClient = async ({
         }
     }
 
+    const cleanEnabled = botConfig.clean.enabled;
+    if (cleanEnabled) {
+        const cleanHandler = new CleanDiscordCommandHandler(
+            client,
+            botConfig.roles.moderator,
+            botConfig.clean.triggerPrefixes
+        );
+        for (const name of CLEAN_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, cleanHandler);
+        }
+    }
+
     client.once(Events.ClientReady, () => {
         logger.info(`💬 Discord bot logged in as ${client.user?.tag}`);
 
@@ -294,12 +309,13 @@ const startDiscordClient = async ({
         }
     });
 
-    client.on(Events.MessageDelete, async (message) => {
-        if (!message.inGuild()) return;
-
-        const messageLink = await linkService.getMessageLinkByDiscordMessageId(
-            message.id
-        );
+    /**
+     * Deletes the bridged Fluxer copy of a Discord message that was deleted
+     * (singly or as part of a bulk delete) and forgets the message link.
+     */
+    async function mirrorDiscordMessageDelete(messageId: string) {
+        const messageLink =
+            await linkService.getMessageLinkByDiscordMessageId(messageId);
         if (!messageLink) return;
 
         try {
@@ -333,7 +349,7 @@ const startDiscordClient = async ({
         if (!msg) {
             logger.error(
                 '❌ Could not find linked Fluxer message to delete for Discord message ID:',
-                message.id
+                messageId
             );
             return;
         }
@@ -342,6 +358,27 @@ const startDiscordClient = async ({
             await msg.delete();
         } catch (error) {
             logger.error('❌ Error deleting message from Fluxer:', error);
+        }
+    }
+
+    client.on(Events.MessageDelete, async (message) => {
+        if (!message.inGuild()) return;
+        await mirrorDiscordMessageDelete(message.id);
+    });
+
+    // Bulk deletes (e.g. the `clean` command) arrive as one event instead of
+    // a MessageDelete per message; mirror each of them to Fluxer.
+    client.on(Events.MessageBulkDelete, async (messages, channel) => {
+        if (!channel.isTextBased() || !channel.guild) return;
+        for (const id of messages.keys()) {
+            try {
+                await mirrorDiscordMessageDelete(id);
+            } catch (error) {
+                logger.error(
+                    '❌ Error mirroring a bulk-deleted Discord message to Fluxer:',
+                    error
+                );
+            }
         }
     });
 
@@ -417,6 +454,16 @@ const startDiscordClient = async ({
                   )
                 : null;
         const isReminderInvocation = reminderTrigger !== null;
+        // Likewise `?clean 10` / `!clean 10`.
+        const cleanTrigger =
+            cleanEnabled && !isBotCommand
+                ? parseCommandTrigger(
+                      message.content,
+                      botConfig.clean.triggerPrefixes,
+                      CLEAN_COMMAND_NAMES
+                  )
+                : null;
+        const isShortInvocation = isReminderInvocation || cleanTrigger !== null;
 
         const runCommand = async (
             handler: DiscordCommandHandler,
@@ -480,6 +527,17 @@ const startDiscordClient = async ({
                     reminderTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
             }
+        } else if (cleanTrigger && !message.author.bot) {
+            const handler = commandRegistry.getCommandHandler(
+                cleanTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    cleanTrigger.command,
+                    cleanTrigger.rawArgs.split(/\s+/).filter(Boolean)
+                );
+            }
         }
 
         if (
@@ -487,7 +545,7 @@ const startDiscordClient = async ({
             (message.channel instanceof TextChannel ||
                 message.channel.isThread()) &&
             !isBotCommand &&
-            !isReminderInvocation
+            !isShortInvocation
         ) {
             await messageRelay.relayMessage(message);
         }

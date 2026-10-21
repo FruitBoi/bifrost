@@ -38,13 +38,37 @@ export interface BotConfig {
         /** Drop the link when a channel is moved out of a linked category. */
         unlinkWhenChannelLeaves: boolean;
     };
+    /**
+     * Role-based command permissions, all in one place (issue #12). Each
+     * list names the role IDs whose members may run the commands of that
+     * group; a member needs at least one of them on the platform the command
+     * is run on (Fluxer role IDs only ever match Fluxer members, Discord
+     * role IDs only Discord members). IDs must be quoted strings: unquoted
+     * they are parsed as numbers and lose precision.
+     */
     roles: {
+        /** Moderator commands: `clean`. */
+        moderator: string[];
         /**
-         * Fluxer role IDs whose members may run the `role` command, which
-         * copies a Discord user's roles to a Fluxer member. IDs must be quoted
-         * strings: unquoted they are parsed as numbers and lose precision.
+         * Identity commands: `role` (copies a Discord user's roles to a
+         * Fluxer member and maps the accounts) and `map`. Formerly
+         * `roles.copyAllowedRoleIds`, which is still accepted as an alias.
          */
-        copyAllowedRoleIds: string[];
+        identity: string[];
+    };
+    clean: {
+        /**
+         * Enable the YAGPDB-style `clean` command (aliases `clear`, `cl`),
+         * which bulk-deletes recent messages in the current channel. See
+         * `services/clean/`.
+         */
+        enabled: boolean;
+        /**
+         * Prefixes that trigger `clean` directly, without the bot prefix
+         * (`?clean 10`, `!clean 10 -bots`). `BF_COMMAND_PREFIX` keeps
+         * working too (`!b clean 10`). An empty list disables the shortcuts.
+         */
+        triggerPrefixes: string[];
     };
     meow: {
         /**
@@ -78,8 +102,10 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     threads: { mirrorRenames: true, mirrorDeletes: false },
     categories: { mirrorChannelRenames: true, unlinkWhenChannelLeaves: true },
     roles: {
-        copyAllowedRoleIds: ['1561105750388908139', '1561105750388908112'],
+        moderator: ['1561105750388908139'],
+        identity: ['1561105750388908139', '1561105750388908112'],
     },
+    clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     meow: { enabled: true },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
 };
@@ -99,16 +125,91 @@ function isPlainObject(value: unknown): value is Plain {
 }
 
 /**
+ * Renamed keys that are still accepted: the old dotted path maps to the new
+ * one. An old key is moved to its new path unless the new path is also
+ * given, in which case the old key is ignored. Either way it is reported.
+ */
+export const DEPRECATED_CONFIG_KEYS: Record<string, string> = {
+    'roles.copyAllowedRoleIds': 'roles.identity',
+};
+
+/** A deprecated key found in the config file and the key that replaces it. */
+export interface DeprecatedConfigKey {
+    key: string;
+    replacement: string;
+    /** False when the replacement was given as well, so the old key was ignored. */
+    applied: boolean;
+}
+
+function getPath(obj: Plain, path: string[]): unknown {
+    let current: unknown = obj;
+    for (const part of path) {
+        if (!isPlainObject(current) || !(part in current)) return undefined;
+        current = current[part];
+    }
+    return current;
+}
+
+/**
+ * Moves deprecated keys to their replacements on a copy of `raw` (only the
+ * mappings along the touched paths are copied).
+ */
+function applyDeprecatedKeys(raw: Plain): {
+    raw: Plain;
+    deprecatedKeys: DeprecatedConfigKey[];
+} {
+    const deprecatedKeys: DeprecatedConfigKey[] = [];
+    let out = raw;
+    for (const [oldKey, newKey] of Object.entries(DEPRECATED_CONFIG_KEYS)) {
+        const oldPath = oldKey.split('.');
+        if (getPath(out, oldPath) === undefined) continue;
+        const newPath = newKey.split('.');
+        const applied = getPath(out, newPath) === undefined;
+        deprecatedKeys.push({ key: oldKey, replacement: newKey, applied });
+
+        const value = getPath(out, oldPath);
+        out = { ...out };
+        // Remove the old key.
+        let parent = out;
+        for (const part of oldPath.slice(0, -1)) {
+            parent[part] = { ...(parent[part] as Plain) };
+            parent = parent[part] as Plain;
+        }
+        delete parent[oldPath[oldPath.length - 1]];
+        if (!applied) continue;
+        // Insert the value at the new path, creating mappings as needed.
+        parent = out;
+        for (const part of newPath.slice(0, -1)) {
+            parent[part] = isPlainObject(parent[part])
+                ? { ...(parent[part] as Plain) }
+                : {};
+            parent = parent[part] as Plain;
+        }
+        parent[newPath[newPath.length - 1]] = value;
+    }
+    return { raw: out, deprecatedKeys };
+}
+
+/**
  * Deep-merges `raw` over `defaults`, validating that every provided value has
- * the same type as the default. Returns the merged config and the dotted
- * paths of keys that are not part of the schema.
+ * the same type as the default. Returns the merged config, the dotted paths
+ * of keys that are not part of the schema, and the deprecated keys that were
+ * translated (see {@link DEPRECATED_CONFIG_KEYS}).
  */
 export function mergeBotConfig(
     raw: unknown,
     defaults: BotConfig = DEFAULT_BOT_CONFIG
-): { config: BotConfig; unknownKeys: string[] } {
+): {
+    config: BotConfig;
+    unknownKeys: string[];
+    deprecatedKeys: DeprecatedConfigKey[];
+} {
     if (raw === null || raw === undefined) {
-        return { config: structuredClone(defaults), unknownKeys: [] };
+        return {
+            config: structuredClone(defaults),
+            unknownKeys: [],
+            deprecatedKeys: [],
+        };
     }
     if (!isPlainObject(raw)) {
         throw new BotConfigError(
@@ -116,6 +217,8 @@ export function mergeBotConfig(
         );
     }
 
+    const translated = applyDeprecatedKeys(raw);
+    const input = translated.raw;
     const unknownKeys: string[] = [];
 
     function merge<T extends Plain>(base: T, input: Plain, prefix: string): T {
@@ -158,10 +261,11 @@ export function mergeBotConfig(
     return {
         config: merge(
             structuredClone(defaults) as unknown as Plain,
-            raw,
+            input,
             ''
         ) as unknown as BotConfig,
         unknownKeys,
+        deprecatedKeys: translated.deprecatedKeys,
     };
 }
 
@@ -181,6 +285,7 @@ export interface LoadedBotConfig {
     /** Absolute path of the file used, or null when defaults apply. */
     source: string | null;
     unknownKeys: string[];
+    deprecatedKeys: DeprecatedConfigKey[];
 }
 
 /** Resolves which config file to read, or null when none exists. */
@@ -214,11 +319,12 @@ export function loadBotConfig(
             config: structuredClone(DEFAULT_BOT_CONFIG),
             source: null,
             unknownKeys: [],
+            deprecatedKeys: [],
         };
     }
     const raw = parseBotConfigText(fs.readFileSync(source, 'utf8'), source);
-    const { config, unknownKeys } = mergeBotConfig(raw);
-    return { config, source, unknownKeys };
+    const { config, unknownKeys, deprecatedKeys } = mergeBotConfig(raw);
+    return { config, source, unknownKeys, deprecatedKeys };
 }
 
 // Discord and Fluxer use the same permission bit values. The masks exceed 32
