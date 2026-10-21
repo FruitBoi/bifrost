@@ -101,6 +101,16 @@ export interface DownloadedImage {
 
 export type ImageDownloader = (url: string) => Promise<DownloadedImage>;
 
+/**
+ * How often one bulk upload is attempted when Fluxer answers 429. The REST
+ * client only retries rate limits on GET-like requests, so bulk POSTs
+ * surface them as `RateLimitError`s (`statusCode` 429, `retryAfter` in
+ * seconds) and the transfer has to wait and retry itself.
+ */
+export const RATE_LIMIT_MAX_ATTEMPTS = 5;
+const RATE_LIMIT_FALLBACK_WAIT_MS = 5_000;
+const RATE_LIMIT_MAX_WAIT_MS = 60_000;
+
 /** Message shown when the Fluxer API cooldown prevents uploading. */
 const API_BLOCKED_MESSAGE =
     'The Fluxer API is temporarily blocked; try again later.';
@@ -136,6 +146,32 @@ function emptyReport(): ExpressionKindReport {
 function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * How long to wait before retrying after `err`, or null when `err` is not a
+ * rate limit. Honours `retryAfter` (seconds) when present, within a cap.
+ */
+export function rateLimitWaitMs(err: unknown): number | null {
+    if (typeof err !== 'object' || err === null) return null;
+    const { status, statusCode, retryAfter } = err as {
+        status?: unknown;
+        statusCode?: unknown;
+        retryAfter?: unknown;
+    };
+    if (status !== 429 && statusCode !== 429) return null;
+    const seconds =
+        typeof retryAfter === 'number' && Number.isFinite(retryAfter)
+            ? retryAfter
+            : null;
+    const ms =
+        seconds === null
+            ? RATE_LIMIT_FALLBACK_WAIT_MS
+            : Math.max(0, seconds * 1000);
+    return Math.min(ms, RATE_LIMIT_MAX_WAIT_MS);
+}
+
+const defaultSleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * A user-facing error wrapping the failure of one transfer step. Carries the
@@ -186,6 +222,7 @@ export default class ExpressionTransferService {
     private readonly discordEntityResolver: DiscordEntityResolver;
     private readonly fluxerEntityResolver: FluxerEntityResolver;
     private readonly downloadImage: ImageDownloader;
+    private readonly sleep: (ms: number) => Promise<void>;
     /** Fluxer guild IDs with a transfer in flight. */
     private readonly running = new Set<string>();
 
@@ -194,10 +231,13 @@ export default class ExpressionTransferService {
         fluxerEntityResolver: FluxerEntityResolver;
         /** Defaults to the global `fetch`; injectable for tests. */
         downloadImage?: ImageDownloader;
+        /** Waits before a rate-limited upload is retried; injectable for tests. */
+        sleep?: (ms: number) => Promise<void>;
     }) {
         this.discordEntityResolver = deps.discordEntityResolver;
         this.fluxerEntityResolver = deps.fluxerEntityResolver;
         this.downloadImage = deps.downloadImage ?? fetchImage;
+        this.sleep = deps.sleep ?? defaultSleep;
     }
 
     /** Whether a transfer into the given Fluxer guild is currently running. */
@@ -460,7 +500,7 @@ export default class ExpressionTransferService {
 
             let result: BulkResult;
             try {
-                result = await create(payloads);
+                result = await this.createWithRateLimitRetry(create, payloads);
             } catch (err) {
                 const blocked = isFluxerApiBlockError(err);
                 if (blocked) markFluxerApiBlocked();
@@ -497,6 +537,31 @@ export default class ExpressionTransferService {
                     name: payload.name,
                     reason: 'no result reported by Fluxer',
                 });
+            }
+        }
+    }
+
+    /**
+     * Runs one bulk create, waiting and retrying when Fluxer rate-limits it
+     * (up to {@link RATE_LIMIT_MAX_ATTEMPTS} attempts). Any other rejection,
+     * and the last rate limit, propagate to the caller.
+     */
+    private async createWithRateLimitRetry<P extends { name: string }>(
+        create: BulkCreate<P>,
+        payloads: P[]
+    ): Promise<BulkResult> {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                return await create(payloads);
+            } catch (err) {
+                const waitMs = rateLimitWaitMs(err);
+                if (waitMs === null || attempt >= RATE_LIMIT_MAX_ATTEMPTS) {
+                    throw err;
+                }
+                logger.info(
+                    `⏳ Fluxer rate-limited a bulk expression upload; retrying in ${Math.ceil(waitMs / 1000)} s (attempt ${attempt}/${RATE_LIMIT_MAX_ATTEMPTS})`
+                );
+                await this.sleep(waitMs);
             }
         }
     }

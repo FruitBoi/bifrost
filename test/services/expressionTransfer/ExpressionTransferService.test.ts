@@ -4,6 +4,8 @@ import { PermissionFlags } from '@fluxerjs/core';
 import ExpressionTransferService, {
     ExpressionTransferInProgressError,
     ImageDownloader,
+    RATE_LIMIT_MAX_ATTEMPTS,
+    rateLimitWaitMs,
 } from '../../../src/services/expressionTransfer/ExpressionTransferService';
 import DiscordEntityResolver from '../../../src/services/entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from '../../../src/services/entityResolver/FluxerEntityResolver';
@@ -168,6 +170,7 @@ function makeService({
     discordGuild = makeDiscordGuild() as FakeDiscordGuild | null,
     fluxerGuild = makeFluxerGuild() as FakeFluxerGuild | null,
     downloadImage = vi.fn(downloadOk) as ImageDownloader,
+    sleep = vi.fn(async () => {}),
 } = {}) {
     const invalidateEmojis = vi.fn();
     const discordEntityResolver = {
@@ -185,8 +188,17 @@ function makeService({
         discordEntityResolver,
         fluxerEntityResolver,
         downloadImage,
+        sleep,
     });
-    return { service, invalidateEmojis, downloadImage };
+    return { service, invalidateEmojis, downloadImage, sleep };
+}
+
+/** What `@fluxerjs/rest` throws on a 429 for a non-GET request. */
+function rateLimitError(retryAfter?: number) {
+    return Object.assign(new Error('You are being rate limited.'), {
+        statusCode: 429,
+        retryAfter,
+    });
 }
 
 function dataUrlOf(url: string): string {
@@ -714,5 +726,94 @@ describe('ExpressionTransferService guards', () => {
         const report = await service.transfer(DISCORD_GUILD, FLUXER_GUILD);
 
         expect(report.emojis.created).toEqual(['pepe']);
+    });
+});
+
+describe('ExpressionTransferService rate limits', () => {
+    const emojis = Array.from({ length: 12 }, (_, i) => ({
+        id: `e${String(i).padStart(2, '0')}`,
+        name: `emoji_${String(i).padStart(2, '0')}`,
+    }));
+
+    it('waits for retryAfter and retries a rate-limited bulk upload', async () => {
+        const discordGuild = makeDiscordGuild(emojis);
+        const fluxerGuild = makeFluxerGuild();
+        fluxerGuild.createEmojisBulk
+            .mockRejectedValueOnce(rateLimitError(2))
+            .mockRejectedValueOnce(rateLimitError(0.5));
+        const { service, sleep } = makeService({ discordGuild, fluxerGuild });
+
+        const report = await service.transfer(DISCORD_GUILD, FLUXER_GUILD, {
+            kinds: ['emojis'],
+        });
+
+        // Chunk one: two 429s, then success; chunk two: success at once.
+        expect(fluxerGuild.createEmojisBulk).toHaveBeenCalledTimes(4);
+        expect(sleep.mock.calls).toEqual([[2000], [500]]);
+        expect(report.emojis.created).toHaveLength(12);
+        expect(report.emojis.failed).toEqual([]);
+    });
+
+    it('fails the chunk after the last rate-limited attempt and continues', async () => {
+        const discordGuild = makeDiscordGuild(emojis);
+        const fluxerGuild = makeFluxerGuild();
+        for (let i = 0; i < RATE_LIMIT_MAX_ATTEMPTS; i++) {
+            fluxerGuild.createEmojisBulk.mockRejectedValueOnce(
+                rateLimitError()
+            );
+        }
+        const { service, sleep } = makeService({ discordGuild, fluxerGuild });
+
+        const report = await service.transfer(DISCORD_GUILD, FLUXER_GUILD, {
+            kinds: ['emojis'],
+        });
+
+        expect(fluxerGuild.createEmojisBulk).toHaveBeenCalledTimes(
+            RATE_LIMIT_MAX_ATTEMPTS + 1
+        );
+        // No retryAfter: the fallback wait, once per retry.
+        expect(sleep).toHaveBeenCalledTimes(RATE_LIMIT_MAX_ATTEMPTS - 1);
+        expect(sleep).toHaveBeenCalledWith(5000);
+        expect(report.emojis.failed).toHaveLength(10);
+        expect(report.emojis.failed[0].reason).toBe(
+            'You are being rate limited.'
+        );
+        expect(report.emojis.created).toEqual(['emoji_10', 'emoji_11']);
+    });
+
+    it('does not retry other rejections', async () => {
+        const discordGuild = makeDiscordGuild(emojis.slice(0, 3));
+        const fluxerGuild = makeFluxerGuild();
+        fluxerGuild.createEmojisBulk.mockRejectedValueOnce(
+            Object.assign(new Error('Forbidden'), { statusCode: 403 })
+        );
+        const { service, sleep } = makeService({ discordGuild, fluxerGuild });
+
+        const report = await service.transfer(DISCORD_GUILD, FLUXER_GUILD, {
+            kinds: ['emojis'],
+        });
+
+        expect(fluxerGuild.createEmojisBulk).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+        expect(report.emojis.failed).toHaveLength(3);
+    });
+});
+
+describe('rateLimitWaitMs', () => {
+    it('is null for anything but a 429', () => {
+        expect(rateLimitWaitMs(null)).toBeNull();
+        expect(rateLimitWaitMs(new Error('x'))).toBeNull();
+        expect(rateLimitWaitMs({ statusCode: 500, retryAfter: 3 })).toBeNull();
+    });
+
+    it('uses retryAfter seconds, a fallback without it, and a cap', () => {
+        expect(rateLimitWaitMs({ statusCode: 429, retryAfter: 1.5 })).toBe(
+            1500
+        );
+        expect(rateLimitWaitMs({ status: 429 })).toBe(5000);
+        expect(rateLimitWaitMs({ statusCode: 429, retryAfter: 600 })).toBe(
+            60_000
+        );
+        expect(rateLimitWaitMs({ statusCode: 429, retryAfter: -1 })).toBe(0);
     });
 });
