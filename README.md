@@ -166,7 +166,7 @@ There are three ways to run the commands:
 - `!remindme 1h30min take the pizza out`
 - `!b remindme 1h30min take the pizza out` (the normal bot prefix, always available)
 
-The short `?` and `!` forms work for every reminder command and alias below (`?reminders`, `!reminder delete 3`, …). They are set by `reminders.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form, and `reminders.enabled: false` switches reminders off entirely. Like other commands, these messages are not bridged to the other platform and are deleted when `BF_DELETE_INVOCATION` is on.
+The short `?` and `!` forms work for every reminder command and alias below (`?reminders`, `!reminder delete 3`, …), and a space or capital after the prefix is fine, so `? Remindme 1h30min …` as typed on a phone keyboard works too. They are set by `reminders.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form, and `reminders.enabled: false` switches reminders off entirely. Like other commands, these messages are not bridged to the other platform and are deleted when `BF_DELETE_INVOCATION` is on.
 
 ### Commands
 

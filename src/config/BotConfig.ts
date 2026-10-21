@@ -64,7 +64,9 @@ export interface BotConfig {
          * Prefixes that trigger the reminder commands directly, without the
          * bot prefix: with the defaults `?remindme 1h30m text` and
          * `!remindme 1h30m text` both work (so do `?reminders`,
-         * `?reminder delete 3`, ...). `BF_COMMAND_PREFIX` keeps working too
+         * `?reminder delete 3`, ... and `? Remindme 1h30m text` with the
+         * space and capital phone keyboards add). `BF_COMMAND_PREFIX` keeps
+         * working too
          * (`!b remindme ...`). An empty list disables the shortcuts.
          */
         triggerPrefixes: string[];

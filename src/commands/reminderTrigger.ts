@@ -2,8 +2,9 @@
  * Direct triggers for the reminder commands (issue #9): besides the normal
  * bot prefix (`!b remindme ...`), the reminder commands can be invoked with
  * short prefixes such as `?remindme ...` or `!remindme ...` (configured in
- * `reminders.triggerPrefixes`). Only the command names below are reachable
- * this way; every other command still needs the bot prefix.
+ * `reminders.triggerPrefixes`); `? Remindme ...` works too. Only the command
+ * names below are reachable this way; every other command still needs the
+ * bot prefix.
  */
 
 /** Command words (lower case) that the short prefixes may trigger. */
@@ -37,9 +38,12 @@ function isReminderCommandName(word: string): word is ReminderCommandName {
 /**
  * Recognises `<prefix><command>` at the start of `content` for any of the
  * given prefixes (checked in order; the first prefix that matches wins) and
- * any reminder command name, case-insensitively. The command word must be
- * followed by whitespace or the end of the message, so `?remindmeow` is not
- * a trigger. Returns null when the message is not a reminder invocation.
+ * any reminder command name, case-insensitively. Whitespace between the
+ * prefix and the command word is allowed, so `? Remindme 1h x` (what a phone
+ * keyboard makes of `?remindme`, with its automatic space and capital after
+ * punctuation) works like `?remindme 1h x`. The command word must be followed
+ * by whitespace or the end of the message, so `?remindmeow` is not a trigger.
+ * Returns null when the message is not a reminder invocation.
  */
 export function parseReminderTrigger(
     content: string | null | undefined,
@@ -49,7 +53,7 @@ export function parseReminderTrigger(
     for (const prefix of prefixes) {
         if (!prefix || !content.startsWith(prefix)) continue;
         const rest = content.slice(prefix.length);
-        const match = /^(\S+)(?:\s+|$)/.exec(rest);
+        const match = /^\s*(\S+)(?:\s+|$)/.exec(rest);
         if (!match) continue;
         const word = match[1].toLowerCase();
         if (!isReminderCommandName(word)) continue;

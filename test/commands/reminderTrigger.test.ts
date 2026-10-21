@@ -37,6 +37,30 @@ describe('parseReminderTrigger', () => {
         });
     });
 
+    it('allows whitespace between the prefix and the command word', () => {
+        // Phone keyboards add a space and a capital after punctuation.
+        expect(parseReminderTrigger('? Remindme 1h x', prefixes)).toEqual({
+            command: 'remindme',
+            rawArgs: '1h x',
+        });
+        expect(parseReminderTrigger('! Reminders', prefixes)).toEqual({
+            command: 'reminders',
+            rawArgs: '',
+        });
+        expect(
+            parseReminderTrigger('?  \treminder delete 3', prefixes)
+        ).toEqual({ command: 'reminder', rawArgs: 'delete 3' });
+        expect(parseReminderTrigger('?\nremindme 1h x', prefixes)).toEqual({
+            command: 'remindme',
+            rawArgs: '1h x',
+        });
+        expect(parseReminderTrigger('? ', prefixes)).toBeNull();
+        expect(parseReminderTrigger('? remindmeow', prefixes)).toBeNull();
+        expect(parseReminderTrigger('? ping', prefixes)).toBeNull();
+        // The whitespace is not part of the prefix match: '?' must still be first.
+        expect(parseReminderTrigger(' ? remindme 1h', prefixes)).toBeNull();
+    });
+
     it.each([...REMINDER_COMMAND_NAMES])('recognises %s', (name) => {
         expect(parseReminderTrigger(`?${name}`, prefixes)?.command).toBe(name);
         expect(parseReminderTrigger(`!${name} a b`, prefixes)).toEqual({
@@ -91,7 +115,6 @@ describe('parseReminderTrigger', () => {
         expect(parseReminderTrigger('hello ?remindme 1h', prefixes)).toBeNull();
         expect(parseReminderTrigger(' ?remindme 1h', prefixes)).toBeNull();
         expect(parseReminderTrigger('?', prefixes)).toBeNull();
-        expect(parseReminderTrigger('? remindme 1h', prefixes)).toBeNull();
         expect(parseReminderTrigger('', prefixes)).toBeNull();
         expect(parseReminderTrigger(null, prefixes)).toBeNull();
         expect(parseReminderTrigger(undefined, prefixes)).toBeNull();
@@ -108,6 +131,8 @@ describe('stripReminderInvocation', () => {
             '1h  x\ny'
         );
         expect(stripReminderInvocation('!b reminders', all)).toBe('');
+        expect(stripReminderInvocation('? Remindme 1h x', all)).toBe('1h x');
+        expect(stripReminderInvocation('!b  Remindme 1h x', all)).toBe('1h x');
     });
 
     it('returns null when the content is not a reminder invocation', () => {

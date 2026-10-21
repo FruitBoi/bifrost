@@ -145,12 +145,12 @@ const commandList: Command[] = [
         name: 'remindme',
         discord: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
             usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
         },
         fluxer: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
             usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
         },
     },

@@ -60,9 +60,10 @@ reminders:
     enabled: true
     # Prefixes that trigger the reminder commands without the bot prefix, so
     # `?remindme 1h30min take the pizza out` and `!remindme ...` work (same for
-    # `?reminders`, `?reminder delete 3`, ...). The bot prefix form
-    # `!b remindme ...` always works while reminders are enabled. An empty list
-    # ([]) disables the shortcuts. `!` is a common prefix for other bots, so
+    # `?reminders`, `?reminder delete 3`, ...). A space and a capital after
+    # the prefix, as phone keyboards add (`? Remindme ...`), are accepted. The
+    # bot prefix form `!b remindme ...` always works while reminders are
+    # enabled. An empty list ([]) disables the shortcuts. `!` is a common prefix for other bots, so
     # you may want to keep only "?" if they would answer too. Quote them.
     triggerPrefixes:
         - "?"
