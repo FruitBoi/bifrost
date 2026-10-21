@@ -11,6 +11,7 @@ import MessageQueueService, { toSerializable } from '../MessageQueueService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import FluxerEntityResolver from '../entityResolver/FluxerEntityResolver';
 import { ChannelLink } from '../../db/entities/ChannelLink';
+import { GuildLink } from '../../db/entities/GuildLink';
 import { LinkService } from '../LinkService';
 import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
@@ -74,11 +75,46 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         return null;
     }
 
+    public async buildPayload(
+        message: OmitPartialGroupDMChannel<Message<boolean>>,
+        guildLink: GuildLink
+    ): Promise<WebhookMessageData> {
+        if (message.type === MessageType.UserJoin) {
+            return {
+                content: formatJoinMessage(message.author.username, 'discord'),
+                username: message.client.user?.username || 'Bifröst',
+                avatarURL: message.client.user?.avatarURL() || '',
+            };
+        }
+        const fluxerEmojis = await this.fluxerEntityResolver.fetchEmojis(
+            guildLink.fluxerGuildId
+        );
+        return this.getMessageTransformer().transformMessage(
+            message,
+            fluxerEmojis
+        );
+    }
+
+    public async sendPayload(
+        link: ChannelLink,
+        payload: WebhookMessageData
+    ): Promise<{ messageId: string }> {
+        const webhookService = this.getWebhookService();
+        const webhook = await webhookService.getFluxerWebhook(
+            link.fluxerWebhookId,
+            link.fluxerWebhookToken
+        );
+        return webhookService.sendMessageViaFluxerWebhook(
+            webhook,
+            payload,
+            link.fluxerThreadId
+        );
+    }
+
     public async relayMessage(
         message: OmitPartialGroupDMChannel<Message<boolean>>
     ): Promise<void> {
         const linkService = this.getLinkService();
-        const webhookService = this.getWebhookService();
 
         if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
 
@@ -97,29 +133,13 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         );
         if (!guildLink) return;
 
-        const fluxerThreadId = linkedChannel.fluxerThreadId;
         // A webhook/integration author has no user id to ping on Fluxer.
         const sourceAuthorId = message.webhookId
             ? undefined
             : message.author.id;
 
         // Build payload before attempting send so it can be queued on failure
-        let msg: WebhookMessageData;
-        if (message.type === MessageType.UserJoin) {
-            msg = {
-                content: formatJoinMessage(message.author.username, 'discord'),
-                username: message.client.user?.username || 'Bifröst',
-                avatarURL: message.client.user?.avatarURL() || '',
-            };
-        } else {
-            const fluxerEmojis = await this.fluxerEntityResolver.fetchEmojis(
-                guildLink.fluxerGuildId
-            );
-            msg = await this.getMessageTransformer().transformMessage(
-                message,
-                fluxerEmojis
-            );
-        }
+        const msg = await this.buildPayload(message, guildLink);
 
         if (isFluxerApiBlocked()) {
             logger.debug(
@@ -135,17 +155,10 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         }
 
         try {
-            const webhook = await webhookService.getFluxerWebhook(
-                linkedChannel.fluxerWebhookId,
-                linkedChannel.fluxerWebhookToken
+            const { messageId: webhookMessageId } = await this.sendPayload(
+                linkedChannel,
+                msg
             );
-
-            const { messageId: webhookMessageId } =
-                await webhookService.sendMessageViaFluxerWebhook(
-                    webhook,
-                    msg,
-                    fluxerThreadId
-                );
 
             if (message.type !== MessageType.UserJoin) {
                 await linkService.createMessageLink({

@@ -10,6 +10,8 @@ import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCa
 import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import { SequelizeUserLinkRepository } from './db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
+import HistoryTransferService from './services/history/HistoryTransferService';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -174,6 +176,18 @@ const main = async () => {
     if (!botConfig.reminders.enabled) {
         logger.info('Config: reminders are disabled (reminders.enabled=false)');
     }
+    // History transfer (issue #16): one background queue for both platforms;
+    // transferred messages are remembered so a re-run skips them.
+    const historyMessageRepo = new SequelizeHistoryMessageRepository();
+    linkService.setHistoryMessageRepository(historyMessageRepo);
+    const historyService = new HistoryTransferService(historyMessageRepo, {
+        delayMs: botConfig.history.delayMs,
+    });
+    if (!botConfig.history.enabled) {
+        logger.info(
+            'Config: history transfer is disabled (history.enabled=false)'
+        );
+    }
 
     const FLUXER_DOWN_THRESHOLD = 5; // 5 × 30s = 2.5 min before restart
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
@@ -256,6 +270,7 @@ const main = async () => {
         dbStatsService,
         botConfig,
         reminderService,
+        historyService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
@@ -378,6 +393,7 @@ const main = async () => {
             dbStatsService,
             botConfig,
             reminderService,
+            historyService,
         }),
         connectFluxer(),
     ]);

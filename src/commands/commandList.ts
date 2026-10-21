@@ -203,6 +203,25 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'history',
+        discord: {
+            description:
+                "Copies this linked channel's or thread's message history to its Fluxer counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles configured in `roles.moderator`.",
+            usageArgs: [
+                '[num | all | confirm | status | stop]',
+                '[-ma <time>] [-after <id>] [-before <id>] [-digest] [-notime]',
+            ],
+        },
+        fluxer: {
+            description:
+                "Copies this linked channel's or thread's message history to its Discord counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles configured in `roles.moderator`.",
+            usageArgs: [
+                '[num | all | confirm | status | stop]',
+                '[-ma <time>] [-after <id>] [-before <id>] [-digest] [-notime]',
+            ],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:

@@ -12,9 +12,11 @@ import * as voiceLinks from '../../src/db/migrations/00006-voice-links';
 import * as messageLinkAuthors from '../../src/db/migrations/00007-message-link-authors';
 import * as userLinks from '../../src/db/migrations/00008-user-links';
 import * as reminders from '../../src/db/migrations/00009-reminders';
+import * as historyMessages from '../../src/db/migrations/00010-history-messages';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
+import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
 import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
@@ -64,6 +66,11 @@ const umzug = new Umzug({
             name: '00009-reminders.js',
             up: reminders.up,
             down: reminders.down,
+        },
+        {
+            name: '00010-history-messages.js',
+            up: historyMessages.up,
+            down: historyMessages.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1113,6 +1120,213 @@ describe('migration 00009-reminders', () => {
         await umzug.up();
         expect(await executed()).toContain('00009-reminders.js');
         expect(await qi.tableExists('reminders')).toBe(true);
+        expect(await repo.count()).toBe(0);
+    });
+});
+
+describe('migration 00010-history-messages', () => {
+    const EXECUTED_THROUGH_00009 = [
+        '00001-baseline.js',
+        '00002-add-channel-link-indexes.js',
+        '00003-add-thread-links.js',
+        '00004-location-links.js',
+        '00005-category-links.js',
+        '00006-voice-links.js',
+        '00007-message-link-authors.js',
+        '00008-user-links.js',
+        '00009-reminders.js',
+    ];
+
+    it('adds history_messages with its indexes, works with the repository, and rolls back cleanly', async () => {
+        // Start from a deployment that ran 00009: links exist, no history yet.
+        await umzug.down({ to: '00010-history-messages.js' });
+        expect(await executed()).toEqual(EXECUTED_THROUGH_00009);
+        expect(await qi.tableExists('history_messages')).toBe(false);
+        await qi.bulkInsert('guild_links', [
+            {
+                id: 'g-hist',
+                discordGuildId: 'dg-hist',
+                fluxerGuildId: 'fg-hist',
+                createdAt: now,
+            },
+        ]);
+        await qi.bulkInsert('channel_links', [
+            {
+                id: 'c-hist',
+                guildLinkId: 'g-hist',
+                discordChannelId: 'dc-hist',
+                fluxerChannelId: 'fc-hist',
+                discordWebhookId: 'dw-hist',
+                discordWebhookToken: 't',
+                fluxerWebhookId: 'fw-hist',
+                fluxerWebhookToken: 't',
+                linkId: 'hist1',
+                autoSyncThreads: false,
+                createdAt: now,
+            },
+        ]);
+
+        await umzug.up({ to: '00010-history-messages.js' });
+        expect(await executed()).toEqual([
+            ...EXECUTED_THROUGH_00009,
+            '00010-history-messages.js',
+        ]);
+        expect(await qi.tableExists('history_messages')).toBe(true);
+
+        const cols = await qi.describeTable('history_messages');
+        expect(cols.id).toMatchObject({ primaryKey: true });
+        expect(cols.guildLinkId).toMatchObject({ allowNull: false });
+        expect(cols.channelLinkId).toMatchObject({ allowNull: false });
+        expect(cols.sourcePlatform).toMatchObject({ allowNull: false });
+        expect(cols.sourceMessageId).toMatchObject({ allowNull: false });
+        expect(cols.targetMessageId).toMatchObject({ allowNull: false });
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('history_messages');
+        const byName = (name: string) => indexes.find((i) => i.name === name);
+        expect(byName('history_messages_source')).toMatchObject({
+            unique: true,
+            fields: [
+                { attribute: 'sourcePlatform' },
+                { attribute: 'sourceMessageId' },
+            ],
+        });
+        expect(byName('history_messages_channel_link')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'channelLinkId' }],
+        });
+        expect(byName('history_messages_guild_link')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'guildLinkId' }],
+        });
+        expect(byName('history_messages_target')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'targetMessageId' }],
+        });
+
+        // The repository works against the new schema.
+        const repo = new SequelizeHistoryMessageRepository();
+        expect(await repo.count()).toBe(0);
+        await repo.createMany([]);
+        expect(await repo.count()).toBe(0);
+
+        // Digest mode: several source messages share one target message.
+        const digest = { guildLinkId: 'g-hist', channelLinkId: 'c-hist' };
+        await repo.createMany([
+            {
+                ...digest,
+                sourcePlatform: 'discord',
+                sourceMessageId: 'dm-h1',
+                targetMessageId: 'fm-digest',
+            },
+            {
+                ...digest,
+                sourcePlatform: 'discord',
+                sourceMessageId: 'dm-h2',
+                targetMessageId: 'fm-digest',
+            },
+        ]);
+        expect(await repo.count()).toBe(2);
+
+        // Re-running the transfer: the already recorded row is ignored, the
+        // new ones are added, and nothing throws.
+        await repo.createMany([
+            {
+                ...digest,
+                sourcePlatform: 'discord',
+                sourceMessageId: 'dm-h2',
+                targetMessageId: 'fm-digest-again',
+            },
+            {
+                ...digest,
+                sourcePlatform: 'discord',
+                sourceMessageId: 'dm-h3',
+                targetMessageId: 'fm-h3',
+            },
+            {
+                guildLinkId: 'g1',
+                channelLinkId: 'c1',
+                sourcePlatform: 'fluxer',
+                sourceMessageId: 'fm-h1',
+                targetMessageId: 'dm-h1',
+            },
+        ]);
+        expect(await repo.count()).toBe(4);
+        const [kept] = await select<{ targetMessageId: string }>(
+            "SELECT targetMessageId FROM history_messages WHERE sourceMessageId = 'dm-h2'"
+        );
+        expect(kept.targetMessageId).toBe('fm-digest');
+        const created = await select<{ createdAt: string | Date }>(
+            'SELECT createdAt FROM history_messages'
+        );
+        expect(created.every((r) => r.createdAt)).toBe(true);
+
+        // findTransferredIds: only recorded ids, scoped by platform.
+        expect(
+            await repo.findTransferredIds('discord', [
+                'dm-h1',
+                'dm-h2',
+                'dm-h3',
+                'dm-new',
+            ])
+        ).toEqual(new Set(['dm-h1', 'dm-h2', 'dm-h3']));
+        // The same id on the other platform is a different message.
+        expect(await repo.findTransferredIds('fluxer', ['dm-h1'])).toEqual(
+            new Set()
+        );
+        expect(await repo.findTransferredIds('fluxer', ['fm-h1'])).toEqual(
+            new Set(['fm-h1'])
+        );
+        expect(await repo.findTransferredIds('discord', [])).toEqual(new Set());
+        // Long lists are chunked into several IN queries.
+        const many = Array.from({ length: 1203 }, (_, i) => `dm-bulk-${i}`);
+        expect(
+            await repo.findTransferredIds('discord', [...many, 'dm-h3'])
+        ).toEqual(new Set(['dm-h3']));
+
+        // Deleting by channel link leaves other channels alone.
+        await repo.deleteByChannelLinkId('c-hist');
+        expect(await repo.count()).toBe(1);
+        expect(await repo.findTransferredIds('discord', ['dm-h1'])).toEqual(
+            new Set()
+        );
+        expect(await repo.findTransferredIds('fluxer', ['fm-h1'])).toEqual(
+            new Set(['fm-h1'])
+        );
+        await repo.deleteByChannelLinkId('c-hist');
+        expect(await repo.count()).toBe(1);
+
+        // Deleting by guild link.
+        await repo.deleteByGuildLinkId('g-hist');
+        expect(await repo.count()).toBe(1);
+        await repo.deleteByGuildLinkId('g1');
+        expect(await repo.count()).toBe(0);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await repo.createMany([
+            {
+                ...digest,
+                sourcePlatform: 'discord',
+                sourceMessageId: 'dm-h4',
+                targetMessageId: 'fm-h4',
+            },
+        ]);
+        await umzug.down({ to: '00010-history-messages.js' });
+        expect(await executed()).toEqual(EXECUTED_THROUGH_00009);
+        expect(await qi.tableExists('history_messages')).toBe(false);
+        expect(await qi.tableExists('reminders')).toBe(true);
+        expect(await qi.tableExists('message_links')).toBe(true);
+        expect(
+            (
+                await select<{ id: string }>(
+                    "SELECT id FROM channel_links WHERE id = 'c-hist'"
+                )
+            ).length
+        ).toBe(1);
+
+        await umzug.up();
+        expect(await executed()).toContain('00010-history-messages.js');
+        expect(await qi.tableExists('history_messages')).toBe(true);
         expect(await repo.count()).toBe(0);
     });
 });

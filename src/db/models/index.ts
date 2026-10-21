@@ -6,6 +6,7 @@ import { QueuedMessageModel } from './QueuedMessageModel';
 import { VoiceLinkModel } from './VoiceLinkModel';
 import { UserLinkModel } from './UserLinkModel';
 import { ReminderModel } from './ReminderModel';
+import { HistoryMessageModel } from './HistoryMessageModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -39,6 +40,30 @@ ChannelLinkModel.hasMany(MessageLinkModel, {
 });
 
 MessageLinkModel.belongsTo(ChannelLinkModel, {
+    foreignKey: 'channelLinkId',
+    as: 'channelLink',
+});
+
+// Guild -> HistoryMessages
+GuildLinkModel.hasMany(HistoryMessageModel, {
+    foreignKey: 'guildLinkId',
+    as: 'historyMessages',
+    onDelete: 'CASCADE',
+});
+
+HistoryMessageModel.belongsTo(GuildLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'guildLink',
+});
+
+// Channel -> HistoryMessages
+ChannelLinkModel.hasMany(HistoryMessageModel, {
+    foreignKey: 'channelLinkId',
+    as: 'historyMessages',
+    onDelete: 'CASCADE',
+});
+
+HistoryMessageModel.belongsTo(ChannelLinkModel, {
     foreignKey: 'channelLinkId',
     as: 'channelLink',
 });
@@ -89,4 +114,5 @@ export {
     VoiceLinkModel,
     UserLinkModel,
     ReminderModel,
+    HistoryMessageModel,
 };

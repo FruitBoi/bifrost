@@ -54,6 +54,9 @@ import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsDiscordCommandHandler from './commands/discord/handlers/ExpressionsDiscordCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
+import HistoryDiscordCommandHandler from './commands/discord/handlers/HistoryDiscordCommandHandler';
+import HistoryTransferService from './services/history/HistoryTransferService';
+import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 import { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
@@ -72,6 +75,7 @@ const startDiscordClient = async ({
     fluxerStatsService,
     dbStatsService,
     reminderService,
+    historyService,
     botConfig,
 }: {
     linkService: LinkService;
@@ -89,6 +93,7 @@ const startDiscordClient = async ({
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
     reminderService: ReminderService;
+    historyService: HistoryTransferService;
     botConfig: BotConfig;
 }): Promise<Client> => {
     const client = new Client({
@@ -251,6 +256,24 @@ const startDiscordClient = async ({
         );
         for (const name of CLEAN_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, cleanHandler);
+        }
+    }
+
+    if (botConfig.history.enabled) {
+        const historyHandler = new HistoryDiscordCommandHandler(client, {
+            linkService,
+            threadSyncService,
+            messageRelay,
+            historyService,
+            moderatorRoleIds: botConfig.roles.moderator,
+            limits: {
+                defaultCount: botConfig.history.defaultCount,
+                maxCount: botConfig.history.maxCount,
+            },
+            delayMs: botConfig.history.delayMs,
+        });
+        for (const name of HISTORY_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, historyHandler);
         }
     }
 

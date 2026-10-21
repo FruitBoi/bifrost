@@ -42,6 +42,12 @@ export type WebhookMessageData = {
      * send: an edit keeps the markup but never pings the role again.
      */
     mentionRoleIds?: string[];
+    /**
+     * When set, nothing in the message pings anyone: allowed mentions are
+     * emptied for users and roles, overriding mentionUserIds/mentionRoleIds.
+     * Used for history transfers.
+     */
+    suppressMentions?: boolean;
 };
 
 type AllowedMentions = { parse: never[]; users: string[]; roles?: string[] };
@@ -53,12 +59,14 @@ type AllowedMentions = { parse: never[]; users: string[]; roles?: string[] };
  * is nothing to ping. The empty `parse` means a bridged message never newly
  * opts in to @everyone/@here or blanket role pings; `roles` is only present
  * when a role is actually whitelisted. Edits whitelist no roles so that
- * re-relaying an edited message cannot ping a role a second time.
+ * re-relaying an edited message cannot ping a role a second time. With
+ * `suppressMentions` the whitelist is empty, so nobody is pinged at all.
  */
 function allowedMentionsFor(
     data: WebhookMessageData,
     isEdit = false
 ): AllowedMentions | undefined {
+    if (data.suppressMentions) return { parse: [], users: [] };
     const users = data.mentionUserIds ?? [];
     const roles = isEdit ? [] : (data.mentionRoleIds ?? []);
     if (users.length === 0 && roles.length === 0) return undefined;

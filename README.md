@@ -20,6 +20,7 @@
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
+- Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
@@ -258,7 +259,7 @@ Reminders ship as migration `00009-reminders`, which adds the `reminders` table 
 
 ### Clean
 
-Bifröst has a bulk-delete command modelled on [YAGPDB's `clean`](https://help.yagpdb.xyz/docs/core/all-commands/#clean): tell it how many messages to remove, optionally whose and which, and it deletes them from the current channel. It works the same on Discord and on Fluxer, and is a **moderator command** (see [Permissions](#permissions-2) below).
+Bifröst has a bulk-delete command modelled on [YAGPDB's `clean`](https://help.yagpdb.xyz/docs/core/all-commands/#clean): tell it how many messages to remove, optionally whose and which, and it deletes them from the current channel. It works the same on Discord and on Fluxer, and is a **moderator command** (see [Permissions](#permissions-3) below).
 
 There are three ways to run it:
 
@@ -306,6 +307,37 @@ Examples:
 - **Who may run it.** The member needs at least one of the roles listed in `roles.moderator` in the [configuration file](#configuration-file). Role IDs are matched on the platform the command is run on, and the default (`1561105750388908139`) is a **Fluxer** role, so out of the box nobody can run `clean` on Discord: add a Discord role ID to `roles.moderator` to allow it there.
 - **What the bot needs.** **Manage Messages** and **Read Message History** in the channel.
 
+### History transfer
+
+Linking two channels bridges new messages only. `history` (alias `backfill`) copies the messages that were already there: run it inside a linked channel or thread on either platform and it posts that channel's history to the linked counterpart, oldest first, through the same pipeline as live bridging. Copies look like bridged messages (the author's name and avatar via the webhook, attachments, embeds, replies, emojis), and each one starts with a small `<t:…>` line showing when the original was written. It is a **moderator command** (see [Permissions](#permissions-4) below) and only answers to the bot prefix: `!b history …`, never `?history`.
+
+**Scope.** Three ways to say what to copy:
+
+- `!b history` copies the last 100 messages (`history.defaultCount`); `!b history 500` the last 500, up to `history.maxCount` (1000 by default).
+- `!b history all` copies the whole history. Because that may be a lot, Bifröst first explains what will happen and waits for `!b history confirm` from the same person in the same channel, for 2 minutes.
+- `-ma <time>` copies only messages younger than the given time (`-ma 7d`), `-after <id>` only messages newer than that message, `-before <id>` only older ones; message IDs or message links both work. These combine with a count or `all`: `!b history all -after 1234567890123456789`.
+
+| Switch | Effect |
+| --- | --- |
+| `-ma <time>` | Max age: only messages younger than the given time ([duration syntax](#duration-syntax)). |
+| `-after <id>` | Only messages newer than this message ID or link. |
+| `-before <id>` | Only messages older than this message ID or link. |
+| `-digest` | Pack many messages into transcript posts instead of one post per message. |
+| `-notime` | Leave out the timestamp line at the top of each copy. |
+
+**What is skipped.** Messages that were already bridged live, or already transferred by an earlier run, are skipped, so running the command again is safe: it only fills the gaps and continues where a stopped run ended. System messages (joins, pins), empty messages, bot commands and the bot's own messages are skipped as well. Copies made in plain mode get a message link like live-bridged messages, so later reactions, edits and deletions of the original are mirrored to them (an edit refreshes the copy without the timestamp line).
+
+**How it runs.** The transfer runs in the background, one channel at a time (further requests queue up), with a pause of `history.delayMs` between posts so the bot stays inside both platforms' rate limits. The reply to the command is a status embed that keeps updating while the job runs and shows the final counts when it is done; `!b history status` shows it again and `!b history stop` cancels the job (what was posted stays). The copies appear at the bottom of the other channel, in the original order, after whatever is there already; they never ping anyone, even when the original did.
+
+**How long it takes.** Roughly *posts × delay*: 1000 messages at the default 1 s delay take about 17 minutes, a channel with 50 000 messages about 14 hours. `-digest` is the fast lane: it packs roughly 10–20 messages into one transcript post (author, time and text per line; attachments are re-uploaded with the post and noted as `📎 name`), so the same channel takes a fraction of the time. The price is that digest copies get no per-message links, so later reactions, edits and deletions of those originals are not mirrored to them, and replies to them cannot ping the original author. Use plain mode for the recent part of a channel and `-digest -before <id>` for the old bulk if you want both.
+
+#### Permissions
+
+- **Who may run it.** A member with one of the roles listed in `roles.moderator`, like [Clean](#clean); add a Discord role ID there to allow it on Discord.
+- **What the bot needs.** **Read Message History** in the channel the command is run in. Posting on the other side goes through the link's webhook, which exists already.
+
+`history.enabled: false` switches the command off. The transfer state ships as migration `00010-history-messages`, which adds the `history_messages` table (one row per transferred message, so re-runs can skip them); it runs automatically on startup.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -348,11 +380,15 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
-| `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`); see [Clean](#clean). IDs are matched on the platform the command is run on, so add a Discord role ID to allow `clean` on Discord. Quote the IDs, unquoted numbers lose precision. |
+| `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`, `history`); see [Clean](#clean) and [History transfer](#history-transfer). IDs are matched on the platform the command is run on, so add a Discord role ID to allow them on Discord. Quote the IDs, unquoted numbers lose precision. |
 | `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity commands `!b role` and `!b map`; see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
 | `roles.bridgeMentions` | `true` | Relay role mentions as real pings of the role with the same name in the linked server on the other platform, if the author could ping the role on their own side. Without a same-named role the mention stays plaintext `@RoleName`; `@everyone`/`@here` are never bridged and edits never re-ping. `false` relays every role mention as plaintext. See [Pings](#pings). |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
+| `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |
+| `history.defaultCount` | `100` | Messages copied by a bare `!b history`. |
+| `history.maxCount` | `1000` | Largest count accepted as a number (`!b history 1000`); anything bigger needs `!b history all` plus `confirm`. |
+| `history.delayMs` | `1000` | Pause between two posts on the destination, in milliseconds; 1000 posts take about `1000 × delayMs`. Keep it at or above the default: both platforms rate-limit webhooks and Fluxer IP-bans bots that exceed its limits. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |

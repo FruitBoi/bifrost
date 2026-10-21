@@ -47,7 +47,7 @@ export interface BotConfig {
      * they are parsed as numbers and lose precision.
      */
     roles: {
-        /** Moderator commands: `clean`. */
+        /** Moderator commands: `clean` and `history`. */
         moderator: string[];
         /**
          * Identity commands: `role` (copies a Discord user's roles to a
@@ -77,6 +77,23 @@ export interface BotConfig {
          * working too (`!b clean 10`). An empty list disables the shortcuts.
          */
         triggerPrefixes: string[];
+    };
+    history: {
+        /**
+         * Enable the `history` command (alias `backfill`), which copies a
+         * linked channel's history to the other platform (issue #16). See
+         * `services/history/`.
+         */
+        enabled: boolean;
+        /** Messages transferred when no count is given. */
+        defaultCount: number;
+        /** Largest count accepted without `all`. */
+        maxCount: number;
+        /**
+         * Pause between two destination posts, in ms (keeps the bot inside
+         * both platforms' rate limits; Fluxer IP-bans bots that exceed them).
+         */
+        delayMs: number;
     };
     meow: {
         /**
@@ -125,6 +142,12 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         bridgeMentions: true,
     },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
+    history: {
+        enabled: true,
+        defaultCount: 100,
+        maxCount: 1000,
+        delayMs: 1000,
+    },
     meow: { enabled: true },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
     reactions: { enabled: true },
@@ -278,15 +301,39 @@ export function mergeBotConfig(
         return out as T;
     }
 
+    const config = merge(
+        structuredClone(defaults) as unknown as Plain,
+        input,
+        ''
+    ) as unknown as BotConfig;
+    validateHistoryConfig(config.history);
+
     return {
-        config: merge(
-            structuredClone(defaults) as unknown as Plain,
-            input,
-            ''
-        ) as unknown as BotConfig,
+        config,
         unknownKeys,
         deprecatedKeys: translated.deprecatedKeys,
     };
+}
+
+/**
+ * The `history` numbers must be positive integers, and the default count
+ * cannot exceed the maximum (`history 50` with a `maxCount` of 10 would be
+ * refused while the bare `history` would silently ask for more).
+ */
+function validateHistoryConfig(history: BotConfig['history']): void {
+    for (const key of ['defaultCount', 'maxCount', 'delayMs'] as const) {
+        const value = history[key];
+        if (!Number.isInteger(value) || value <= 0) {
+            throw new BotConfigError(
+                `Config "history.${key}" must be a positive whole number, got ${value}`
+            );
+        }
+    }
+    if (history.defaultCount > history.maxCount) {
+        throw new BotConfigError(
+            `Config "history.defaultCount" (${history.defaultCount}) must not exceed "history.maxCount" (${history.maxCount})`
+        );
+    }
 }
 
 /** Parses YAML (a JSON superset) or JSON according to the file extension. */

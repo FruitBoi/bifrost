@@ -6,6 +6,7 @@ import MessageQueueService, { toSerializable } from '../MessageQueueService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import DiscordEntityResolver from '../entityResolver/DiscordEntityResolver';
 import { ChannelLink } from '../../db/entities/ChannelLink';
+import { GuildLink } from '../../db/entities/GuildLink';
 import { LinkService } from '../LinkService';
 import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
@@ -16,6 +17,14 @@ const SKIPPED_MESSAGE_TYPES = new Set<number>([
     MessageType.ThreadCreated,
     MessageType.ThreadStarterMessage,
 ]);
+
+/** The link's Discord webhook could not be fetched (deleted or token revoked). */
+export class DiscordWebhookMissingError extends Error {
+    constructor(link: ChannelLink) {
+        super(`No Discord webhook found for linked channel ${link.linkId}`);
+        this.name = 'DiscordWebhookMissingError';
+    }
+}
 
 export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
     private readonly discordEntityResolver: DiscordEntityResolver;
@@ -64,9 +73,55 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         return null;
     }
 
+    public async buildPayload(
+        message: Message,
+        guildLink: GuildLink
+    ): Promise<WebhookMessageData> {
+        if (message.type === MessageType.UserJoin) {
+            return {
+                content: formatJoinMessage(
+                    message.author.username +
+                        '#' +
+                        message.author.discriminator,
+                    'fluxer'
+                ),
+                username: message.client.user?.username || 'Bifröst',
+                avatarURL: message.client.user?.avatarURL() || '',
+            };
+        }
+        const discordEmojis = await this.discordEntityResolver.fetchEmojis(
+            guildLink.discordGuildId
+        );
+        return this.getMessageTransformer().transformMessage(
+            message,
+            discordEmojis
+        );
+    }
+
+    /**
+     * Throws a {@link DiscordWebhookMissingError} when the link's Discord
+     * webhook no longer exists; the live relay treats that as "nothing to
+     * do" rather than a failure worth queueing.
+     */
+    public async sendPayload(
+        link: ChannelLink,
+        payload: WebhookMessageData
+    ): Promise<{ messageId: string }> {
+        const webhookService = this.getWebhookService();
+        const webhook = await webhookService.getDiscordWebhook(
+            link.discordWebhookId,
+            link.discordWebhookToken
+        );
+        if (!webhook) throw new DiscordWebhookMissingError(link);
+        return webhookService.sendMessageViaDiscordWebhook(
+            webhook,
+            payload,
+            link.discordThreadId
+        );
+    }
+
     public async relayMessage(message: Message): Promise<void> {
         const linkService = this.getLinkService();
-        const webhookService = this.getWebhookService();
 
         if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
 
@@ -85,53 +140,19 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         );
         if (!guildLink) return;
 
-        const discordThreadId = linkedChannel.discordThreadId;
         // A webhook/integration author has no user id to ping on Discord.
         const sourceAuthorId = message.webhookId
             ? undefined
             : message.author.id;
 
         // Build payload before attempting send so it can be queued on failure
-        let msg: WebhookMessageData;
-        if (message.type === MessageType.UserJoin) {
-            msg = {
-                content: formatJoinMessage(
-                    message.author.username +
-                        '#' +
-                        message.author.discriminator,
-                    'fluxer'
-                ),
-                username: message.client.user?.username || 'Bifröst',
-                avatarURL: message.client.user?.avatarURL() || '',
-            };
-        } else {
-            const discordEmojis = await this.discordEntityResolver.fetchEmojis(
-                guildLink.discordGuildId
-            );
-            msg = await this.getMessageTransformer().transformMessage(
-                message,
-                discordEmojis
-            );
-        }
+        const msg = await this.buildPayload(message, guildLink);
 
         try {
-            const webhook = await webhookService.getDiscordWebhook(
-                linkedChannel.discordWebhookId,
-                linkedChannel.discordWebhookToken
+            const { messageId: webhookMessageId } = await this.sendPayload(
+                linkedChannel,
+                msg
             );
-            if (!webhook) {
-                logger.warn(
-                    `⚠️ No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message`
-                );
-                return;
-            }
-
-            const { messageId: webhookMessageId } =
-                await webhookService.sendMessageViaDiscordWebhook(
-                    webhook,
-                    msg,
-                    discordThreadId
-                );
 
             if (message.type !== MessageType.UserJoin) {
                 await linkService.createMessageLink({
@@ -147,6 +168,12 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
                 direction: 'fluxer_to_discord',
             });
         } catch (error) {
+            if (error instanceof DiscordWebhookMissingError) {
+                logger.warn(
+                    `⚠️ No webhook found for linked channel ${linkedChannel.linkId}, cannot relay message`
+                );
+                return;
+            }
             logger.error('❌ Error relaying message to Discord:', error);
             this.metricsService?.messageRelayErrors.inc({
                 direction: 'fluxer_to_discord',

@@ -69,6 +69,9 @@ import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsFluxerCommandHandler from './commands/fluxer/handlers/ExpressionsFluxerCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
+import HistoryFluxerCommandHandler from './commands/fluxer/handlers/HistoryFluxerCommandHandler';
+import HistoryTransferService from './services/history/HistoryTransferService';
+import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 
 const startFluxerClient = async ({
     linkService,
@@ -88,6 +91,7 @@ const startFluxerClient = async ({
     dbStatsService,
     botConfig,
     reminderService,
+    historyService,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -107,6 +111,7 @@ const startFluxerClient = async ({
     dbStatsService: DbStatsService;
     botConfig: BotConfig;
     reminderService: ReminderService;
+    historyService: HistoryTransferService;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -286,6 +291,23 @@ const startFluxerClient = async ({
         );
         for (const name of CLEAN_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, cleanHandler);
+        }
+    }
+    if (botConfig.history.enabled) {
+        const historyHandler = new HistoryFluxerCommandHandler(client, {
+            linkService,
+            threadSyncService,
+            messageRelay,
+            historyService,
+            moderatorRoleIds: botConfig.roles.moderator,
+            limits: {
+                defaultCount: botConfig.history.defaultCount,
+                maxCount: botConfig.history.maxCount,
+            },
+            delayMs: botConfig.history.delayMs,
+        });
+        for (const name of HISTORY_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, historyHandler);
         }
     }
 

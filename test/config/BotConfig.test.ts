@@ -133,6 +133,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             clean: DEFAULT_BOT_CONFIG.clean,
+            history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
@@ -160,6 +161,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             clean: DEFAULT_BOT_CONFIG.clean,
+            history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
@@ -379,6 +381,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'categories',
             'roles',
             'clean',
+            'history',
             'meow',
             'reminders',
             'reactions',
@@ -635,6 +638,104 @@ describe('clean', () => {
         const { unknownKeys } = mergeBotConfig({ clean: { maxCount: 50 } });
 
         expect(unknownKeys).toEqual(['clean.maxCount']);
+    });
+});
+
+describe('history', () => {
+    it('defaults to enabled, 100 messages, at most 1000, one post per second', () => {
+        expect(DEFAULT_BOT_CONFIG.history).toEqual({
+            enabled: true,
+            defaultCount: 100,
+            maxCount: 1000,
+            delayMs: 1000,
+        });
+    });
+
+    it('merges the history section from a YAML file', () => {
+        write(
+            'config.yml',
+            'history: { enabled: false, defaultCount: 50, maxCount: 500, delayMs: 2000 }\n'
+        );
+
+        const { config, unknownKeys, deprecatedKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            history: {
+                enabled: false,
+                defaultCount: 50,
+                maxCount: 500,
+                delayMs: 2000,
+            },
+        });
+    });
+
+    it('keeps the other keys at their defaults when only one is given', () => {
+        const { config } = mergeBotConfig({ history: { delayMs: 1500 } });
+
+        expect(config.history).toEqual({
+            ...DEFAULT_BOT_CONFIG.history,
+            delayMs: 1500,
+        });
+    });
+
+    it('rejects a non-boolean enabled flag', () => {
+        const attempt = () => mergeBotConfig({ history: { enabled: 'no' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('history.enabled');
+        expect(attempt).toThrow('boolean');
+    });
+
+    it('rejects strings where numbers are expected', () => {
+        for (const key of ['defaultCount', 'maxCount', 'delayMs']) {
+            const attempt = () => mergeBotConfig({ history: { [key]: '100' } });
+
+            expect(attempt).toThrow(BotConfigError);
+            expect(attempt).toThrow(`history.${key}`);
+            expect(attempt).toThrow('number');
+        }
+    });
+
+    it('rejects zero, negative and fractional numbers', () => {
+        for (const key of ['defaultCount', 'maxCount', 'delayMs']) {
+            for (const value of [0, -5, 2.5]) {
+                const attempt = () =>
+                    mergeBotConfig({ history: { [key]: value } });
+
+                expect(attempt).toThrow(BotConfigError);
+                expect(attempt).toThrow(`history.${key}`);
+                expect(attempt).toThrow('positive whole number');
+            }
+        }
+    });
+
+    it('rejects a default count above the maximum', () => {
+        const attempt = () =>
+            mergeBotConfig({ history: { defaultCount: 20, maxCount: 10 } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('history.defaultCount');
+        expect(attempt).toThrow('history.maxCount');
+    });
+
+    it('accepts a default count equal to the maximum', () => {
+        const { config } = mergeBotConfig({
+            history: { defaultCount: 10, maxCount: 10 },
+        });
+
+        expect(config.history.defaultCount).toBe(10);
+        expect(config.history.maxCount).toBe(10);
+    });
+
+    it('reports unknown keys inside the section', () => {
+        const { unknownKeys } = mergeBotConfig({
+            history: { triggerPrefixes: ['?'] },
+        });
+
+        expect(unknownKeys).toEqual(['history.triggerPrefixes']);
     });
 });
 

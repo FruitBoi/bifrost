@@ -7,6 +7,7 @@ import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
 import { CategoryLinkRepository } from '../db/repositories/CategoryLinkRepository';
 import { VoiceLinkRepository } from '../db/repositories/VoiceLinkRepository';
 import { UserLinkRepository } from '../db/repositories/UserLinkRepository';
+import { HistoryMessageRepository } from '../db/repositories/HistoryMessageRepository';
 import { ChannelLink } from '../db/entities/ChannelLink';
 import { CategoryLink } from '../db/entities/CategoryLink';
 import { MessagePlatform } from '../db/entities/MessageLink';
@@ -62,9 +63,19 @@ export class LinkService {
     ) {}
 
     private voiceLinkListener: VoiceLinkListener | null = null;
+    private historyRepo: HistoryMessageRepository | null = null;
 
     setVoiceLinkListener(listener: VoiceLinkListener | null) {
         this.voiceLinkListener = listener;
+    }
+
+    /**
+     * Optional: history transfer rows (issue #16) are forgotten together with
+     * the link they belong to. SQLite does not enforce the foreign keys here,
+     * hence the explicit deletes in removeGuildLink/removeChannelLink.
+     */
+    setHistoryMessageRepository(repo: HistoryMessageRepository | null) {
+        this.historyRepo = repo;
     }
 
     // ---------------------------------------------------------------------
@@ -109,6 +120,7 @@ export class LinkService {
      */
     async removeGuildLink(guildLinkId: string) {
         await this.messageRepo.deleteByGuildLinkId(guildLinkId);
+        await this.historyRepo?.deleteByGuildLinkId(guildLinkId);
         await this.channelRepo.deleteByGuildLinkId(guildLinkId);
         await this.categoryRepo.deleteByGuildLinkId(guildLinkId);
         const voiceLinks = await this.voiceRepo.findAllByGuild(guildLinkId);
@@ -183,6 +195,7 @@ export class LinkService {
             throw new Error('Link not found');
         }
         await this.messageRepo.deleteByChannelLinkId(channelLink.id);
+        await this.historyRepo?.deleteByChannelLinkId(channelLink.id);
         await this.channelRepo.deleteById(channelLink.id);
         return channelLink;
     }
