@@ -23,6 +23,11 @@ export interface Command {
 
 export type CommandPlatform = 'discord' | 'fluxer';
 
+/** Shared by the Fluxer identity commands `role` and `map`. */
+const IDENTITY_USAGE_ARGS = ['<@fluxerUser> <discordUserId>'];
+const IDENTITY_RESTRICTION =
+    'Restricted to the roles configured in `roles.identity`.';
+
 const commandList: Command[] = [
     {
         name: 'help',
@@ -128,17 +133,15 @@ const commandList: Command[] = [
     {
         name: 'role',
         fluxer: {
-            description:
-                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
-            usageArgs: ['<@fluxerUser> <discordUserId>'],
+            description: `Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. ${IDENTITY_RESTRICTION}`,
+            usageArgs: IDENTITY_USAGE_ARGS,
         },
     },
     {
         name: 'map',
         fluxer: {
-            description:
-                'Records that the mentioned Fluxer member is the given Discord user, so pings of either account are bridged to the other. Only works when neither account is mapped yet; existing mappings are shown and left alone (`role` replaces them). Restricted to the roles configured in `roles.copyAllowedRoleIds`.',
-            usageArgs: ['<@fluxerUser> <discordUserId>'],
+            description: `Records that the mentioned Fluxer member is the given Discord user, so pings of either account are bridged to the other. Only works when neither account is mapped yet; existing mappings are shown and left alone. \`role\` does the same and also copies roles and thread memberships, replacing an existing mapping. ${IDENTITY_RESTRICTION}`,
+            usageArgs: IDENTITY_USAGE_ARGS,
         },
     },
     {

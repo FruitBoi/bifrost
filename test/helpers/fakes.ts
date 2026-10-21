@@ -10,6 +10,7 @@ import { VoiceLink } from '../../src/db/entities/VoiceLink';
 import { UserLink } from '../../src/db/entities/UserLink';
 import {
     LinkService,
+    SetUserLinkOptions,
     SetUserLinkResult,
     VoiceLinkListener,
 } from '../../src/services/LinkService';
@@ -252,31 +253,55 @@ export class FakeLinkService {
         return this.userLinks.filter((u) => u.guildLinkId === guildLinkId);
     }
 
-    async setUserLink(data: {
-        guildLinkId: string;
-        discordUserId: string;
-        fluxerUserId: string;
-    }): Promise<SetUserLinkResult> {
+    async setUserLink(
+        data: {
+            guildLinkId: string;
+            discordUserId: string;
+            fluxerUserId: string;
+        },
+        options: SetUserLinkOptions = {}
+    ): Promise<SetUserLinkResult> {
+        // Mirrors LinkService.setUserLink over the in-memory rows.
         const byDiscord = await this.getUserLinkForDiscordUser(
             data.guildLinkId,
             data.discordUserId
         );
-        if (byDiscord && byDiscord.fluxerUserId === data.fluxerUserId) {
-            return { link: byDiscord, unchanged: true, replaced: [] };
-        }
         const byFluxer = await this.getUserLinkForFluxerUser(
             data.guildLinkId,
             data.fluxerUserId
         );
-        const replaced: UserLink[] = [];
-        for (const stale of [byDiscord, byFluxer]) {
-            if (!stale || replaced.some((r) => r.id === stale.id)) continue;
-            this.userLinks = this.userLinks.filter((u) => u.id !== stale.id);
-            replaced.push(stale);
+        const existing: UserLink[] = [];
+        for (const row of [byDiscord, byFluxer]) {
+            if (row && !existing.some((r) => r.id === row.id))
+                existing.push(row);
         }
+        const same = existing.find(
+            (row) =>
+                row.discordUserId === data.discordUserId &&
+                row.fluxerUserId === data.fluxerUserId
+        );
+        if (same) {
+            return {
+                link: same,
+                unchanged: true,
+                replaced: [],
+                conflicting: [],
+            };
+        }
+        if (existing.length > 0 && options.replaceExisting === false) {
+            return {
+                link: null,
+                unchanged: false,
+                replaced: [],
+                conflicting: existing,
+            };
+        }
+        this.userLinks = this.userLinks.filter(
+            (u) => !existing.some((r) => r.id === u.id)
+        );
         const link = makeUserLink(data);
         this.userLinks.push(link);
-        return { link, unchanged: false, replaced };
+        return { link, unchanged: false, replaced: existing, conflicting: [] };
     }
 
     async removeUserLink(id: string) {

@@ -54,8 +54,7 @@ import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
-import RoleFluxerCommandHandler from './commands/fluxer/handlers/RoleFluxerCommandHandler';
-import MapFluxerCommandHandler from './commands/fluxer/handlers/MapFluxerCommandHandler';
+import IdentityFluxerCommandHandler from './commands/fluxer/handlers/IdentityFluxerCommandHandler';
 import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
@@ -214,25 +213,15 @@ const startFluxerClient = async ({
         'voice',
         new VoiceFluxerCommandHandler(client, linkService, linkProvisioner)
     );
-    commandRegistry.registerCommand(
-        'role',
-        new RoleFluxerCommandHandler(
-            client,
-            linkService,
-            discordEntityResolver,
-            threadMemberSyncService,
-            botConfig.roles.identity
-        )
+    const identityHandler = new IdentityFluxerCommandHandler(
+        client,
+        linkService,
+        discordEntityResolver,
+        threadMemberSyncService,
+        botConfig.roles.identity
     );
-    commandRegistry.registerCommand(
-        'map',
-        new MapFluxerCommandHandler(
-            client,
-            linkService,
-            discordEntityResolver,
-            botConfig.roles.identity
-        )
-    );
+    commandRegistry.registerCommand('role', identityHandler);
+    commandRegistry.registerCommand('map', identityHandler);
     commandRegistry.registerCommand(
         'autolink',
         new AutolinkFluxerCommandHandler(

@@ -96,6 +96,7 @@ describe('LinkService user links', () => {
 
         expect(result.unchanged).toBe(false);
         expect(result.replaced).toEqual([]);
+        expect(result.conflicting).toEqual([]);
         expect(result.link).toMatchObject({
             discordUserId: 'd1',
             fluxerUserId: 'f1',
@@ -127,8 +128,9 @@ describe('LinkService user links', () => {
         });
 
         expect(again.unchanged).toBe(true);
-        expect(again.link.id).toBe(first.link.id);
+        expect(again.link?.id).toBe(first.link!.id);
         expect(again.replaced).toEqual([]);
+        expect(again.conflicting).toEqual([]);
         expect(users.rows).toHaveLength(1);
     });
 
@@ -144,7 +146,9 @@ describe('LinkService user links', () => {
             fluxerUserId: 'f2',
         });
 
-        expect(result.replaced.map((r) => r.id)).toEqual([old.link.id]);
+        expect(result.unchanged).toBe(false);
+        expect(result.replaced.map((r) => r.id)).toEqual([old.link!.id]);
+        expect(result.conflicting).toEqual([]);
         expect(await service.getUserLinkForFluxerUser('g1', 'f1')).toBeNull();
         expect(
             await service.getUserLinkForFluxerUser('g1', 'f2')
@@ -172,8 +176,9 @@ describe('LinkService user links', () => {
         });
 
         expect(result.replaced.map((r) => r.id).sort()).toEqual(
-            [a.link.id, b.link.id].sort()
+            [a.link!.id, b.link!.id].sort()
         );
+        expect(result.conflicting).toEqual([]);
         expect(await service.getUserLinksForGuildLink('g1')).toHaveLength(1);
         expect(await service.getUserLinkForDiscordUser('g1', 'd2')).toBeNull();
         expect(await service.getUserLinkForFluxerUser('g1', 'f1')).toBeNull();
@@ -195,69 +200,118 @@ describe('LinkService user links', () => {
         expect(await service.getUserLinksCount()).toBe(2);
     });
 
-    it('createUserLinkIfUnmapped maps only when both accounts are free', async () => {
-        const first = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd1',
-            fluxerUserId: 'f1',
-        });
-        expect(first.link).toMatchObject({
-            discordUserId: 'd1',
-            fluxerUserId: 'f1',
-        });
-        expect(first.existing).toEqual([]);
+    describe('with replaceExisting: false', () => {
+        const keep = { replaceExisting: false };
 
-        // The identical mapping is reported as existing, not re-created.
-        const same = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd1',
-            fluxerUserId: 'f1',
-        });
-        expect(same.link).toBeNull();
-        expect(same.existing.map((e) => e.id)).toEqual([first.link!.id]);
+        it('creates the mapping when both accounts are free', async () => {
+            const result = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
 
-        // Either side already mapped blocks the new pair and nothing changes.
-        const discordTaken = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd1',
-            fluxerUserId: 'f2',
+            expect(result.link).toMatchObject({
+                discordUserId: 'd1',
+                fluxerUserId: 'f1',
+            });
+            expect(result.unchanged).toBe(false);
+            expect(result.replaced).toEqual([]);
+            expect(result.conflicting).toEqual([]);
+            expect(users.rows).toHaveLength(1);
         });
-        expect(discordTaken.link).toBeNull();
-        expect(discordTaken.existing.map((e) => e.id)).toEqual([
-            first.link!.id,
-        ]);
-        const fluxerTaken = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd2',
-            fluxerUserId: 'f1',
-        });
-        expect(fluxerTaken.link).toBeNull();
-        expect(fluxerTaken.existing.map((e) => e.id)).toEqual([first.link!.id]);
 
-        // Two different stale rows are both reported.
-        const second = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd2',
-            fluxerUserId: 'f2',
-        });
-        const crossed = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g1',
-            discordUserId: 'd1',
-            fluxerUserId: 'f2',
-        });
-        expect(crossed.link).toBeNull();
-        expect(crossed.existing.map((e) => e.id).sort()).toEqual(
-            [first.link!.id, second.link!.id].sort()
-        );
-        expect(users.rows).toHaveLength(2);
+        it('reports an identical mapping as unchanged without re-creating it', async () => {
+            const first = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+            const same = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
 
-        // Other guild links are unaffected.
-        const other = await service.createUserLinkIfUnmapped({
-            guildLinkId: 'g2',
-            discordUserId: 'd1',
-            fluxerUserId: 'f1',
+            expect(same.unchanged).toBe(true);
+            expect(same.link?.id).toBe(first.link!.id);
+            expect(same.replaced).toEqual([]);
+            expect(same.conflicting).toEqual([]);
+            expect(users.rows).toHaveLength(1);
         });
-        expect(other.link).not.toBeNull();
+
+        it('refuses when the Discord user is already mapped', async () => {
+            const first = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+            const result = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f2' },
+                keep
+            );
+
+            expect(result.link).toBeNull();
+            expect(result.unchanged).toBe(false);
+            expect(result.replaced).toEqual([]);
+            expect(result.conflicting.map((c) => c.id)).toEqual([
+                first.link!.id,
+            ]);
+            expect(users.rows).toEqual([first.link]);
+        });
+
+        it('refuses when the Fluxer user is already mapped', async () => {
+            const first = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+            const result = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd2', fluxerUserId: 'f1' },
+                keep
+            );
+
+            expect(result.link).toBeNull();
+            expect(result.unchanged).toBe(false);
+            expect(result.replaced).toEqual([]);
+            expect(result.conflicting.map((c) => c.id)).toEqual([
+                first.link!.id,
+            ]);
+            expect(users.rows).toEqual([first.link]);
+        });
+
+        it('reports both rows when the pair crosses two existing mappings', async () => {
+            const a = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+            const b = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd2', fluxerUserId: 'f2' },
+                keep
+            );
+            const crossed = await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f2' },
+                keep
+            );
+
+            expect(crossed.link).toBeNull();
+            expect(crossed.replaced).toEqual([]);
+            expect(crossed.conflicting.map((c) => c.id).sort()).toEqual(
+                [a.link!.id, b.link!.id].sort()
+            );
+            expect(users.rows.map((r) => r.id).sort()).toEqual(
+                [a.link!.id, b.link!.id].sort()
+            );
+        });
+
+        it('keeps mappings of different guild links apart', async () => {
+            await service.setUserLink(
+                { guildLinkId: 'g1', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+            const other = await service.setUserLink(
+                { guildLinkId: 'g2', discordUserId: 'd1', fluxerUserId: 'f1' },
+                keep
+            );
+
+            expect(other.link).toMatchObject({ guildLinkId: 'g2' });
+            expect(other.conflicting).toEqual([]);
+            expect(await service.getUserLinksCount()).toBe(2);
+        });
     });
 
     it('removes a mapping by id', async () => {
@@ -267,11 +321,11 @@ describe('LinkService user links', () => {
             fluxerUserId: 'f1',
         });
 
-        expect(await service.removeUserLink(link.id)).toMatchObject({
-            id: link.id,
+        expect(await service.removeUserLink(link!.id)).toMatchObject({
+            id: link!.id,
         });
         expect(await service.getUserLinkForDiscordUser('g1', 'd1')).toBeNull();
-        await expect(service.removeUserLink(link.id)).rejects.toThrow(
+        await expect(service.removeUserLink(link!.id)).rejects.toThrow(
             'User link not found'
         );
     });

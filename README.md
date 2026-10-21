@@ -145,11 +145,11 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 
 ## Identity mapping
 
-Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with two Fluxer commands: `role`, which also copies roles and thread memberships for someone who has just moved over, and `map`, which records the mapping alone:
+Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with two Fluxer commands, `map` and `role`. Both take the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run them:
 
-- `!b role <@fluxerUser> <discordUserId>` — run on Fluxer, mentioning the Fluxer member and passing the ID of their Discord account. Only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.
+- `!b map <@fluxerUser> <discordUserId>` — records the mapping, and only when neither account is mapped yet. If the same mapping already exists, nothing changes; if either account is mapped differently, the existing mapping is shown and left alone (use `!b role` to replace it).
 
-- `!b map <@fluxerUser> <discordUserId>` — records only the identity mapping, and only when neither account is mapped yet. If one of them already is, the existing mapping is shown and nothing changes; use `!b role` to replace it. Same permission rule as `!b role`.
+- `!b role <@fluxerUser> <discordUserId>` — everything `!b map` does, plus roles and thread membership for someone who has just moved over, and it replaces an existing mapping instead of leaving it alone.
 
 The `role` command does three things at once and reports the outcome of each:
 
