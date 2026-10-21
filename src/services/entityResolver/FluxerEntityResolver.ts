@@ -188,6 +188,16 @@ export default class FluxerEntityResolver implements EntityResolver<
     }
 
     /**
+     * Drops the cached emoji list of a guild so the next lookup sees emojis
+     * created since (the expression transfer calls this after uploading, so
+     * bridging picks the new emojis up at once instead of after the TTL).
+     */
+    invalidateEmojis(guildId: string | Guild): void {
+        const id = typeof guildId === 'string' ? guildId : guildId.id;
+        this.emojiCache.del(id);
+    }
+
+    /**
      * Lists the guild's roles (including @everyone, whose id is the guild id),
      * cached for a minute. A failed fetch is logged and yields an empty list
      * for a short while so a flaky API is not hammered on every message.

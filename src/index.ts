@@ -25,6 +25,7 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
+import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import ReminderService from './services/reminders/ReminderService';
 import {
     DISCORD_APP_ID,
@@ -152,6 +153,10 @@ const main = async () => {
         discordEntityResolver,
         fluxerEntityResolver
     );
+    const expressionTransferService = new ExpressionTransferService({
+        discordEntityResolver,
+        fluxerEntityResolver,
+    });
     threadSyncService.setBotConfig(botConfig);
     categorySyncService.setBotConfig(botConfig);
     const discordStatsService = new DiscordStatsService();
@@ -243,6 +248,7 @@ const main = async () => {
         threadSyncService,
         categorySyncService,
         threadMemberSyncService,
+        expressionTransferService,
         metricsService,
         queueService,
         discordStatsService,
@@ -364,6 +370,7 @@ const main = async () => {
             fluxerEntityResolver,
             threadSyncService,
             categorySyncService,
+            expressionTransferService,
             metricsService,
             queueService,
             discordStatsService,

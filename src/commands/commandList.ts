@@ -145,6 +145,19 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'expressions',
+        discord: {
+            description:
+                "Copies this server's custom emojis and stickers to the linked Fluxer server under the same names, so bridged messages and reactions can show them; names that already exist there are skipped, so it can be re-run. Give `emojis` or `stickers` to copy only that kind. Aliases `emotes`, `emojis`. Requires the `Manage Expressions` permission.",
+            usageArgs: ['[emojis | stickers]'],
+        },
+        fluxer: {
+            description:
+                "Copies the linked Discord server's custom emojis and stickers to this server under the same names, so bridged messages and reactions can show them; names that already exist here are skipped, so it can be re-run. Give `emojis` or `stickers` to copy only that kind. Aliases `emotes`, `emojis`. Requires the `Manage Expressions` permission.",
+            usageArgs: ['[emojis | stickers]'],
+        },
+    },
+    {
         name: 'remindme',
         discord: {
             description:

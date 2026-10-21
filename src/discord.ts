@@ -51,6 +51,9 @@ import { parseReminderTrigger } from './commands/reminderTrigger';
 import CleanDiscordCommandHandler from './commands/discord/handlers/CleanDiscordCommandHandler';
 import { parseCommandTrigger } from './commands/commandTrigger';
 import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
+import ExpressionsDiscordCommandHandler from './commands/discord/handlers/ExpressionsDiscordCommandHandler';
+import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
+import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
 import { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
@@ -62,6 +65,7 @@ const startDiscordClient = async ({
     fluxerEntityResolver,
     threadSyncService,
     categorySyncService,
+    expressionTransferService,
     metricsService,
     queueService,
     discordStatsService,
@@ -78,6 +82,7 @@ const startDiscordClient = async ({
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
     categorySyncService: CategorySyncService;
+    expressionTransferService: ExpressionTransferService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -200,6 +205,14 @@ const startDiscordClient = async ({
             fluxerEntityResolver
         )
     );
+    const expressionsHandler = new ExpressionsDiscordCommandHandler(
+        client,
+        linkService,
+        expressionTransferService
+    );
+    for (const name of EXPRESSIONS_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, expressionsHandler);
+    }
 
     const remindersEnabled = botConfig.reminders.enabled;
     if (remindersEnabled) {

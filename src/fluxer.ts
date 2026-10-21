@@ -66,6 +66,9 @@ import { parseReminderTrigger } from './commands/reminderTrigger';
 import CleanFluxerCommandHandler from './commands/fluxer/handlers/CleanFluxerCommandHandler';
 import { parseCommandTrigger } from './commands/commandTrigger';
 import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
+import ExpressionsFluxerCommandHandler from './commands/fluxer/handlers/ExpressionsFluxerCommandHandler';
+import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
+import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
 
 const startFluxerClient = async ({
     linkService,
@@ -77,6 +80,7 @@ const startFluxerClient = async ({
     threadSyncService,
     categorySyncService,
     threadMemberSyncService,
+    expressionTransferService,
     metricsService,
     queueService,
     discordStatsService,
@@ -95,6 +99,7 @@ const startFluxerClient = async ({
     threadSyncService: ThreadSyncService;
     categorySyncService: CategorySyncService;
     threadMemberSyncService: ThreadMemberSyncService;
+    expressionTransferService: ExpressionTransferService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -228,6 +233,14 @@ const startFluxerClient = async ({
     );
     commandRegistry.registerCommand('role', identityHandler);
     commandRegistry.registerCommand('map', identityHandler);
+    const expressionsHandler = new ExpressionsFluxerCommandHandler(
+        client,
+        linkService,
+        expressionTransferService
+    );
+    for (const name of EXPRESSIONS_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, expressionsHandler);
+    }
     commandRegistry.registerCommand(
         'autolink',
         new AutolinkFluxerCommandHandler(

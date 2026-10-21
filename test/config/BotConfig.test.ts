@@ -320,7 +320,7 @@ describe('inviteBotPermissions', () => {
     it('requests the base set without Manage Threads by default', () => {
         const mask = inviteBotPermissions(DEFAULT_BOT_CONFIG);
 
-        expect(mask).toBe('309811301440');
+        expect(mask).toBe('9105904323648');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(0n);
     });
 
@@ -330,7 +330,7 @@ describe('inviteBotPermissions', () => {
             permissions: { manageThreads: true },
         });
 
-        expect(mask).toBe('326991170624');
+        expect(mask).toBe('9123084192832');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(MANAGE_THREADS);
         expect(BigInt(mask) - MANAGE_THREADS).toBe(
             BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG))
@@ -348,6 +348,22 @@ describe('inviteBotPermissions', () => {
             BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG)) & ADD_REACTIONS
         ).toBe(ADD_REACTIONS);
         expect(BigInt(off) & ADD_REACTIONS).toBe(ADD_REACTIONS);
+    });
+
+    it('always requests Create Expressions for emoji and sticker transfer', () => {
+        const CREATE_EXPRESSIONS = 1n << 43n;
+        const withThreads = inviteBotPermissions({
+            ...DEFAULT_BOT_CONFIG,
+            permissions: { manageThreads: true },
+        });
+
+        expect(
+            BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG)) &
+                CREATE_EXPRESSIONS
+        ).toBe(CREATE_EXPRESSIONS);
+        expect(BigInt(withThreads) & CREATE_EXPRESSIONS).toBe(
+            CREATE_EXPRESSIONS
+        );
     });
 
     it('returns a decimal string', () => {

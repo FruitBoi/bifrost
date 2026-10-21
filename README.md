@@ -16,11 +16,12 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
+- Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 
-¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly.
+¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
 ## Threads
 
@@ -173,6 +174,31 @@ User pings need an identity mapping; role pings need a role with the same name i
 ### Database migration
 
 Identity mappings ship as migration `00008-user-links`, which adds the `user_links` table (one row per mapped account pair, unique per server link on both the Discord and the Fluxer side). It runs automatically on startup; rolling it back drops the table.
+
+## Emoji and sticker transfer
+
+Custom emojis are bridged by **name**: in messages and in [reactions](#reactions), a custom emoji only comes through when the other server has a custom emoji with the same name. Instead of re-creating every emoji on Fluxer by hand, one command copies all of the linked Discord server's custom emojis and stickers into the linked Fluxer server under the same names. The copy goes one way only, **Discord → Fluxer**; nothing is ever deleted or renamed on either side.
+
+- `!b expressions` — copies the emojis and the stickers.
+- `!b expressions emojis` — copies only the emojis.
+- `!b expressions stickers` — copies only the stickers.
+
+`!b emotes` and `!b emojis` are aliases of `!b expressions`. The command works on both platforms: run it on Discord inside the linked Discord server, or on Fluxer inside the linked Fluxer server; either way the Discord server's expressions are copied to the Fluxer server it is linked to.
+
+- **Re-running is safe.** An emoji or sticker whose name already exists on the Fluxer server is skipped (names are compared exactly, case-sensitive, the same rule bridging uses), so after adding new emojis on Discord, run the command again to copy only the new ones. If several Discord emojis share a name, it is copied once.
+- **What is copied.** Emojis (PNG or animated GIF) and PNG, APNG and GIF stickers are copied as-is at their original size, keeping the name; stickers also keep their description and tag.
+- **What is skipped.** Lottie stickers (Discord's animated vector format) cannot be transferred, because Fluxer only stores PNG, APNG, GIF and WebP images.
+- **Progress and report.** For a non-empty transfer the bot first posts a short "copying N emojis and M stickers…" notice: images are downloaded from Discord and uploaded to Fluxer in batches, so a large server can take a while. When it is done it posts one report listing what was created, what was skipped (and why) and what failed (with the error). A failed item does not stop the rest.
+- **One at a time.** Only one transfer per Fluxer server runs at once; running the command again while one is in progress is refused with a message.
+
+### Permissions
+
+- **Who may run it.** The member needs **Manage Expressions** on the platform the command is run on: in the linked Discord server when run on Discord, in the linked Fluxer server when run on Fluxer. `roles.*` in the configuration file does not apply.
+- **What the bot needs.** **Create Expressions** in the Fluxer server, to upload the copies. Reading the Discord server's emojis and stickers needs no extra permission. The invite links logged at startup include Create Expressions; installations made before emoji and sticker transfer was added must grant it to the bot's role on Fluxer manually or re-invite the bot.
+
+### Limits
+
+Fluxer's defaults apply (a self-hosted instance may configure them differently): a server has **500 emoji** and **500 sticker** slots, and each image may be at most **512 KiB**. Items that do not fit, are too large, or whose content the instance blocks are listed as failed in the report, with Fluxer's error.
 
 ## Reminders
 

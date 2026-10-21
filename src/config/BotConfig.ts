@@ -363,6 +363,7 @@ const PERMISSION_BITS = {
     manageThreads: 2 ** 34,
     createPublicThreads: 2 ** 35,
     sendMessagesInThreads: 2 ** 38,
+    createExpressions: 2 ** 43,
 };
 
 /**
@@ -371,8 +372,10 @@ const PERMISSION_BITS = {
  * Voice Activity); thread bridging adds Create Public Threads and Send
  * Messages in Threads, and reaction bridging adds Add Reactions (requested
  * even when `reactions.enabled` is off, so turning it on later needs no
- * re-invite). Manage Threads is only requested when enabled in the config,
- * because it also grants deleting and archiving threads.
+ * re-invite). Emoji and sticker transfer (`expressions` command) adds Create
+ * Expressions, which the bot needs on Fluxer to upload the copies. Manage
+ * Threads is only requested when enabled in the config, because it also
+ * grants deleting and archiving threads.
  */
 export function inviteBotPermissions(config: BotConfig): string {
     const flags = [
@@ -387,6 +390,7 @@ export function inviteBotPermissions(config: BotConfig): string {
         PERMISSION_BITS.useVoiceActivity,
         PERMISSION_BITS.createPublicThreads,
         PERMISSION_BITS.sendMessagesInThreads,
+        PERMISSION_BITS.createExpressions,
     ];
     if (config.permissions.manageThreads) {
         flags.push(PERMISSION_BITS.manageThreads);
