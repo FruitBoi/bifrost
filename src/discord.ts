@@ -121,7 +121,13 @@ const startDiscordClient = async ({
     discordStatsService.setClient(client);
 
     const messageTransformer = new DiscordMessageTransformer(
-        new MentionBridgeService(linkService)
+        new MentionBridgeService(linkService, {
+            roleLookup: {
+                fetchDiscordRoles: (id) => discordEntityResolver.fetchRoles(id),
+                fetchFluxerRoles: (id) => fluxerEntityResolver.fetchRoles(id),
+            },
+            bridgeRoleMentions: botConfig.roles.bridgeMentions,
+        })
     );
     const messageRelay = new DiscordToFluxerMessageRelay({
         linkService,

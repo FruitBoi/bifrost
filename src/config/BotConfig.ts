@@ -55,6 +55,14 @@ export interface BotConfig {
          * `roles.copyAllowedRoleIds`, which is still accepted as an alias.
          */
         identity: string[];
+        /**
+         * Relay role mentions as real pings: a `<@&role>` mention written on
+         * one platform pings the role with the same name on the other
+         * (issue #15). Roles without a namesake, and roles the author could
+         * not ping on their own platform, stay plaintext. @everyone and
+         * @here are never bridged. See `services/mentionBridge/`.
+         */
+        bridgeMentions: boolean;
     };
     clean: {
         /**
@@ -114,6 +122,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     roles: {
         moderator: ['1561105750388908139'],
         identity: ['1561105750388908139', '1561105750388908112'],
+        bridgeMentions: true,
     },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     meow: { enabled: true },

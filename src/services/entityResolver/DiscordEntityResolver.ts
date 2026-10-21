@@ -9,7 +9,11 @@ import {
     VoiceChannel,
 } from 'discord.js';
 import NodeCache from 'node-cache';
+import logger from '../../utils/logging/logger';
 import EntityResolver from '../entityResolver/EntityResolver';
+import { GeneralRole } from '../mentionBridge/MentionBridgeService';
+
+const ROLE_FAILURE_TTL_SECONDS = 30;
 
 export default class DiscordEntityResolver implements EntityResolver<
     Guild,
@@ -19,6 +23,10 @@ export default class DiscordEntityResolver implements EntityResolver<
 > {
     private discordClient: Client | null = null;
     private readonly emojiCache = new NodeCache({
+        stdTTL: 60,
+        useClones: false,
+    });
+    private readonly roleCache = new NodeCache({
         stdTTL: 60,
         useClones: false,
     });
@@ -152,5 +160,42 @@ export default class DiscordEntityResolver implements EntityResolver<
         const emojis = emojiCollection.map((emoji) => emoji);
         this.emojiCache.set(id, emojis);
         return emojis;
+    }
+
+    /**
+     * Lists the guild's roles (including @everyone, whose id is the guild id),
+     * cached for a minute. A failed fetch is logged and yields an empty list
+     * for a short while so a flaky API is not hammered on every message.
+     */
+    async fetchRoles(guildOrId: string | Guild): Promise<GeneralRole[]> {
+        const id = typeof guildOrId === 'string' ? guildOrId : guildOrId.id;
+
+        const cached = this.roleCache.get<GeneralRole[]>(id);
+        if (cached) return cached;
+
+        try {
+            this.ensureClient();
+            const guild =
+                typeof guildOrId === 'string'
+                    ? await this.fetchGuild(guildOrId)
+                    : guildOrId;
+            if (!guild) {
+                throw new Error('Discord guild not found');
+            }
+
+            const roles = (await guild.roles.fetch()).map((role) => ({
+                id: role.id,
+                name: role.name,
+            }));
+            this.roleCache.set(id, roles);
+            return roles;
+        } catch (err) {
+            logger.warn(
+                `⚠️ Could not fetch Discord roles for guild ${id}, relaying role mentions as plaintext:`,
+                err
+            );
+            this.roleCache.set(id, [], ROLE_FAILURE_TTL_SECONDS);
+            return [];
+        }
     }
 }

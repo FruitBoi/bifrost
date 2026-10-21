@@ -2,6 +2,7 @@ import {
     Message,
     MessageFlags,
     OmitPartialGroupDMChannel,
+    PermissionFlagsBits,
     TextChannel,
 } from 'discord.js';
 import { WebhookAttachment, WebhookMessageData } from '../WebhookService';
@@ -12,6 +13,7 @@ import { getPollMessage } from '../../utils/pollMessageFormatter';
 import WebhookEmbed, { WebhookEmbedFooter } from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
 import MentionBridgeService, {
+    ResolvedRoleMention,
     ResolvedUserMention,
 } from '../mentionBridge/MentionBridgeService';
 
@@ -70,10 +72,12 @@ export default class DiscordMessageTransformer extends MessageTransformer<
 
     private sanitizeContent(
         message: Pick<DiscordMessage, 'content' | 'client' | 'guild'>,
-        renderUserMention?: (id: string) => string | null
+        renderUserMention?: (id: string) => string | null,
+        renderRoleMention?: (id: string) => string | null
     ): string {
         return sanitizeMentions(message.content, {
             renderUserMention,
+            renderRoleMention,
             resolveUser: (id) => {
                 const user = message.client.users.cache.get(id);
                 return user ? user.username : null;
@@ -139,6 +143,40 @@ export default class DiscordMessageTransformer extends MessageTransformer<
     }
 
     /**
+     * Resolves the `<@&id>` role mentions in the raw content to the Fluxer
+     * roles of the same name. Unmatched ones, and roles the author could not
+     * ping on Discord, are logged and relayed as plaintext.
+     */
+    private async resolveRoleMentions(
+        message: Pick<
+            DiscordMessage,
+            'content' | 'guild' | 'guildId' | 'member'
+        >,
+        options: TransformOptions
+    ): Promise<ResolvedRoleMention[]> {
+        if (!this.mentionBridge) return [];
+        const ids = MentionBridgeService.extractRoleMentionIds(message.content);
+        if (ids.length === 0) return [];
+        return this.mentionBridge.resolveRoleMentions({
+            platform: 'discord',
+            guildId: message.guildId ?? null,
+            mentions: ids.map((id) => {
+                const role = message.guild?.roles.cache.get(id);
+                return {
+                    id,
+                    name: role?.name ?? null,
+                    mentionable: role?.mentionable ?? false,
+                };
+            }),
+            authorCanMentionAnyRole:
+                message.member?.permissions.has(
+                    PermissionFlagsBits.MentionEveryone
+                ) ?? false,
+            isEdit: options.isEdit,
+        });
+    }
+
+    /**
      * When a reply pings the author of a bridged message, resolves the Fluxer
      * user that the relayed copy must ping. Empty when there is nobody to ping.
      */
@@ -171,12 +209,15 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         rawContent: string,
         attachments: WebhookAttachment[],
         embeds: WebhookEmbed[],
-        allMentionUserIds: string[]
+        allMentionUserIds: string[],
+        allMentionRoleIds: string[]
     ): WebhookMessageData {
         // Mapped direct mentions sit in the content as placeholders until now
         // so that sanitising could not touch them; reply pings are prepended.
-        // A user can be both (reply target and mentioned inline).
+        // A user can be both (reply target and mentioned inline). Role
+        // mentions stay inline where they were written.
         const mentionUserIds = [...new Set(allMentionUserIds)];
+        const mentionRoleIds = [...new Set(allMentionRoleIds)];
         const content =
             MentionBridgeService.restoreMentionPlaceholders(rawContent);
         return {
@@ -192,6 +233,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             attachments: attachments,
             embeds,
             ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
+            ...(mentionRoleIds.length > 0 ? { mentionRoleIds } : {}),
         };
     }
 
@@ -201,15 +243,28 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         options: TransformOptions = {}
     ): Promise<WebhookMessageData> {
         const directMentions = await this.resolveUserMentions(message, options);
+        const roleMentions = await this.resolveRoleMentions(message, options);
         const counterpartByMentionId = new Map(
             directMentions.map((m) => [m.id, m.counterpartId])
         );
-        const sanitizedContent = this.sanitizeContent(message, (id) => {
-            const counterpartId = counterpartByMentionId.get(id);
-            return counterpartId
-                ? MentionBridgeService.mentionPlaceholder(counterpartId)
-                : null;
-        });
+        const counterpartByRoleId = new Map(
+            roleMentions.map((m) => [m.id, m.counterpartId])
+        );
+        const sanitizedContent = this.sanitizeContent(
+            message,
+            (id) => {
+                const counterpartId = counterpartByMentionId.get(id);
+                return counterpartId
+                    ? MentionBridgeService.mentionPlaceholder(counterpartId)
+                    : null;
+            },
+            (id) => {
+                const counterpartId = counterpartByRoleId.get(id);
+                return counterpartId
+                    ? MentionBridgeService.roleMentionPlaceholder(counterpartId)
+                    : null;
+            }
+        );
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
             fluxerEmojis
@@ -238,6 +293,9 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         const mentionUserIds: string[] = isPollPresent
             ? []
             : directMentions.map((m) => m.counterpartId);
+        const mentionRoleIds: string[] = isPollPresent
+            ? []
+            : roleMentions.map((m) => m.counterpartId);
 
         if (message.reference) {
             const isForwarded = message.flags.has(MessageFlags.HasSnapshot);
@@ -250,7 +308,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                     messageContent,
                     attachments,
                     embeds,
-                    mentionUserIds
+                    mentionUserIds,
+                    mentionRoleIds
                 );
             }
 
@@ -305,7 +364,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             messageContent,
             attachments,
             embeds,
-            mentionUserIds
+            mentionUserIds,
+            mentionRoleIds
         );
     }
 }

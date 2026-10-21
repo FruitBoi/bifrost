@@ -1,3 +1,5 @@
+import { GeneralRole } from '../mentionBridge/MentionBridgeService';
+
 export default interface EntityResolver<Guild, Channel, Message, Emoji> {
     fetchGuild(guildId: string): Promise<Guild | null>;
     fetchChannel(
@@ -10,6 +12,8 @@ export default interface EntityResolver<Guild, Channel, Message, Emoji> {
         messageId: string
     ): Promise<Message>;
     fetchEmojis(guildId: string | Guild): Promise<Emoji[]>;
+    /** Lists the guild's roles as `{ id, name }` pairs; empty when unknown. */
+    fetchRoles(guildId: string | Guild): Promise<GeneralRole[]>;
     /** Fetches a channel of the guild; null unless it is a voice channel. */
     fetchVoiceChannel(
         guildId: string | Guild,

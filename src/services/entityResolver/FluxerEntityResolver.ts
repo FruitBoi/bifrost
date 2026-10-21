@@ -15,8 +15,10 @@ import {
     markFluxerApiBlocked,
 } from '../../utils/fluxerApiGuard';
 import EntityResolver from '../entityResolver/EntityResolver';
+import { GeneralRole } from '../mentionBridge/MentionBridgeService';
 
 const EMOJI_FAILURE_TTL_SECONDS = 30;
+const ROLE_FAILURE_TTL_SECONDS = 30;
 
 export default class FluxerEntityResolver implements EntityResolver<
     Guild,
@@ -26,6 +28,10 @@ export default class FluxerEntityResolver implements EntityResolver<
 > {
     private fluxerClient: Client | null = null;
     private readonly emojiCache = new NodeCache({
+        stdTTL: 60,
+        useClones: false,
+    });
+    private readonly roleCache = new NodeCache({
         stdTTL: 60,
         useClones: false,
     });
@@ -177,6 +183,41 @@ export default class FluxerEntityResolver implements EntityResolver<
                 err
             );
             this.emojiCache.set(id, [], EMOJI_FAILURE_TTL_SECONDS);
+            return [];
+        }
+    }
+
+    /**
+     * Lists the guild's roles (including @everyone, whose id is the guild id),
+     * cached for a minute. A failed fetch is logged and yields an empty list
+     * for a short while so a flaky API is not hammered on every message.
+     */
+    async fetchRoles(guildId: string | Guild): Promise<GeneralRole[]> {
+        const id = typeof guildId === 'string' ? guildId : guildId.id;
+
+        const cached = this.roleCache.get<GeneralRole[]>(id);
+        if (cached) return cached;
+        if (isFluxerApiBlocked()) return [];
+
+        try {
+            const guild =
+                typeof guildId === 'string'
+                    ? await this.ensureClient().guilds.fetch(guildId)
+                    : guildId;
+
+            const roles = (await guild.fetchRoles()).map((role) => ({
+                id: role.id,
+                name: role.name,
+            }));
+            this.roleCache.set(id, roles);
+            return roles;
+        } catch (err) {
+            if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
+            logger.warn(
+                `⚠️ Could not fetch Fluxer roles for guild ${id}, relaying role mentions as plaintext:`,
+                err
+            );
+            this.roleCache.set(id, [], ROLE_FAILURE_TTL_SECONDS);
             return [];
         }
     }

@@ -35,28 +35,34 @@ export type WebhookMessageData = {
      * webhook so the platform notifies those users.
      */
     mentionUserIds?: string[];
+    /**
+     * Role ids that the relayed message must really ping. Content already
+     * carries the matching `<@&id>` mentions; this whitelists them for the
+     * webhook so the platform notifies the role's members. Only honoured on
+     * send: an edit keeps the markup but never pings the role again.
+     */
+    mentionRoleIds?: string[];
 };
 
-/** Discord allowed-mentions whitelist for `mentionUserIds`, or undefined to keep defaults. */
-function discordAllowedMentions(
-    data: WebhookMessageData
-): { users: string[] } | undefined {
-    return data.mentionUserIds && data.mentionUserIds.length > 0
-        ? { users: data.mentionUserIds }
-        : undefined;
-}
+type AllowedMentions = { parse: never[]; users: string[]; roles?: string[] };
 
 /**
- * Fluxer allowed-mentions whitelist for `mentionUserIds`, or undefined to keep
- * defaults. The empty `parse` mirrors the Discord side: a bridged reply ping
- * must never newly opt in to @everyone/@here or role pings.
+ * Allowed-mentions whitelist for `mentionUserIds` / `mentionRoleIds` (the
+ * same shape serves Discord's `allowedMentions` and Fluxer's
+ * `allowed_mentions`), or undefined to keep the platform defaults when there
+ * is nothing to ping. The empty `parse` means a bridged message never newly
+ * opts in to @everyone/@here or blanket role pings; `roles` is only present
+ * when a role is actually whitelisted. Edits whitelist no roles so that
+ * re-relaying an edited message cannot ping a role a second time.
  */
-function fluxerAllowedMentions(
-    data: WebhookMessageData
-): { parse: never[]; users: string[] } | undefined {
-    return data.mentionUserIds && data.mentionUserIds.length > 0
-        ? { parse: [], users: data.mentionUserIds }
-        : undefined;
+function allowedMentionsFor(
+    data: WebhookMessageData,
+    isEdit = false
+): AllowedMentions | undefined {
+    const users = data.mentionUserIds ?? [];
+    const roles = isEdit ? [] : (data.mentionRoleIds ?? []);
+    if (users.length === 0 && roles.length === 0) return undefined;
+    return { parse: [], users, ...(roles.length > 0 ? { roles } : {}) };
 }
 
 /** Appends `key=value` to a route that may or may not already carry a query string. */
@@ -153,7 +159,7 @@ export class WebhookService {
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
                 threadId: threadId ?? undefined,
-                allowedMentions: discordAllowedMentions(data),
+                allowedMentions: allowedMentionsFor(data),
             });
 
             return { messageId: id };
@@ -187,7 +193,7 @@ export class WebhookService {
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
                 threadId: threadId ?? undefined,
-                allowedMentions: discordAllowedMentions(data),
+                allowedMentions: allowedMentionsFor(data, true),
             });
         } catch (error: unknown) {
             logger.error(
@@ -354,7 +360,7 @@ export class WebhookService {
                     embeds:
                         data.embeds?.map((embed) => embed.toFluxerEmbed()) ||
                         [],
-                    allowedMentions: fluxerAllowedMentions(data),
+                    allowedMentions: allowedMentionsFor(data),
                 },
                 true
             );
@@ -383,7 +389,7 @@ export class WebhookService {
                 FluxerRoutes.webhookExecute(webhook.id, webhook.token!) +
                 `/messages/${messageId}`;
             if (threadId) route = appendQuery(route, 'thread_id', threadId);
-            const allowedMentions = fluxerAllowedMentions(data);
+            const allowedMentions = allowedMentionsFor(data, true);
 
             await webhook.client.rest.patch(route, {
                 body: {

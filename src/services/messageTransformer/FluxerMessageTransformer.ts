@@ -1,4 +1,8 @@
-import { Message, MessageAttachmentFlags } from '@fluxerjs/core';
+import {
+    Message,
+    MessageAttachmentFlags,
+    PermissionFlags,
+} from '@fluxerjs/core';
 import MessageTransformer, { TransformOptions } from './MessageTransformer';
 import { WebhookMessageData } from '../WebhookService';
 import { breakMentions, sanitizeMentions } from '../../utils/sanitizeMentions';
@@ -6,6 +10,7 @@ import { buildFluxerStickerUrl } from '../../utils/buildStickerUrl';
 import WebhookEmbed from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
 import MentionBridgeService, {
+    ResolvedRoleMention,
     ResolvedUserMention,
 } from '../mentionBridge/MentionBridgeService';
 
@@ -36,6 +41,37 @@ export default class FluxerMessageTransformer extends MessageTransformer<
     }
 
     /**
+     * Resolves the `<@&id>` role mentions in the raw content to the Discord
+     * roles of the same name. Unmatched ones, and roles the author could not
+     * ping on Fluxer, are logged and relayed as plaintext.
+     */
+    private async resolveRoleMentions(
+        message: Message,
+        options: TransformOptions
+    ): Promise<ResolvedRoleMention[]> {
+        if (!this.mentionBridge) return [];
+        const ids = MentionBridgeService.extractRoleMentionIds(message.content);
+        if (ids.length === 0) return [];
+        return this.mentionBridge.resolveRoleMentions({
+            platform: 'fluxer',
+            guildId: message.guildId ?? null,
+            mentions: ids.map((id) => {
+                const role = message.guild?.roles.get(id);
+                return {
+                    id,
+                    name: role?.name ?? null,
+                    mentionable: role?.mentionable ?? false,
+                };
+            }),
+            authorCanMentionAnyRole:
+                message.member?.permissions.has(
+                    PermissionFlags.MentionEveryone
+                ) ?? false,
+            isEdit: options.isEdit,
+        });
+    }
+
+    /**
      * When a reply pings the author of a bridged message, resolves the Discord
      * user that the relayed copy must ping. Empty when there is nobody to ping.
      */
@@ -57,11 +93,13 @@ export default class FluxerMessageTransformer extends MessageTransformer<
 
     private sanitizeContent(
         message: Message,
-        renderUserMention?: (id: string) => string | null
+        renderUserMention?: (id: string) => string | null,
+        renderRoleMention?: (id: string) => string | null
     ): string {
         return breakMentions(
             sanitizeMentions(message.content, {
                 renderUserMention,
+                renderRoleMention,
                 resolveUser: (id) => {
                     const user = message.client.users.get(id);
                     return user ? user.username : null;
@@ -85,15 +123,28 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         options: TransformOptions = {}
     ): Promise<WebhookMessageData> {
         const directMentions = await this.resolveUserMentions(message, options);
+        const roleMentions = await this.resolveRoleMentions(message, options);
         const counterpartByMentionId = new Map(
             directMentions.map((m) => [m.id, m.counterpartId])
         );
-        const sanitizedContent = this.sanitizeContent(message, (id) => {
-            const counterpartId = counterpartByMentionId.get(id);
-            return counterpartId
-                ? MentionBridgeService.mentionPlaceholder(counterpartId)
-                : null;
-        });
+        const counterpartByRoleId = new Map(
+            roleMentions.map((m) => [m.id, m.counterpartId])
+        );
+        const sanitizedContent = this.sanitizeContent(
+            message,
+            (id) => {
+                const counterpartId = counterpartByMentionId.get(id);
+                return counterpartId
+                    ? MentionBridgeService.mentionPlaceholder(counterpartId)
+                    : null;
+            },
+            (id) => {
+                const counterpartId = counterpartByRoleId.get(id);
+                return counterpartId
+                    ? MentionBridgeService.roleMentionPlaceholder(counterpartId)
+                    : null;
+            }
+        );
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
             discordEmojis
@@ -158,10 +209,13 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         }
 
         // Applied after breakMentions/sanitizeMentions/replaceEmojis so the
-        // injected `<@id>` reaches Discord intact: mapped direct mentions were
-        // placeholders until now, reply pings are prepended.
-        // A user can be both (reply target and mentioned inline).
+        // injected `<@id>` / `<@&id>` reaches Discord intact: mapped direct
+        // and role mentions were placeholders until now, reply pings are
+        // prepended. A user can be both (reply target and mentioned inline).
         const mentionUserIds = [...new Set(allMentionUserIds)];
+        const mentionRoleIds = [
+            ...new Set(roleMentions.map((m) => m.counterpartId)),
+        ];
         const content =
             MentionBridgeService.restoreMentionPlaceholders(
                 emojiReplacedContent
@@ -179,6 +233,7 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             attachments: attachments,
             embeds,
             ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
+            ...(mentionRoleIds.length > 0 ? { mentionRoleIds } : {}),
         };
     }
 }

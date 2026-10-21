@@ -16,7 +16,7 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
-- Map a Fluxer account to a Discord account so pings reach the same person on both sides (see [Identity mapping](#identity-mapping))
+- Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 
@@ -159,9 +159,16 @@ The `role` command does three things at once and reports the outcome of each:
 
 ### Pings
 
+User pings need an identity mapping; role pings need a role with the same name in the linked server.
+
 - With a mapping, a `<@user>` mention written on one platform is relayed as a real mention of the mapped account on the other, and a reply-with-ping to a message that was written on the replier's own platform pings the author's mapped account on the other side.
 - Without a mapping, mentions are relayed as plaintext `@name` and nobody is pinged on the other side.
 - Replying with a ping to a *bridged copy* of a message (one the bridge posted on your platform) has always pinged the original author on their platform and still does, mapping or not.
+- A `<@&role>` mention is relayed as a real mention of the role with the **same name** in the linked server on the other platform, Discord → Fluxer and Fluxer → Discord. Names are matched the same way as for custom emojis and `!b role`.
+- The role is only pinged on the other side if the author could ping it on their own: the role is mentionable there, or the author has **Mention Everyone** (or the Fluxer equivalent).
+- If the other server has no role with that name, or the author could not ping the role, the mention is relayed as plaintext `@RoleName` and nobody is pinged.
+- `@everyone` and `@here` are never bridged, and editing a bridged message never pings anyone again.
+- Role ping bridging is on by default; turn it off with `roles.bridgeMentions: false` in the [configuration file](#configuration-file) to relay every role mention as plaintext.
 
 ### Database migration
 
@@ -317,6 +324,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
 | `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`); see [Clean](#clean). IDs are matched on the platform the command is run on, so add a Discord role ID to allow `clean` on Discord. Quote the IDs, unquoted numbers lose precision. |
 | `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity commands `!b role` and `!b map`; see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
+| `roles.bridgeMentions` | `true` | Relay role mentions as real pings of the role with the same name in the linked server on the other platform, if the author could ping the role on their own side. Without a same-named role the mention stays plaintext `@RoleName`; `@everyone`/`@here` are never bridged and edits never re-ping. `false` relays every role mention as plaintext. See [Pings](#pings). |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |

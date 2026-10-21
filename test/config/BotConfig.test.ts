@@ -375,6 +375,7 @@ describe('roles', () => {
         expect(DEFAULT_BOT_CONFIG.roles).toEqual({
             moderator: ['1561105750388908139'],
             identity: ['1561105750388908139', '1561105750388908112'],
+            bridgeMentions: true,
         });
     });
 
@@ -386,6 +387,7 @@ describe('roles', () => {
         expect(config.roles).toEqual({
             moderator: ['1', '2'],
             identity: ['3'],
+            bridgeMentions: true,
         });
         expect(unknownKeys).toEqual([]);
         expect(deprecatedKeys).toEqual([]);
@@ -397,6 +399,7 @@ describe('roles', () => {
         expect(config.roles).toEqual({
             moderator: ['1'],
             identity: DEFAULT_BOT_CONFIG.roles.identity,
+            bridgeMentions: true,
         });
     });
 
@@ -428,9 +431,51 @@ describe('roles', () => {
         expect(config.roles).toEqual({
             moderator: ['42'],
             identity: ['43', '44'],
+            bridgeMentions: true,
         });
         expect(unknownKeys).toEqual([]);
         expect(deprecatedKeys).toEqual([]);
+    });
+});
+
+describe('roles.bridgeMentions', () => {
+    it('defaults to true', () => {
+        expect(DEFAULT_BOT_CONFIG.roles.bridgeMentions).toBe(true);
+    });
+
+    it('can be turned off without touching the role groups', () => {
+        const { config, unknownKeys, deprecatedKeys } = mergeBotConfig({
+            roles: { bridgeMentions: false },
+        });
+
+        expect(config.roles).toEqual({
+            moderator: DEFAULT_BOT_CONFIG.roles.moderator,
+            identity: DEFAULT_BOT_CONFIG.roles.identity,
+            bridgeMentions: false,
+        });
+        expect(unknownKeys).toEqual([]);
+        expect(deprecatedKeys).toEqual([]);
+    });
+
+    it('merges roles.bridgeMentions: false from a YAML file', () => {
+        write('config.yml', 'roles:\n  bridgeMentions: false\n');
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            roles: { ...DEFAULT_BOT_CONFIG.roles, bridgeMentions: false },
+        });
+    });
+
+    it('rejects a non-boolean value', () => {
+        const attempt = () =>
+            mergeBotConfig({ roles: { bridgeMentions: 'no' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('roles.bridgeMentions');
+        expect(attempt).toThrow('boolean');
     });
 });
 
@@ -482,7 +527,11 @@ describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => 
             roles: { moderator: ['9'], copyAllowedRoleIds: ['42'] },
         });
 
-        expect(config.roles).toEqual({ moderator: ['9'], identity: ['42'] });
+        expect(config.roles).toEqual({
+            moderator: ['9'],
+            identity: ['42'],
+            bridgeMentions: true,
+        });
     });
 
     it('does not mutate the raw input', () => {

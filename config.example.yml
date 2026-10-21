@@ -56,6 +56,16 @@ roles:
     identity:
         - "1561105750388908139"
         - "1561105750388908112"
+    # Bridge role pings. A role mention (`@Role`) in a bridged message pings
+    # the role with the same name in the linked server on the other platform
+    # (names are matched like custom emojis and `!b role`), in both
+    # directions. The role is only pinged there if the author could ping it
+    # on their own side (the role is mentionable, or the author has Mention
+    # Everyone). Without a same-named role the mention is relayed as
+    # plaintext `@RoleName` and nobody is pinged. @everyone and @here are
+    # never bridged, and editing a bridged message never pings again. Set to
+    # false to relay every role mention as plaintext.
+    bridgeMentions: true
 
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`

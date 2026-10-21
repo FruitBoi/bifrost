@@ -8,6 +8,12 @@ type MentionResolver = {
      * real pings; see MentionBridgeService.mentionPlaceholder).
      */
     renderUserMention?: (id: string) => string | null;
+    /**
+     * Optional: a verbatim replacement for a role mention, used instead of
+     * `@RoleName` when it returns a string (for role mentions that are kept
+     * as real pings; see MentionBridgeService.roleMentionPlaceholder).
+     */
+    renderRoleMention?: (id: string) => string | null;
 };
 
 export function sanitizeMentions(
@@ -29,6 +35,8 @@ export function sanitizeMentions(
 
         if (match.startsWith('<@&')) {
             const id = match.replace(/[<@&>]/g, '');
+            const rendered = resolver.renderRoleMention?.(id) ?? null;
+            if (rendered !== null) return rendered;
             const roleName = resolver.resolveRole(id);
             return roleName ? `@${roleName}` : '@unknown-role';
         }

@@ -146,7 +146,13 @@ const startFluxerClient = async ({
     fluxerStatsService.setClient(client);
 
     const messageTransformer = new FluxerMessageTransformer(
-        new MentionBridgeService(linkService)
+        new MentionBridgeService(linkService, {
+            roleLookup: {
+                fetchDiscordRoles: (id) => discordEntityResolver.fetchRoles(id),
+                fetchFluxerRoles: (id) => fluxerEntityResolver.fetchRoles(id),
+            },
+            bridgeRoleMentions: botConfig.roles.bridgeMentions,
+        })
     );
     const meowService = new MeowService();
     const messageRelay = new FluxerToDiscordMessageRelay({
