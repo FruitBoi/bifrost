@@ -17,6 +17,7 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
+- Lets your fish day-trade a simulated fish stock market: `!b fishtrade Bubbles` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
@@ -164,6 +165,16 @@ Voice links ship as migration `00006-voice-links`, which adds the `voice_links` 
 ## Cat chat
 
 Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. **Only Fluxer users get an answer**: a meow written on Discord is bridged like any other message but is not replied to. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so Discord still sees the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
+
+## Fish trading
+
+`!b fishtrade [fish name] [-seed <n>] [-cash <amount>]` (aliases `fishtrading`, `stonks`; also a Discord slash command) simulates one trading day of your fish day-trading a made-up fish ticker, and reports how it went. It is open to everyone; bots are refused.
+
+Instead of the fish's usual random guesses, the day is traded with a real trend-following algorithm: a fast and a slow exponential moving average (EMA) crossover decides when to go long or short, a stop-loss a few average true ranges (ATR) from the entry limits each loss, the position is sized so that a stopped-out trade risks only a small fraction of the bankroll, and every position is closed before the close so the fish is flat overnight. The same simulated day is also played by the old random strategy and by plain buy-and-hold, and the reply compares the three.
+
+The reply also shows progress toward **fish financial independence**: the portfolio needed to live off its returns is 25 times the fish's yearly fish-food expenses (the 4% rule), and the day's result is shown against that target.
+
+`-seed <n>` replays the same day (same prices, same outcome); without it every run is a new day. `-cash <amount>` sets the starting bankroll (default $100). Everything is simulated: there is no real market data, no network access and nothing is stored, and none of it is financial advice, for fish or anyone else.
 
 ## Identity mapping
 

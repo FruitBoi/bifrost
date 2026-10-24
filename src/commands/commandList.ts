@@ -240,6 +240,20 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'fishtrade',
+        aliases: ['fishtrading', 'stonks'],
+        discord: {
+            description:
+                'Simulates one trading day of your fish day-trading a made-up fish ticker (no real market data, purely simulated). The fish follows a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close) and is compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles` names the fish, `-seed <n>` replays a day, `-cash <amount>` sets the starting bankroll (default $100). Aliases `fishtrading`, `stonks`. Open to everyone.',
+            usageArgs: ['[fish name]', '[-seed <n>]', '[-cash <amount>]'],
+        },
+        fluxer: {
+            description:
+                'Simulates one trading day of your fish day-trading a made-up fish ticker (no real market data, purely simulated). The fish follows a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close) and is compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles` names the fish, `-seed <n>` replays a day, `-cash <amount>` sets the starting bankroll (default $100). Aliases `fishtrading`, `stonks`. Open to everyone.',
+            usageArgs: ['[fish name]', '[-seed <n>]', '[-cash <amount>]'],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:

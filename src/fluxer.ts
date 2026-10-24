@@ -79,6 +79,8 @@ import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
 import LinesFluxerCommandHandler from './commands/fluxer/handlers/LinesFluxerCommandHandler';
+import FishTradeFluxerCommandHandler from './commands/fluxer/handlers/FishTradeFluxerCommandHandler';
+import { FISH_TRADE_COMMAND_NAMES } from './services/fishTrading/fishTrading';
 import ClaudeLinesService, {
     CLAUDE_LINES_COMMAND_NAMES,
 } from './services/claudeLines/ClaudeLinesService';
@@ -352,6 +354,11 @@ const startFluxerClient = async ({
     );
     for (const name of CLAUDE_LINES_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, linesHandler);
+    }
+
+    const fishTradeHandler = new FishTradeFluxerCommandHandler(client);
+    for (const name of FISH_TRADE_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, fishTradeHandler);
     }
 
     client.once(Events.Ready, () => {
