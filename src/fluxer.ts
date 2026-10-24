@@ -75,6 +75,10 @@ import ClaudeRequestFluxerCommandHandler from './commands/fluxer/handlers/Claude
 import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
+import LinesFluxerCommandHandler from './commands/fluxer/handlers/LinesFluxerCommandHandler';
+import ClaudeLinesService, {
+    CLAUDE_LINES_COMMAND_NAMES,
+} from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 
 const startFluxerClient = async ({
@@ -97,6 +101,7 @@ const startFluxerClient = async ({
     reminderService,
     historyService,
     claudeRequestService,
+    claudeLinesService,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -118,6 +123,7 @@ const startFluxerClient = async ({
     reminderService: ReminderService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
+    claudeLinesService: ClaudeLinesService;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -326,6 +332,14 @@ const startFluxerClient = async ({
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
         }
+    }
+
+    const linesHandler = new LinesFluxerCommandHandler(
+        client,
+        claudeLinesService
+    );
+    for (const name of CLAUDE_LINES_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, linesHandler);
     }
 
     client.once(Events.Ready, () => {

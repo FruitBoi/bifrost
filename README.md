@@ -22,6 +22,7 @@
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
 - File a GitHub issue for Claude straight from chat: `!b clauderequest make the bot meow louder` (see [Claude requests](#claude-requests))
+- See how many lines of code Claude has written for the bot: `!b lines` (see [Lines](#lines))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
@@ -347,6 +348,12 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 - **Setup.** Set `BF_GITHUB_TOKEN` (or `BF_GITHUB_TOKEN_FILE`) to a GitHub token that may create issues and apply labels in the repository, for example a fine-grained token limited to that repository with **Issues: Read and write**. Without it the command replies that it is not configured. `claudeRequests.enabled: false` switches the command off.
 
 Filing an issue does not start any work by itself; see [CLAUDE.md](CLAUDE.md) for how Claude requests are picked up.
+
+## Lines
+
+`!b lines` answers the server's favorite question: how many lines of code has Claude written? It scans the default branch of the bot's repository (`claudeRequests.repo`) and adds up the lines added and deleted in every commit with a `Co-Authored-By: Claude …` trailer, then replies with the totals, the number of those commits, their share of all lines added, the biggest and the latest Claude commit, and when the first one landed. Anyone can run it. Results are cached for 10 minutes; up to the 5000 most recent commits are scanned.
+
+It reads the history through the GitHub GraphQL API, so it needs `BF_GITHUB_TOKEN` as well (the GraphQL API does not allow anonymous requests); a fine-grained token also needs **Contents: Read** on the repository. Without a token the command replies that it is not configured.
 
 ## Community
 

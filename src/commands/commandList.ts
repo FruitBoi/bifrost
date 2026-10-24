@@ -235,6 +235,19 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'lines',
+        discord: {
+            description:
+                "Shows how many lines of code Claude has written in the bot's GitHub repository: lines added and deleted in commits with a `Co-Authored-By: Claude` trailer, the number of those commits, their share of all lines added, and the biggest and latest one. Counted from the repository's default branch and cached for 10 minutes. Needs `BF_GITHUB_TOKEN`.",
+            usageArgs: [],
+        },
+        fluxer: {
+            description:
+                "Shows how many lines of code Claude has written in the bot's GitHub repository: lines added and deleted in commits with a `Co-Authored-By: Claude` trailer, the number of those commits, their share of all lines added, and the biggest and latest one. Counted from the repository's default branch and cached for 10 minutes. Needs `BF_GITHUB_TOKEN`.",
+            usageArgs: [],
+        },
+    },
+    {
         name: 'list',
         discord: {
             description:

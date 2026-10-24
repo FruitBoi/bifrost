@@ -13,6 +13,7 @@ import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeRemind
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
+import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -208,6 +209,13 @@ const main = async () => {
         );
     }
 
+    // `lines` (issue #19): counts the lines in Claude-co-authored commits of
+    // the same repository; one service (and one cache) for both platforms.
+    const claudeLinesService = new ClaudeLinesService({
+        token: GITHUB_TOKEN,
+        repo: botConfig.claudeRequests.repo,
+    });
+
     const FLUXER_DOWN_THRESHOLD = 5; // 5 × 30s = 2.5 min before restart
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
     const FLUXER_BACKOFF_MS = 20 * 60_000; // 20 min wait after exhausting restarts
@@ -291,6 +299,7 @@ const main = async () => {
         reminderService,
         historyService,
         claudeRequestService,
+        claudeLinesService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
@@ -415,6 +424,7 @@ const main = async () => {
             reminderService,
             historyService,
             claudeRequestService,
+            claudeLinesService,
         }),
         connectFluxer(),
     ]);

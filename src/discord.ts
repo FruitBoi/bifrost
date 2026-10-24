@@ -60,6 +60,10 @@ import ClaudeRequestDiscordCommandHandler from './commands/discord/handlers/Clau
 import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
+import LinesDiscordCommandHandler from './commands/discord/handlers/LinesDiscordCommandHandler';
+import ClaudeLinesService, {
+    CLAUDE_LINES_COMMAND_NAMES,
+} from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 import { BotConfig } from './config/BotConfig';
 
@@ -81,6 +85,7 @@ const startDiscordClient = async ({
     reminderService,
     historyService,
     claudeRequestService,
+    claudeLinesService,
     botConfig,
 }: {
     linkService: LinkService;
@@ -100,6 +105,7 @@ const startDiscordClient = async ({
     reminderService: ReminderService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
+    claudeLinesService: ClaudeLinesService;
     botConfig: BotConfig;
 }): Promise<Client> => {
     const client = new Client({
@@ -292,6 +298,14 @@ const startDiscordClient = async ({
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
         }
+    }
+
+    const linesHandler = new LinesDiscordCommandHandler(
+        client,
+        claudeLinesService
+    );
+    for (const name of CLAUDE_LINES_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, linesHandler);
     }
 
     client.once(Events.ClientReady, () => {
