@@ -7,7 +7,7 @@ import {
     MessageSendOptions,
     EmbedBuilder as FluxerEmbedBuilder,
 } from '@fluxerjs/core';
-import { EmbedColors } from '../utils/embeds';
+import { chunkDescriptionLines, EmbedColors } from '../utils/embeds';
 
 export interface CommandInfo {
     description: string;
@@ -313,7 +313,11 @@ export function getFluxerCommandUsage(commandName: string): MessageSendOptions {
     };
 }
 
-export const getHelpMessage = (platform: CommandPlatform): string => {
+/**
+ * The help text for `platform`, split into embed descriptions that each fit within the
+ * embed description limit (the full list is longer than one embed allows).
+ */
+export const getHelpPages = (platform: CommandPlatform): string[] => {
     function getHelpLine(command: Command): string {
         const commandInfo =
             platform === 'discord' ? command.discord : command.fluxer;
@@ -327,17 +331,16 @@ export const getHelpMessage = (platform: CommandPlatform): string => {
         return `- \`${usage}\`: ${commandInfo.description}`;
     }
 
-    const helpMessage = `
-**Available Commands:**
-${commandList
-    .map((cmd) => getHelpLine(cmd))
-    .filter(Boolean)
-    .join('\n')}
+    const lines = [
+        '**Available Commands:**',
+        ...commandList.map((cmd) => getHelpLine(cmd)).filter(Boolean),
+        '',
+        `Use \`${COMMAND_PREFIX}<command>\` to execute a command.`,
+        '',
+        '-# [Privacy Policy](https://bifrost-bot.com/legal/privacy) | [Terms of Service](https://bifrost-bot.com/legal/tos) | [Support Server](https://fluxer.gg/TN8FkpdQ) | [GitHub](https://github.com/KartoffelChipss/bifrost)',
+    ];
 
-Use \`${COMMAND_PREFIX}<command>\` to execute a command.
-
--# [Privacy Policy](https://bifrost-bot.com/legal/privacy) | [Terms of Service](https://bifrost-bot.com/legal/tos) | [Support Server](https://fluxer.gg/TN8FkpdQ) | [GitHub](https://github.com/KartoffelChipss/bifrost)
-    `;
-
-    return helpMessage;
+    return chunkDescriptionLines(lines, '\n').map((chunk) =>
+        chunk.join('\n').trim()
+    );
 };

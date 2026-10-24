@@ -1,6 +1,6 @@
 import { Client, EmbedBuilder, Message, PermissionFlags } from '@fluxerjs/core';
 import FluxerCommandHandler from '../FluxerCommandHandler';
-import { getHelpMessage } from '../../../commands/commandList';
+import { getHelpPages } from '../../../commands/commandList';
 import { EmbedColors } from '../../../utils/embeds';
 
 export default class HelpFluxerCommandHandler extends FluxerCommandHandler {
@@ -15,15 +15,16 @@ export default class HelpFluxerCommandHandler extends FluxerCommandHandler {
             'Manage Webhooks'
         );
         if (!hasPerms) return;
-        await message.reply({
-            embeds: [
-                new EmbedBuilder()
-                    .setTitle('Bifröst Help')
-                    .setDescription(getHelpMessage('fluxer'))
-                    .setColor(EmbedColors.Info)
-                    .setFooter(this.footer(message))
-                    .setTimestamp(),
-            ],
-        });
+        const pages = getHelpPages('fluxer');
+        const embeds = pages.map((page, i) =>
+            new EmbedBuilder()
+                .setTitle(i === 0 ? 'Bifröst Help' : 'Bifröst Help (continued)')
+                .setDescription(page)
+                .setColor(EmbedColors.Info)
+        );
+        embeds[embeds.length - 1]
+            .setFooter(this.footer(message))
+            .setTimestamp();
+        await this.replyEmbeds(message, embeds);
     }
 }
