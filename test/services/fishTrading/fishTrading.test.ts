@@ -9,13 +9,20 @@ import {
     mulberry32,
     parseFishTradeArgs,
     runFishStrategy,
+    runFishTradingDay,
     runPoorDecisionsBaseline,
     sanitizeFishName,
     simulateFishTradingDay,
     sparkline,
     tradingDaysToFi,
     type FishTradingDay,
+    type FishTradingDeps,
 } from '../../../src/services/fishTrading/fishTrading';
+import {
+    MarketDataError,
+    REAL_TICKERS,
+    type MarketSession,
+} from '../../../src/services/fishTrading/marketData';
 
 describe('mulberry32', () => {
     it('is deterministic per seed and stays in [0, 1)', () => {
@@ -199,6 +206,33 @@ describe('parseFishTradeArgs', () => {
         });
     });
 
+    it('accepts -ticker, a bare $TICKER word and -sim', () => {
+        expect(parseFishTradeArgs(['Bubbles', '$tsla'])).toEqual({
+            ok: true,
+            options: { fishName: 'Bubbles', ticker: 'TSLA' },
+        });
+        expect(
+            parseFishTradeArgs(['--TICKER', 'aapl', 'Gill', '-cash', '50'])
+        ).toEqual({
+            ok: true,
+            options: { fishName: 'Gill', ticker: 'AAPL', startingCash: 50 },
+        });
+        // The same ticker twice is fine.
+        expect(parseFishTradeArgs(['-ticker', 'AAPL', '$aapl'])).toEqual({
+            ok: true,
+            options: { ticker: 'AAPL' },
+        });
+        expect(parseFishTradeArgs(['-sim', 'Nemo'])).toEqual({
+            ok: true,
+            options: { fishName: 'Nemo', simulated: true },
+        });
+        // Plain words stay the fish name, even when they look like tickers.
+        expect(parseFishTradeArgs(['AAPL'])).toEqual({
+            ok: true,
+            options: { fishName: 'AAPL' },
+        });
+    });
+
     it.each([
         [['-seed']],
         [['-seed', '-1']],
@@ -211,6 +245,12 @@ describe('parseFishTradeArgs', () => {
         [['-cash', '1000001']],
         [['-cash', 'lots']],
         [['-cash', '-5']],
+        [['-ticker']],
+        [['-ticker', 'not a ticker!']],
+        [['$ap!pl']],
+        [['-ticker', 'AAPL', '-sim']],
+        [['$TSLA', '-seed', '5']],
+        [['-ticker', 'AAPL', '$TSLA']],
     ])('rejects %j', (args) => {
         const result = parseFishTradeArgs(args);
         expect(result.ok).toBe(false);
@@ -361,5 +401,269 @@ describe('buildFishTradeSummary', () => {
             f.name.startsWith('Financial independence')
         )!;
         expect(fi.value).toMatch(/Not at this rate/);
+    });
+});
+
+/** A session of `prices` one-minute closes starting at 09:30 New York time. */
+function fakeSession(
+    prices: number[],
+    overrides: Partial<MarketSession> = {}
+): MarketSession {
+    const open = Date.UTC(2026, 9, 22, 13, 30) / 1000;
+    return {
+        symbol: 'AAPL',
+        name: 'Apple Inc.',
+        currency: 'USD',
+        exchange: 'NasdaqGS',
+        sessionDate: '2026-10-22',
+        timestamps: prices.map((_, i) => open + i * 60),
+        prices,
+        sessionOpen: open,
+        sessionClose: open + 390 * 60,
+        inProgress: false,
+        ...overrides,
+    };
+}
+
+/** A strong uptrend with a bit of zig-zag, so the fish trades it. */
+function trendingPrices(bars: number, start = 200): number[] {
+    return Array.from(
+        { length: bars },
+        (_, i) => start * Math.exp(0.0006 * i + 0.0015 * Math.sin(i * 1.7))
+    );
+}
+
+function fakeDeps(
+    fetchSession: FishTradingDeps['fetchSession'],
+    random = mulberry32(99)
+): FishTradingDeps & { calls: string[] } {
+    const calls: string[] = [];
+    return {
+        calls,
+        random,
+        fetchSession: async (symbol) => {
+            calls.push(symbol);
+            return fetchSession(symbol);
+        },
+    };
+}
+
+describe('runFishTradingDay on the real market', () => {
+    it('paper-trades a full real session and is flat at the close', async () => {
+        const prices = trendingPrices(BARS_PER_DAY);
+        const deps = fakeDeps(async (symbol) =>
+            fakeSession(prices, { symbol })
+        );
+        const day = await runFishTradingDay(
+            { ticker: 'AAPL', fishName: 'Bubbles', startingCash: 1000 },
+            deps
+        );
+        expect(deps.calls).toEqual(['AAPL']);
+        expect(day.market).toBe('real');
+        expect(day.ticker).toBe('AAPL');
+        expect(day.fishName).toBe('Bubbles');
+        expect(day.notice).toBeNull();
+        expect(day.session).toEqual({
+            sessionDate: '2026-10-22',
+            exchange: 'NasdaqGS',
+            companyName: 'Apple Inc.',
+            currency: 'USD',
+            inProgress: false,
+        });
+        expect(day.prices).toEqual(prices);
+        expect(day.trades.length).toBeGreaterThan(0);
+        expect(day.returnPct).toBeGreaterThan(0);
+        expect(day.marketReturnPct).toBeGreaterThan(0);
+        const pnl = day.trades.reduce((s, t) => s + t.pnl, 0);
+        expect(day.endingCash).toBeCloseTo(1000 + pnl, 6);
+        for (const t of day.trades)
+            expect(t.exitBar).toBeLessThanOrEqual(BARS_PER_DAY - 1);
+        expect(
+            runFishStrategy(prices, 1000, undefined, prices.length - 1)
+                .openPosition
+        ).toBe(false);
+    });
+
+    it('closes out at the latest price of a session still in progress', async () => {
+        const prices = trendingPrices(120);
+        const deps = fakeDeps(async () =>
+            fakeSession(prices, { inProgress: true })
+        );
+        const day = await runFishTradingDay({ ticker: 'AAPL' }, deps);
+        expect(day.market).toBe('real');
+        expect(day.session?.inProgress).toBe(true);
+        expect(day.prices).toHaveLength(120);
+        expect(day.trades.length).toBeGreaterThan(0);
+        const last = day.trades[day.trades.length - 1];
+        // The uptrend is still running, so the fish is closed out at the last bar.
+        expect(last.reason).toBe('close');
+        expect(last.exitBar).toBe(119);
+        expect(last.exitPrice).toBe(prices[119]);
+        const pnl = day.trades.reduce((s, t) => s + t.pnl, 0);
+        expect(day.endingCash).toBeCloseTo(100 + pnl, 6);
+    });
+
+    it('handles very short sessions without trading', async () => {
+        for (const bars of [2, 10, 31, 46]) {
+            const deps = fakeDeps(async () =>
+                fakeSession(trendingPrices(bars), { inProgress: true })
+            );
+            const day = await runFishTradingDay({}, deps);
+            expect(day.market).toBe('real');
+            expect(day.trades).toEqual([]);
+            expect(day.endingCash).toBe(100);
+            expect(buildFishTradeSummary(day).description).toMatch(
+                /stayed in cash/
+            );
+        }
+    });
+
+    it('picks a random well-known ticker when none is given', async () => {
+        const deps = fakeDeps(async (symbol) =>
+            fakeSession(trendingPrices(BARS_PER_DAY), { symbol })
+        );
+        const day = await runFishTradingDay({}, deps);
+        expect(deps.calls).toHaveLength(1);
+        expect(REAL_TICKERS).toContain(deps.calls[0]);
+        expect(day.ticker).toBe(deps.calls[0]);
+    });
+
+    it('falls back to the fish exchange when the market is unreachable', async () => {
+        const deps = fakeDeps(async () => {
+            throw new MarketDataError('Yahoo is asleep.');
+        });
+        const day = await runFishTradingDay({ fishName: 'Bubbles' }, deps);
+        expect(day.market).toBe('simulated');
+        expect(day.session).toBeNull();
+        expect(FISH_TICKERS).toContain(day.ticker);
+        expect(day.notice).toMatch(/Bubbles practised on the fish exchange/);
+        // The fallback day is replayable with its seed.
+        const replay = simulateFishTradingDay({
+            fishName: 'Bubbles',
+            seed: day.seed,
+        });
+        expect(replay.prices).toEqual(day.prices);
+        const summary = buildFishTradeSummary(day);
+        expect(summary.description).toContain(`-# ${day.notice}`);
+        expect(summary.fields.map((f) => f.name)).toContain('Seed');
+    });
+
+    it('falls back when a session has no usable prices', async () => {
+        const deps = fakeDeps(async () => fakeSession([123]));
+        const day = await runFishTradingDay({}, deps);
+        expect(day.market).toBe('simulated');
+        expect(day.notice).not.toBeNull();
+    });
+
+    it('reports market errors for an explicit ticker', async () => {
+        const deps = fakeDeps(async () => {
+            throw new MarketDataError('Unknown ticker ZZZZ.');
+        });
+        await expect(
+            runFishTradingDay({ ticker: 'ZZZZ' }, deps)
+        ).rejects.toThrow('Unknown ticker ZZZZ.');
+        await expect(
+            runFishTradingDay({ ticker: 'ZZZZ' }, deps)
+        ).rejects.toBeInstanceOf(MarketDataError);
+    });
+
+    it('lets other errors propagate', async () => {
+        const deps = fakeDeps(async () => {
+            throw new TypeError('boom');
+        });
+        await expect(runFishTradingDay({}, deps)).rejects.toThrow('boom');
+    });
+
+    it('uses the simulated market for -sim and -seed without fetching', async () => {
+        const deps = fakeDeps(async () => {
+            throw new Error('should not fetch');
+        });
+        const seeded = await runFishTradingDay({ seed: 1234 }, deps);
+        expect(seeded).toEqual(simulateFishTradingDay({ seed: 1234 }));
+        expect(seeded.market).toBe('simulated');
+        expect(seeded.notice).toBeNull();
+        const sim = await runFishTradingDay({ simulated: true }, deps);
+        expect(sim.market).toBe('simulated');
+        expect(deps.calls).toEqual([]);
+    });
+});
+
+describe('buildFishTradeSummary for real days', () => {
+    async function realDay(
+        overrides: Partial<MarketSession> = {},
+        fishName = 'Bubbles',
+        prices = trendingPrices(BARS_PER_DAY)
+    ): Promise<FishTradingDay> {
+        return runFishTradingDay(
+            { ticker: 'AAPL', fishName },
+            fakeDeps(async () => fakeSession(prices, overrides))
+        );
+    }
+
+    it('shows the real session and the disclaimer, without a seed', async () => {
+        const day = await realDay();
+        const summary = buildFishTradeSummary(day);
+        expect(summary.title).toMatch(
+            /^🐟📈 Bubbles day-traded AAPL on 2026-10-22$/
+        );
+        expect(summary.description).toContain('AAPL (Apple Inc.) $200.00 → $');
+        expect(summary.description).toMatch(/`[▁▂▃▄▅▆▇█]{24}`/);
+        expect(summary.description).toContain(
+            '-# Paper trades on real NasdaqGS prices from 2026-10-22 (1-minute bars, Yahoo Finance). Not financial advice, especially for humans.'
+        );
+        expect(summary.description).not.toMatch(/Simulated fish market/);
+        expect(summary.description).not.toMatch(/still open/);
+        const names = summary.fields.map((f) => f.name);
+        expect(names).not.toContain('Seed');
+        expect(summary.fields.map((f) => f.value).join('\n')).not.toMatch(
+            /-seed/
+        );
+        expect(names).toEqual(
+            expect.arrayContaining(['P&L', 'vs. old strategy', 'Trades'])
+        );
+    });
+
+    it('says when the market is still open', async () => {
+        const day = await realDay(
+            { inProgress: true, name: null, currency: 'EUR' },
+            'Nemo',
+            trendingPrices(100)
+        );
+        const summary = buildFishTradeSummary(day);
+        expect(summary.title).toContain('Nemo is day-trading AAPL');
+        expect(summary.title).toContain('live');
+        expect(summary.description).toMatch(/still open.*live so far/);
+        expect(summary.description).toMatch(
+            /AAPL 200\.00 EUR → [\d,.]+ EUR so far/
+        );
+    });
+
+    it('cleans source text and stays within embed limits', async () => {
+        const day = await realDay(
+            {
+                symbol: 'A'.repeat(40),
+                name: '**@everyone** `' + 'x'.repeat(300),
+                exchange: '<@123> ' + 'y'.repeat(300),
+                sessionDate: '2026-10-22',
+            },
+            'W'.repeat(40)
+        );
+        const summary = buildFishTradeSummary({
+            ...day,
+            startingCash: 1_000_000,
+            endingCash: 1_234_567.89,
+        });
+        expect(summary.description).not.toMatch(/@everyone|<@|\*\*@/);
+        expect(summary.title.length).toBeLessThanOrEqual(256);
+        expect(summary.description.length).toBeLessThanOrEqual(4096);
+        let total = summary.title.length + summary.description.length;
+        for (const field of summary.fields) {
+            expect(field.name.length).toBeLessThanOrEqual(256);
+            expect(field.value.length).toBeGreaterThan(0);
+            expect(field.value.length).toBeLessThanOrEqual(1024);
+            total += field.name.length + field.value.length;
+        }
+        // Leaves plenty of room for the footer under the 6000 total.
+        expect(total).toBeLessThan(2500);
     });
 });

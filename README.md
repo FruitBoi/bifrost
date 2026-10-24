@@ -17,7 +17,7 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
-- Lets your fish day-trade a simulated fish stock market: `!b fishtrade Bubbles` (see [Fish trading](#fish-trading))
+- Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
@@ -168,13 +168,15 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 
 ## Fish trading
 
-`!b fishtrade [fish name] [-seed <n>] [-cash <amount>]` (aliases `fishtrading`, `stonks`; also a Discord slash command) simulates one trading day of your fish day-trading a made-up fish ticker, and reports how it went. It is open to everyone; bots are refused.
+`!b fishtrade [fish name] [-ticker <symbol>] [-cash <amount>] [-sim] [-seed <n>]` (aliases `fishtrading`, `stonks`; also a Discord slash command) lets your fish day-trade one session of a real stock with pretend money, and reports how it went. It is open to everyone; bots are refused.
 
-Instead of the fish's usual random guesses, the day is traded with a real trend-following algorithm: a fast and a slow exponential moving average (EMA) crossover decides when to go long or short, a stop-loss a few average true ranges (ATR) from the entry limits each loss, the position is sized so that a stopped-out trade risks only a small fraction of the bankroll, and every position is closed before the close so the fish is flat overnight. The same simulated day is also played by the old random strategy and by plain buy-and-hold, and the reply compares the three.
+By default the fish paper-trades **real prices**: it fetches the latest regular trading session of a real ticker in one-minute bars from Yahoo Finance (no API key needed) and trades it bar by bar. Name the ticker with `-ticker AAPL` or just `$AAPL` (`!b fishtrade Bubbles $TSLA`); without one the fish picks a well-known stock or ETF. If the market is open, the fish trades the session so far and closes out at the latest price. No real orders are placed and nothing is stored; prices are cached for a minute. If the price feed can't be reached and you didn't name a ticker, the fish practises on the simulated fish exchange instead.
+
+Instead of the fish's usual random guesses, the day is traded with a real trend-following algorithm: a fast and a slow exponential moving average (EMA) crossover decides when to go long or short, a stop-loss a few average true ranges (ATR) from the entry limits each loss, the position is sized so that a stopped-out trade risks only a small fraction of the bankroll, and every position is closed before the close so the fish is flat overnight. The same day is also played by the old random strategy and by plain buy-and-hold, and the reply compares the three.
 
 The reply also shows progress toward **fish financial independence**: the portfolio needed to live off its returns is 25 times the fish's yearly fish-food expenses (the 4% rule), and the day's result is shown against that target.
 
-`-seed <n>` replays the same day (same prices, same outcome); without it every run is a new day. `-cash <amount>` sets the starting bankroll (default $100). Everything is simulated: there is no real market data, no network access and nothing is stored, and none of it is financial advice, for fish or anyone else.
+`-sim` trades a simulated day on a made-up fish ticker instead (no network access), and `-seed <n>` replays a simulated day (same prices, same outcome); `-seed` implies `-sim` and can't be combined with a ticker. `-cash <amount>` sets the starting bankroll (default $100). None of it is financial advice, for fish or anyone else.
 
 ## Identity mapping
 

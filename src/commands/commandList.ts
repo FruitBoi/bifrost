@@ -244,13 +244,25 @@ const commandList: Command[] = [
         aliases: ['fishtrading', 'stonks'],
         discord: {
             description:
-                'Simulates one trading day of your fish day-trading a made-up fish ticker (no real market data, purely simulated). The fish follows a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close) and is compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles` names the fish, `-seed <n>` replays a day, `-cash <amount>` sets the starting bankroll (default $100). Aliases `fishtrading`, `stonks`. Open to everyone.',
-            usageArgs: ['[fish name]', '[-seed <n>]', '[-cash <amount>]'],
+                'Lets your fish paper-trade one session of a real stock (1-minute prices from Yahoo Finance, pretend money) with a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close), compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles $AAPL` names the fish and the ticker (`-ticker <symbol>` works too; random well-known ticker by default), `-cash <amount>` sets the starting bankroll (default $100), `-sim` trades a simulated fish market instead and `-seed <n>` replays a simulated day. Aliases `fishtrading`, `stonks`. Open to everyone.',
+            usageArgs: [
+                '[fish name]',
+                '[-ticker <symbol>]',
+                '[-cash <amount>]',
+                '[-sim]',
+                '[-seed <n>]',
+            ],
         },
         fluxer: {
             description:
-                'Simulates one trading day of your fish day-trading a made-up fish ticker (no real market data, purely simulated). The fish follows a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close) and is compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles` names the fish, `-seed <n>` replays a day, `-cash <amount>` sets the starting bankroll (default $100). Aliases `fishtrading`, `stonks`. Open to everyone.',
-            usageArgs: ['[fish name]', '[-seed <n>]', '[-cash <amount>]'],
+                'Lets your fish paper-trade one session of a real stock (1-minute prices from Yahoo Finance, pretend money) with a trend-following algorithm (EMA crossover entries, ATR stops, risk-based position sizing, flat by the close), compared with its old random strategy and with buy-and-hold, plus progress toward fish financial independence (25x yearly fish-food expenses). `fishtrade Bubbles $AAPL` names the fish and the ticker (`-ticker <symbol>` works too; random well-known ticker by default), `-cash <amount>` sets the starting bankroll (default $100), `-sim` trades a simulated fish market instead and `-seed <n>` replays a simulated day. Aliases `fishtrading`, `stonks`. Open to everyone.',
+            usageArgs: [
+                '[fish name]',
+                '[-ticker <symbol>]',
+                '[-cash <amount>]',
+                '[-sim]',
+                '[-seed <n>]',
+            ],
         },
     },
     {

@@ -3,12 +3,14 @@ import FluxerCommandHandler from '../FluxerCommandHandler';
 import {
     buildFishTradeSummary,
     parseFishTradeArgs,
-    simulateFishTradingDay,
+    runFishTradingDay,
 } from '../../../services/fishTrading/fishTrading';
+import { MarketDataError } from '../../../services/fishTrading/marketData';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
 
-const USAGE = '`fishtrade [fish name] [-seed <n>] [-cash <amount>]`';
+const USAGE =
+    '`fishtrade [fish name] [-ticker <symbol> | $SYMBOL] [-cash <amount>] [-sim] [-seed <n>]`';
 
 const COLORS = {
     success: EmbedColors.Success,
@@ -17,9 +19,10 @@ const COLORS = {
 } as const;
 
 /**
- * `fishtrade` (issue #34): simulates one trading day of the user's fish
- * day-trading a made-up fish ticker with a trend-following algorithm. Purely
- * simulated; open to everyone.
+ * `fishtrade` (issue #34): the user's fish day-trades one session with a
+ * trend-following algorithm. By default it paper-trades real one-minute
+ * prices of a real ticker; `-sim` / `-seed` use the simulated fish exchange.
+ * No real orders; open to everyone.
  */
 export default class FishTradeFluxerCommandHandler extends FluxerCommandHandler {
     constructor(client: Client) {
@@ -58,7 +61,7 @@ export default class FishTradeFluxerCommandHandler extends FluxerCommandHandler 
                 return;
             }
             const summary = buildFishTradeSummary(
-                simulateFishTradingDay(parsed.options)
+                await runFishTradingDay(parsed.options)
             );
             await message.reply({
                 embeds: [
@@ -72,7 +75,11 @@ export default class FishTradeFluxerCommandHandler extends FluxerCommandHandler 
                 ],
             });
         } catch (err: unknown) {
-            logger.error('❌ Fish trading simulation failed:', err);
+            if (err instanceof MarketDataError) {
+                await this.replyError(message, err.message);
+                return;
+            }
+            logger.error('❌ Fish trading failed:', err);
             await this.replyError(
                 message,
                 `The fish tripped over the keyboard: ${(err as Error).message}`

@@ -3,22 +3,33 @@
  *
  * A just-for-fun chat command in the spirit of the meow replies: someone's
  * pet fish has been making extremely poor trading decisions, so it gets a
- * real algorithm. One trading day ("while you're at work", 09:30-16:00, 390
- * one-minute bars) of a made-up fish ticker is simulated and the fish trades
- * it with a trend-following strategy, then reports how far it got towards
- * financial independence.
+ * real algorithm. The fish day-trades one session ("while you're at work",
+ * 09:30-16:00, up to 390 one-minute bars) with a trend-following strategy,
+ * then reports how far it got towards financial independence.
  *
- * Everything is simulated: there is no network access, no real market data
- * and nothing is persisted. A run is fully determined by its seed, so a user
- * can replay a day with `-seed <n>`.
+ * By default the fish paper-trades the real stock market: the latest (or
+ * current) regular session of a real ticker is fetched as one-minute closes
+ * (see `marketData.ts`) and the fish trades it as if live, flat at the last
+ * bar. Nothing is ever ordered and nothing is persisted. When the market data
+ * cannot be fetched and the user did not ask for a specific ticker, the fish
+ * practises on the simulated fish exchange instead.
  *
- * The simulated market is a regime-switching random walk on log prices: the
- * price trends up, trends down or chops sideways, and each regime persists
- * for a while before switching. That persistence is the edge a trend
- * follower can exploit, so the strategy genuinely makes money on average
- * (a test checks this over hundreds of seeds) while individual days can and
- * do lose.
+ * The simulated fish exchange (`-sim`, or `-seed <n>` to replay a day) needs
+ * no network access: a run is fully determined by its seed. The simulated
+ * market is a regime-switching random walk on log prices: the price trends
+ * up, trends down or chops sideways, and each regime persists for a while
+ * before switching. That persistence is the edge a trend follower can
+ * exploit, so the strategy genuinely makes money on average there (a test
+ * checks this over hundreds of seeds) while individual days can and do lose.
+ * Real markets offer no such guarantee.
  */
+import {
+    fetchIntradaySession,
+    MarketDataError,
+    MarketSession,
+    normalizeTicker,
+    REAL_TICKERS,
+} from './marketData';
 
 /** Chat command names (without prefix) that run the fish's trading day. */
 export const FISH_TRADE_COMMAND_NAMES = [
@@ -27,14 +38,21 @@ export const FISH_TRADE_COMMAND_NAMES = [
     'stonks',
 ] as const;
 
-/** Options for one simulated trading day. */
+/** Options for one trading day. */
 export interface FishTradeOptions {
     /** Name of the fish; defaults to `your fish`. Sanitized before use. */
     fishName?: string;
-    /** Seed for the market and the fish's old strategy; random by default. */
+    /**
+     * Seed for the simulated market and the fish's old strategy; random by
+     * default. Giving one implies the simulated market.
+     */
     seed?: number;
     /** Starting bankroll in dollars; defaults to 100 (the fish's allowance). */
     startingCash?: number;
+    /** Real ticker to trade (normalized); a random well-known one by default. */
+    ticker?: string;
+    /** Trade the simulated fish exchange instead of the real market. */
+    simulated?: boolean;
 }
 
 /** One round trip made by the fish. */
@@ -50,14 +68,38 @@ export interface FishTrade {
     reason: 'stop' | 'trail' | 'target' | 'signal' | 'close';
 }
 
-/** Result of one simulated trading day. */
+/** Where the real prices of a trading day came from. */
+export interface FishRealSession {
+    /** Session date `YYYY-MM-DD` in the exchange's time zone. */
+    sessionDate: string;
+    /** Human-readable exchange, e.g. `NasdaqGS`. */
+    exchange: string;
+    /** Company / fund name when known. */
+    companyName: string | null;
+    /** Quote currency of the prices, e.g. `USD`. */
+    currency: string;
+    /** True when the market was still open: results are live so far. */
+    inProgress: boolean;
+}
+
+/** Result of one trading day. */
 export interface FishTradingDay {
+    /** Real market prices or the simulated fish exchange. */
+    market: 'real' | 'simulated';
     fishName: string;
     ticker: string;
+    /**
+     * Seed of the day. On the simulated market it replays the whole day
+     * (`-seed <n>`); on a real day it only drives the coin-flip baseline.
+     */
     seed: number;
+    /** Details of the real session; null on the simulated market. */
+    session: FishRealSession | null;
+    /** Short note shown with the result (e.g. why the fish fell back to the fish exchange), or null. */
+    notice: string | null;
     /** One-line description of the fish's algorithm. */
     strategy: string;
-    /** One close per minute bar, 390 in total. */
+    /** One close per minute bar: 390 when simulated, up to 390 on a real day. */
     prices: number[];
     trades: FishTrade[];
     startingCash: number;
@@ -470,15 +512,33 @@ export function sanitizeFishName(name: string | undefined): string {
     return clean || DEFAULT_FISH_NAME;
 }
 
+/** Shortens user input for echoing it back in an error message. */
+function echo(input: string): string {
+    const clean = input.replace(/[`\\]/g, '');
+    return clean.length > 16 ? `${clean.slice(0, 15)}…` : clean;
+}
+
 /**
- * Parses the words after the command. `-seed <n>` and `-cash <amount>` may
- * appear anywhere; the remaining words form the fish's name.
+ * Parses the words after the command. `-seed <n>`, `-cash <amount>`,
+ * `-ticker <symbol>` and `-sim` may appear anywhere, and a bare `$TICKER`
+ * word is taken as the ticker; the remaining words form the fish's name.
+ * A ticker trades the real market, so it cannot be combined with `-sim` or
+ * `-seed` (which replays a simulated day).
  */
 export function parseFishTradeArgs(
     args: string[]
 ): { ok: true; options: FishTradeOptions } | { ok: false; error: string } {
     const options: FishTradeOptions = {};
     const nameWords: string[] = [];
+    const setTicker = (value: string): string | null => {
+        const ticker = normalizeTicker(value);
+        if (ticker === null)
+            return `\`${echo(value)}\` doesn't look like a ticker (try \`AAPL\`).`;
+        if (options.ticker !== undefined && options.ticker !== ticker)
+            return 'The fish can only watch one ticker at a time.';
+        options.ticker = ticker;
+        return null;
+    };
     for (let i = 0; i < args.length; i++) {
         const word = args[i];
         if (!word) continue;
@@ -509,39 +569,65 @@ export function parseFishTradeArgs(
                     error: '`-cash` must be an amount from $1 to $1,000,000.',
                 };
             options.startingCash = cash;
+        } else if (flag === '-ticker') {
+            const value = args[++i];
+            if (value === undefined)
+                return { ok: false, error: 'Missing value for `-ticker`.' };
+            const error = setTicker(value);
+            if (error) return { ok: false, error };
+        } else if (flag === '-sim') {
+            options.simulated = true;
+        } else if (/^\$[a-z^]/i.test(word)) {
+            const error = setTicker(word);
+            if (error) return { ok: false, error };
         } else {
             nameWords.push(word);
         }
     }
+    if (
+        options.ticker !== undefined &&
+        (options.simulated || options.seed !== undefined)
+    )
+        return {
+            ok: false,
+            error: 'A ticker trades the real market; drop `-sim` / `-seed` to use it.',
+        };
     if (nameWords.length > 0) options.fishName = nameWords.join(' ');
     return { ok: true, options };
 }
 
-/** Simulates one trading day of the fish. Same options → same result. */
-export function simulateFishTradingDay(
-    options: FishTradeOptions = {}
-): FishTradingDay {
-    const seed =
-        options.seed !== undefined
-            ? options.seed >>> 0
-            : Math.floor(Math.random() * (MAX_SEED + 1));
-    const startingCash = options.startingCash ?? DEFAULT_STARTING_CASH;
-    const fishName = sanitizeFishName(options.fishName);
-
-    const marketRandom = mulberry32(seed);
-    const ticker =
-        FISH_TICKERS[Math.floor(marketRandom() * FISH_TICKERS.length)];
-    const prices = generateFishMarket(marketRandom);
-
-    const run = runFishStrategy(prices, startingCash);
+/** Runs the strategy over `prices` and fills in the shared day statistics. */
+function tradeDay(
+    prices: number[],
+    startingCash: number,
+    seed: number
+): Pick<
+    FishTradingDay,
+    | 'strategy'
+    | 'prices'
+    | 'trades'
+    | 'startingCash'
+    | 'endingCash'
+    | 'returnPct'
+    | 'baselineReturnPct'
+    | 'marketReturnPct'
+    | 'winRate'
+    | 'maxDrawdownPct'
+    | 'fiNumber'
+    | 'fiProgressPct'
+    | 'tradingDaysToFi'
+> {
+    // Flat at the last bar given: the close, or the latest price of a live session.
+    const run = runFishStrategy(
+        prices,
+        startingCash,
+        FISH_STRATEGY_PARAMS,
+        prices.length - 1
+    );
     const endingCash = run.endingEquity;
     const returnPct = (endingCash / startingCash - 1) * 100;
     const wins = run.trades.filter((t) => t.pnl > 0).length;
-
     return {
-        fishName,
-        ticker,
-        seed,
         strategy: describeStrategy(),
         prices,
         trades: run.trades,
@@ -559,6 +645,130 @@ export function simulateFishTradingDay(
         fiProgressPct: (endingCash / FISH_FI_NUMBER) * 100,
         tradingDaysToFi: tradingDaysToFi(endingCash, returnPct),
     };
+}
+
+/** Simulates one trading day on the fish exchange. Same options → same result. */
+export function simulateFishTradingDay(
+    options: FishTradeOptions = {}
+): FishTradingDay {
+    const seed =
+        options.seed !== undefined
+            ? options.seed >>> 0
+            : Math.floor(Math.random() * (MAX_SEED + 1));
+    const startingCash = options.startingCash ?? DEFAULT_STARTING_CASH;
+    const fishName = sanitizeFishName(options.fishName);
+
+    const marketRandom = mulberry32(seed);
+    const ticker =
+        FISH_TICKERS[Math.floor(marketRandom() * FISH_TICKERS.length)];
+    const prices = generateFishMarket(marketRandom);
+
+    return {
+        market: 'simulated',
+        fishName,
+        ticker,
+        seed,
+        session: null,
+        notice: null,
+        ...tradeDay(prices, startingCash, seed),
+    };
+}
+
+/** Cleans text from the data source before it goes into an embed. */
+function cleanSourceText(text: string, maxLength: number): string {
+    const clean = text
+        .replace(/[*_~|<>@#`\\[\]]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return clean.length > maxLength
+        ? `${clean.slice(0, maxLength - 1).trimEnd()}…`
+        : clean;
+}
+
+/**
+ * Paper-trades one real session: the fish trades the one-minute closes as if
+ * live and is flat at the last bar (the close, or the latest price while the
+ * market is still open). `seed` drives the coin-flip baseline.
+ */
+export function tradeRealSession(
+    session: MarketSession,
+    options: FishTradeOptions,
+    seed: number
+): FishTradingDay {
+    const prices = session.prices.filter((p) => Number.isFinite(p) && p > 0);
+    if (prices.length < 2)
+        throw new MarketDataError(
+            `No usable prices for ${session.symbol} yet. Try again in a few minutes.`
+        );
+    const startingCash = options.startingCash ?? DEFAULT_STARTING_CASH;
+    return {
+        market: 'real',
+        fishName: sanitizeFishName(options.fishName),
+        ticker: cleanSourceText(session.symbol, 16) || 'ticker',
+        seed: seed >>> 0,
+        session: {
+            sessionDate: cleanSourceText(session.sessionDate, 16),
+            exchange: cleanSourceText(session.exchange, 32) || 'exchange',
+            companyName: session.name
+                ? cleanSourceText(session.name, 60) || null
+                : null,
+            currency: cleanSourceText(session.currency, 8) || 'USD',
+            inProgress: session.inProgress,
+        },
+        notice: null,
+        ...tradeDay(prices, startingCash, seed),
+    };
+}
+
+/** Injectable dependencies of {@link runFishTradingDay}. */
+export interface FishTradingDeps {
+    /** Fetches the latest (or current) regular session of a ticker. */
+    fetchSession: (symbol: string) => Promise<MarketSession>;
+    /** Picks the random ticker and seeds; `[0, 1)`. */
+    random: () => number;
+}
+
+const DEFAULT_DEPS: FishTradingDeps = {
+    fetchSession: (symbol) => fetchIntradaySession(symbol),
+    random: Math.random,
+};
+
+/**
+ * Runs one trading day. By default the fish paper-trades a real ticker
+ * (`options.ticker`, else a random well-known one); `simulated` or a `seed`
+ * use the simulated fish exchange. When the real market data cannot be
+ * fetched (a {@link MarketDataError}) and no ticker was asked for, the fish
+ * practises on the fish exchange and the day carries a `notice`; with an
+ * explicit ticker the MarketDataError is thrown so its message can be shown.
+ * Other errors propagate.
+ */
+export async function runFishTradingDay(
+    options: FishTradeOptions = {},
+    deps: FishTradingDeps = DEFAULT_DEPS
+): Promise<FishTradingDay> {
+    if (options.simulated || options.seed !== undefined)
+        return simulateFishTradingDay(options);
+
+    const randomSeed = () => Math.floor(deps.random() * (MAX_SEED + 1));
+    const explicit = options.ticker !== undefined;
+    const symbol =
+        options.ticker ??
+        REAL_TICKERS[Math.floor(deps.random() * REAL_TICKERS.length)];
+    try {
+        if (!symbol) throw new MarketDataError('No real tickers configured.');
+        const session = await deps.fetchSession(symbol);
+        return tradeRealSession(session, options, randomSeed());
+    } catch (err: unknown) {
+        if (explicit || !(err instanceof MarketDataError)) throw err;
+        const day = simulateFishTradingDay({
+            ...options,
+            seed: randomSeed(),
+        });
+        return {
+            ...day,
+            notice: `Couldn't reach the real market, so ${day.fishName} practised on the fish exchange.`,
+        };
+    }
 }
 
 export interface FishTradeSummaryField {
@@ -654,16 +864,63 @@ function tradeLine(trade: FishTrade | undefined): string {
     return `${signedMoney(trade.pnl)} (${trade.side}, ${trade.reason})`;
 }
 
-/** Builds the embed-shaped summary of a simulated trading day. */
+/** A quote in its own currency: `$231.50`, or `231.50 EUR`. */
+function quote(n: number, currency: string): string {
+    if (currency === 'USD') return money(n);
+    return `${n.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })} ${currency}`;
+}
+
+/** Title and description of a day on the real market. */
+function describeRealDay(
+    day: FishTradingDay,
+    session: FishRealSession
+): { title: string; description: string } {
+    const up = day.returnPct >= 0;
+    const name = capitalize(day.fishName);
+    const title = session.inProgress
+        ? `🐟${up ? '📈' : '📉'} ${name} is day-trading ${day.ticker} (${session.sessionDate}, live)`
+        : `🐟${up ? '📈' : '📉'} ${name} day-traded ${day.ticker} on ${session.sessionDate}`;
+    const first = day.prices[0];
+    const last = day.prices[day.prices.length - 1];
+    const label = session.companyName
+        ? `${day.ticker} (${session.companyName})`
+        : day.ticker;
+    const lines = [
+        verdict(day),
+        `\`${sparkline(day.prices)}\` ${label} ${quote(first, session.currency)} → ${quote(last, session.currency)}${session.inProgress ? ' so far' : ''}`,
+        `**Algorithm:** ${day.strategy}.`,
+    ];
+    if (session.inProgress)
+        lines.push(
+            `-# The market is still open, so this is live so far: ${day.fishName} closed out at the latest price.`
+        );
+    lines.push(
+        `-# Paper trades on real ${session.exchange} prices from ${session.sessionDate} (1-minute bars, Yahoo Finance). Not financial advice, especially for humans.`
+    );
+    return { title, description: lines.join('\n') };
+}
+
+/** Builds the embed-shaped summary of a trading day (real or simulated). */
 export function buildFishTradeSummary(day: FishTradingDay): FishTradeSummary {
     const up = day.returnPct >= 0;
-    const title = `🐟${up ? '📈' : '📉'} ${capitalize(day.fishName)} day-traded ${day.ticker}`;
-    const description = [
-        verdict(day),
-        `\`${sparkline(day.prices)}\` ${day.ticker} ${money(day.prices[0])} → ${money(day.prices[day.prices.length - 1])}`,
-        `**Algorithm:** ${day.strategy}.`,
-        '-# Simulated fish market. Not financial advice, especially for humans.',
-    ].join('\n');
+    const session = day.market === 'real' ? day.session : null;
+    const { title, description: baseDescription } = session
+        ? describeRealDay(day, session)
+        : {
+              title: `🐟${up ? '📈' : '📉'} ${capitalize(day.fishName)} day-traded ${day.ticker}`,
+              description: [
+                  verdict(day),
+                  `\`${sparkline(day.prices)}\` ${day.ticker} ${money(day.prices[0])} → ${money(day.prices[day.prices.length - 1])}`,
+                  `**Algorithm:** ${day.strategy}.`,
+                  '-# Simulated fish market. Not financial advice, especially for humans.',
+              ].join('\n'),
+          };
+    const description = day.notice
+        ? `${baseDescription}\n-# ${day.notice}`
+        : baseDescription;
 
     const pnl = day.endingCash - day.startingCash;
     const sorted = [...day.trades].sort((a, b) => b.pnl - a.pnl);
@@ -711,12 +968,13 @@ export function buildFishTradeSummary(day: FishTradingDay): FishTradeSummary {
             value: fiValue,
             inline: false,
         },
-        {
+    ];
+    if (!session)
+        fields.push({
             name: 'Seed',
             value: `\`${day.seed}\` (replay with \`-seed ${day.seed}\`)`,
             inline: false,
-        },
-    ];
+        });
 
     return {
         title,
