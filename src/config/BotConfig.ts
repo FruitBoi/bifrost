@@ -60,7 +60,9 @@ export interface BotConfig {
          * one platform pings the role with the same name on the other
          * (issue #15). Roles without a namesake, and roles the author could
          * not ping on their own platform, stay plaintext. @everyone and
-         * @here are never bridged. See `services/mentionBridge/`.
+         * @here do not depend on this toggle: they are bridged whenever the
+         * original really pinged everyone (issue #36). See
+         * `services/mentionBridge/`.
          */
         bridgeMentions: boolean;
         /**

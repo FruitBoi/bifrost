@@ -185,6 +185,9 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         const counterpartByRoleId = new Map(
             roleMentions.map((m) => [m.id, m.counterpartId])
         );
+        // Fluxer only reports an @everyone / @here ping when the author was
+        // allowed to make it; sanitising breaks every other one.
+        const pingsEveryone = message.mentionEveryone === true;
         const sanitizedContent = this.sanitizeContent(
             message,
             (id) => {
@@ -198,7 +201,10 @@ export default class FluxerMessageTransformer extends MessageTransformer<
                 return counterpartId
                     ? MentionBridgeService.roleMentionPlaceholder(counterpartId)
                     : null;
-            }
+            },
+            pingsEveryone
+                ? MentionBridgeService.everyonePlaceholders(message.content)
+                : message.content
         );
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
@@ -283,7 +289,7 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         }
 
         // Applied after breakMentions/sanitizeMentions/replaceEmojis so the
-        // injected `<@id>` / `<@&id>` reaches Discord intact: mapped direct
+        // injected `<@id>` / `<@&id>` / `@everyone` reaches Discord intact: mapped direct
         // and role mentions were placeholders until now, reply pings are
         // prepended. A user can be both (reply target and mentioned inline).
         const mentionUserIds = [...new Set(allMentionUserIds)];
@@ -308,6 +314,7 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             embeds,
             ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
             ...(mentionRoleIds.length > 0 ? { mentionRoleIds } : {}),
+            ...(pingsEveryone ? { mentionEveryone: true } : {}),
         };
     }
 }

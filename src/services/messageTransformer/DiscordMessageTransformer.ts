@@ -74,9 +74,10 @@ export default class DiscordMessageTransformer extends MessageTransformer<
     private sanitizeContent(
         message: Pick<DiscordMessage, 'content' | 'client' | 'guild'>,
         renderUserMention?: (id: string) => string | null,
-        renderRoleMention?: (id: string) => string | null
+        renderRoleMention?: (id: string) => string | null,
+        content: string = message.content
     ): string {
-        return sanitizeMentions(message.content, {
+        return sanitizeMentions(content, {
             renderUserMention,
             renderRoleMention,
             resolveUser: (id) => {
@@ -211,7 +212,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         attachments: WebhookAttachment[],
         embeds: WebhookEmbed[],
         allMentionUserIds: string[],
-        allMentionRoleIds: string[]
+        allMentionRoleIds: string[],
+        mentionEveryone: boolean
     ): WebhookMessageData {
         // Mapped direct mentions sit in the content as placeholders until now
         // so that sanitising could not touch them; reply pings are prepended.
@@ -235,6 +237,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             embeds,
             ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
             ...(mentionRoleIds.length > 0 ? { mentionRoleIds } : {}),
+            ...(mentionEveryone ? { mentionEveryone } : {}),
         };
     }
 
@@ -251,6 +254,9 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         const counterpartByRoleId = new Map(
             roleMentions.map((m) => [m.id, m.counterpartId])
         );
+        // Discord only reports an @everyone / @here ping when the author was
+        // allowed to make it; any other one is broken so the copy cannot ping.
+        const pingsEveryone = message.mentions.everyone;
         const sanitizedContent = this.sanitizeContent(
             message,
             (id) => {
@@ -264,7 +270,10 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                 return counterpartId
                     ? MentionBridgeService.roleMentionPlaceholder(counterpartId)
                     : null;
-            }
+            },
+            pingsEveryone
+                ? MentionBridgeService.everyonePlaceholders(message.content)
+                : MentionBridgeService.breakEveryoneMentions(message.content)
         );
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
@@ -297,6 +306,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         const mentionRoleIds: string[] = isPollPresent
             ? []
             : roleMentions.map((m) => m.counterpartId);
+        const mentionEveryone = pingsEveryone && !isPollPresent;
 
         if (message.reference) {
             const isForwarded = message.flags.has(MessageFlags.HasSnapshot);
@@ -310,7 +320,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                     attachments,
                     embeds,
                     mentionUserIds,
-                    mentionRoleIds
+                    mentionRoleIds,
+                    mentionEveryone
                 );
             }
 
@@ -375,7 +386,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             attachments,
             embeds,
             mentionUserIds,
-            mentionRoleIds
+            mentionRoleIds,
+            mentionEveryone
         );
     }
 }

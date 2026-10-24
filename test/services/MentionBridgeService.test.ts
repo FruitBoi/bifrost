@@ -788,3 +788,46 @@ describe('MentionBridgeService.extractUserMentionIds', () => {
         ).toEqual(['1', '2']);
     });
 });
+
+describe('MentionBridgeService @everyone / @here helpers', () => {
+    it('everyonePlaceholders hides @everyone and @here from @-breaking', () => {
+        const placeholdered = MentionBridgeService.everyonePlaceholders(
+            'a @everyone b @here c'
+        );
+
+        expect(placeholdered).not.toContain('@');
+        expect(breakMentions(placeholdered)).toBe(placeholdered);
+        expect(
+            MentionBridgeService.restoreMentionPlaceholders(placeholdered)
+        ).toBe('a @everyone b @here c');
+    });
+
+    it('everyonePlaceholders leaves other words and mentions alone', () => {
+        const content = '@everyonex @herent @bob <@1> everyone here';
+
+        expect(MentionBridgeService.everyonePlaceholders(content)).toBe(
+            content
+        );
+    });
+
+    it('breakEveryoneMentions inserts a zero-width space after the @', () => {
+        expect(
+            MentionBridgeService.breakEveryoneMentions('@everyone and @here')
+        ).toBe('@\u200Beveryone and @\u200Bhere');
+        expect(
+            MentionBridgeService.breakEveryoneMentions('@everyonex @bob')
+        ).toBe('@everyonex @bob');
+    });
+
+    it('restoreMentionPlaceholders restores user, role and everyone placeholders together', () => {
+        const content = [
+            MentionBridgeService.mentionPlaceholder('1'),
+            MentionBridgeService.roleMentionPlaceholder('2'),
+            MentionBridgeService.everyonePlaceholders('@here'),
+        ].join(' ');
+
+        expect(MentionBridgeService.restoreMentionPlaceholders(content)).toBe(
+            '<@1> <@&2> @here'
+        );
+    });
+});

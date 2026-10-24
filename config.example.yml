@@ -61,9 +61,10 @@ roles:
     # directions. The role is only pinged there if the author could ping it
     # on their own side (the role is mentionable, or the author has Mention
     # Everyone). Without a same-named role the mention is relayed as
-    # plaintext `@RoleName` and nobody is pinged. @everyone and @here are
-    # never bridged, and editing a bridged message never pings again. Set to
-    # false to relay every role mention as plaintext.
+    # plaintext `@RoleName` and nobody is pinged. Editing a bridged message
+    # never pings again. Set to false to relay every role mention as
+    # plaintext. (@everyone and @here are bridged regardless of this
+    # setting, but only when the author may ping everyone on their side.)
     bridgeMentions: true
     # Who may run `!b clauderequest <request>` (see claudeRequests below).
     claudeRequest:

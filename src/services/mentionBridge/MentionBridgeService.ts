@@ -110,9 +110,12 @@ const ROLE_MENTION_PATTERN = /<@&(\d+)>/g;
 // private-use code points that never occur in chat text.
 const PLACEHOLDER_START = '\uE000bfmention:';
 const ROLE_PLACEHOLDER_START = '\uE000bfrole:';
+const EVERYONE_PLACEHOLDER_START = '\uE000bfeveryone:';
 const PLACEHOLDER_END = '\uE001';
 const PLACEHOLDER_PATTERN = /\uE000bfmention:([^\uE001]+)\uE001/g;
 const ROLE_PLACEHOLDER_PATTERN = /\uE000bfrole:([^\uE001]+)\uE001/g;
+const EVERYONE_PLACEHOLDER_PATTERN = /\uE000bfeveryone:(everyone|here)\uE001/g;
+const EVERYONE_MENTION_PATTERN = /@(everyone|here)\b/g;
 
 /**
  * Carries user pings across the bridge. Webhooks cannot send true replies on
@@ -131,6 +134,11 @@ const ROLE_PLACEHOLDER_PATTERN = /\uE000bfrole:([^\uE001]+)\uE001/g;
  * linked guild on the other platform (the same rule as custom emojis and the
  * `role` command) and relayed as a real role ping of that namesake, provided
  * the author was allowed to ping the role where they wrote it.
+ *
+ * `@everyone` / `@here` are relayed as real pings only when the original
+ * really pinged everyone, which both platforms allow only to authors with
+ * Mention Everyone (or the Fluxer equivalent) in that channel; otherwise
+ * they are relayed broken so the copy cannot ping anyone (issue #36).
  */
 export default class MentionBridgeService {
     private readonly roleLookup: CounterpartRoleLookup | null;
@@ -451,13 +459,37 @@ export default class MentionBridgeService {
     }
 
     /**
-     * Replaces every placeholder from {@link mentionPlaceholder} with `<@id>`
-     * and every one from {@link roleMentionPlaceholder} with `<@&id>`.
+     * Replaces every `@everyone` / `@here` in `content` with a token that
+     * survives sanitising and `@`-breaking unchanged;
+     * {@link restoreMentionPlaceholders} turns it back into the literal
+     * mention. Only for messages that really pinged everyone.
+     */
+    static everyonePlaceholders(content: string): string {
+        return content.replace(
+            EVERYONE_MENTION_PATTERN,
+            `${EVERYONE_PLACEHOLDER_START}$1${PLACEHOLDER_END}`
+        );
+    }
+
+    /**
+     * Breaks every `@everyone` / `@here` in `content` with a zero-width space
+     * so the relayed copy cannot ping anyone, whatever the webhook's
+     * allowed mentions default to.
+     */
+    static breakEveryoneMentions(content: string): string {
+        return content.replace(EVERYONE_MENTION_PATTERN, '@\u200B$1');
+    }
+
+    /**
+     * Replaces every placeholder from {@link mentionPlaceholder} with `<@id>`,
+     * every one from {@link roleMentionPlaceholder} with `<@&id>` and every
+     * one from {@link everyonePlaceholders} with `@everyone` / `@here`.
      */
     static restoreMentionPlaceholders(content: string): string {
         return content
             .replace(PLACEHOLDER_PATTERN, '<@$1>')
-            .replace(ROLE_PLACEHOLDER_PATTERN, '<@&$1>');
+            .replace(ROLE_PLACEHOLDER_PATTERN, '<@&$1>')
+            .replace(EVERYONE_PLACEHOLDER_PATTERN, '@$1');
     }
 
     /**

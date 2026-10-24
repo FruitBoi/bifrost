@@ -234,7 +234,8 @@ User pings need an identity mapping; role pings need a role with the same name i
 - A `<@&role>` mention is relayed as a real mention of the role with the **same name** in the linked server on the other platform, Discord → Fluxer and Fluxer → Discord. Names are matched the same way as for custom emojis and `!b role`.
 - The role is only pinged on the other side if the author could ping it on their own: the role is mentionable there, or the author has **Mention Everyone** (or the Fluxer equivalent).
 - If the other server has no role with that name, or the author could not ping the role, the mention is relayed as plaintext `@RoleName` and nobody is pinged.
-- `@everyone` and `@here` are never bridged, and editing a bridged message never pings anyone again.
+- `@everyone` and `@here` are bridged as real pings of everyone (or everyone online) in the linked channel on the other side, but only when the message really pinged everyone where it was written, i.e. the author has **Mention Everyone** (or the Fluxer equivalent) there. Anyone else's `@everyone` / `@here` is relayed as plain text and pings nobody.
+- Editing a bridged message never pings anyone again.
 - Role ping bridging is on by default; turn it off with `roles.bridgeMentions: false` in the [configuration file](#configuration-file) to relay every role mention as plaintext.
 
 ### Database migration

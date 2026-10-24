@@ -51,6 +51,14 @@ export type WebhookMessageData = {
      */
     mentionRoleIds?: string[];
     /**
+     * Whether the relayed message must really ping `@everyone` / `@here`.
+     * Content already carries the literal `@everyone` / `@here`; this adds
+     * `everyone` to the webhook's parsed mentions. Only set when the original
+     * itself pinged everyone, which both platforms allow only to authors
+     * with Mention Everyone (issue #36). Only honoured on send.
+     */
+    mentionEveryone?: boolean;
+    /**
      * When set, nothing in the message pings anyone: allowed mentions are
      * emptied for users and roles, overriding mentionUserIds/mentionRoleIds.
      * Used for history transfers.
@@ -58,17 +66,22 @@ export type WebhookMessageData = {
     suppressMentions?: boolean;
 };
 
-type AllowedMentions = { parse: never[]; users: string[]; roles?: string[] };
+type AllowedMentions = {
+    parse: 'everyone'[];
+    users: string[];
+    roles?: string[];
+};
 
 /**
  * Allowed-mentions whitelist for `mentionUserIds` / `mentionRoleIds` (the
  * same shape serves Discord's `allowedMentions` and Fluxer's
  * `allowed_mentions`), or undefined to keep the platform defaults when there
- * is nothing to ping. The empty `parse` means a bridged message never newly
- * opts in to @everyone/@here or blanket role pings; `roles` is only present
- * when a role is actually whitelisted. Edits whitelist no roles so that
- * re-relaying an edited message cannot ping a role a second time. With
- * `suppressMentions` the whitelist is empty, so nobody is pinged at all.
+ * is nothing to ping. `parse` only ever holds `everyone`, and only when
+ * `mentionEveryone` is set, so a bridged message never opts in to blanket
+ * user or role pings; `roles` is only present when a role is actually
+ * whitelisted. Edits whitelist no roles and no @everyone so that re-relaying
+ * an edited message cannot ping them a second time. With `suppressMentions`
+ * the whitelist is empty, so nobody is pinged at all.
  */
 function allowedMentionsFor(
     data: WebhookMessageData,
@@ -77,8 +90,13 @@ function allowedMentionsFor(
     if (data.suppressMentions) return { parse: [], users: [] };
     const users = data.mentionUserIds ?? [];
     const roles = isEdit ? [] : (data.mentionRoleIds ?? []);
-    if (users.length === 0 && roles.length === 0) return undefined;
-    return { parse: [], users, ...(roles.length > 0 ? { roles } : {}) };
+    const everyone = !isEdit && data.mentionEveryone === true;
+    if (users.length === 0 && roles.length === 0 && !everyone) return undefined;
+    return {
+        parse: everyone ? ['everyone'] : [],
+        users,
+        ...(roles.length > 0 ? { roles } : {}),
+    };
 }
 
 /** Appends `key=value` to a route that may or may not already carry a query string. */

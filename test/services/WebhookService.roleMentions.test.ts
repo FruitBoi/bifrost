@@ -248,3 +248,137 @@ describe('WebhookService Fluxer role pings', () => {
         }
     });
 });
+
+describe('WebhookService @everyone / @here pings', () => {
+    const everyone: WebhookMessageData = {
+        ...base,
+        content: '@everyone hi',
+        mentionEveryone: true,
+    };
+
+    it('parses everyone on a Discord send, even with no users or roles', async () => {
+        const { webhook, send } = fakeDiscordWebhook();
+
+        await new WebhookService().sendMessageViaDiscordWebhook(
+            webhook,
+            everyone
+        );
+
+        const sent = send.mock.calls[0]![0] as Record<string, unknown>;
+        expect(sent.allowedMentions).toEqual({
+            parse: ['everyone'],
+            users: [],
+        });
+    });
+
+    it('combines everyone with users and roles on a Discord send', async () => {
+        const { webhook, send } = fakeDiscordWebhook();
+
+        await new WebhookService().sendMessageViaDiscordWebhook(webhook, {
+            ...withBoth,
+            mentionEveryone: true,
+        });
+
+        const sent = send.mock.calls[0]![0] as Record<string, unknown>;
+        expect(sent.allowedMentions).toEqual({
+            parse: ['everyone'],
+            users: ['u1'],
+            roles: ['r1', 'r2'],
+        });
+    });
+
+    it('never parses everyone on a Discord edit', async () => {
+        const { webhook, editMessage } = fakeDiscordWebhook();
+        const service = new WebhookService();
+
+        await service.editMessageViaDiscordWebhook(webhook, 'm1', everyone);
+        await service.editMessageViaDiscordWebhook(webhook, 'm1', {
+            ...withBoth,
+            mentionEveryone: true,
+        });
+
+        const alone = editMessage.mock.calls[0]![1] as Record<string, unknown>;
+        const mixed = editMessage.mock.calls[1]![1] as Record<string, unknown>;
+        expect(alone.allowedMentions).toBeUndefined();
+        expect(mixed.allowedMentions).toEqual({ parse: [], users: ['u1'] });
+    });
+
+    it('lets suppressMentions win over mentionEveryone on Discord', async () => {
+        const { webhook, send } = fakeDiscordWebhook();
+
+        await new WebhookService().sendMessageViaDiscordWebhook(webhook, {
+            ...withBoth,
+            mentionEveryone: true,
+            suppressMentions: true,
+        });
+
+        const sent = send.mock.calls[0]![0] as Record<string, unknown>;
+        expect(sent.allowedMentions).toEqual({ parse: [], users: [] });
+    });
+
+    it('does not parse everyone when mentionEveryone is false', async () => {
+        const { webhook, send } = fakeDiscordWebhook();
+
+        await new WebhookService().sendMessageViaDiscordWebhook(webhook, {
+            ...base,
+            mentionEveryone: false,
+        });
+
+        const sent = send.mock.calls[0]![0] as Record<string, unknown>;
+        expect(sent.allowedMentions).toBeUndefined();
+    });
+
+    it('parses everyone on a Fluxer send, with and without roles', async () => {
+        const { client, post } = fakeFluxerClient();
+        const webhook = FluxerWebhook.fromToken(client, 'wh1', 'tok');
+        const service = new WebhookService();
+
+        await service.sendMessageViaFluxerWebhook(webhook, everyone);
+        await service.sendMessageViaFluxerWebhook(webhook, {
+            ...withBoth,
+            mentionEveryone: true,
+        });
+
+        const [, first] = post.mock.calls[0] as unknown as RestCall;
+        const [, second] = post.mock.calls[1] as unknown as RestCall;
+        expect(first.body.allowed_mentions).toEqual({ parse: ['everyone'] });
+        expect(second.body.allowed_mentions).toEqual({
+            parse: ['everyone'],
+            users: ['u1'],
+            roles: ['r1', 'r2'],
+        });
+    });
+
+    it('never parses everyone on a Fluxer edit', async () => {
+        const { client, patch } = fakeFluxerClient();
+        const webhook = FluxerWebhook.fromToken(client, 'wh1', 'tok');
+        const service = new WebhookService();
+
+        await service.editMessageViaFluxerWebhook(webhook, 'm1', everyone);
+        await service.editMessageViaFluxerWebhook(webhook, 'm1', {
+            ...withBoth,
+            mentionEveryone: true,
+        });
+
+        const [, alone] = patch.mock.calls[0] as unknown as RestCall;
+        const [, mixed] = patch.mock.calls[1] as unknown as RestCall;
+        expect('allowed_mentions' in alone.body).toBe(false);
+        expect(mixed.body.allowed_mentions).toEqual({
+            parse: [],
+            users: ['u1'],
+        });
+    });
+
+    it('lets suppressMentions win over mentionEveryone on Fluxer', async () => {
+        const { client, post } = fakeFluxerClient();
+        const webhook = FluxerWebhook.fromToken(client, 'wh1', 'tok');
+
+        await new WebhookService().sendMessageViaFluxerWebhook(webhook, {
+            ...everyone,
+            suppressMentions: true,
+        });
+
+        const [, options] = post.mock.calls[0] as unknown as RestCall;
+        expect(options.body.allowed_mentions).toEqual({ parse: [] });
+    });
+});

@@ -353,7 +353,8 @@ describe('DiscordMessageTransformer role mentions (Discord -> Fluxer)', () => {
             ) as never
         );
 
-        expect(result.content).toBe('@everyone @@everyone wake up');
+        expect(result.content).toBe(`@${ZWSP}everyone @@everyone wake up`);
+        expect(result.mentionEveryone).toBeUndefined();
         expect(result.mentionRoleIds).toBeUndefined();
         expect(result.mentionUserIds).toBeUndefined();
         expect(fetchFluxerRoles).not.toHaveBeenCalled();
@@ -671,5 +672,144 @@ describe('FluxerMessageTransformer role mentions (Fluxer -> Discord)', () => {
 
         expect(result.content).toBe('<@&1001> and <@&1001>');
         expect(result.mentionRoleIds).toEqual(['1001']);
+    });
+});
+
+describe('@everyone / @here bridging (issue #36)', () => {
+    let links: FakeLinkService;
+    const bridge = () => new MentionBridgeService(links.asLinkService());
+
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        links = new FakeLinkService();
+        links.guildLinks.push(numericGuildLink);
+    });
+
+    describe('Discord -> Fluxer', () => {
+        const everyoneMessage = (content: string, everyone: boolean) =>
+            discordGuildMessage(content, [], {
+                extra: { mentions: { users: new Map(), everyone } },
+            }) as never;
+
+        it.each(['@everyone', '@here'])(
+            'keeps a permitted %s literal and flags it',
+            async (word) => {
+                const result = await new DiscordMessageTransformer(
+                    bridge()
+                ).transformMessage(everyoneMessage(`${word} hi`, true));
+
+                expect(result.content).toBe(`${word} hi`);
+                expect(result.mentionEveryone).toBe(true);
+            }
+        );
+
+        it.each(['@everyone', '@here'])(
+            'breaks an unpermitted %s and sets no flag',
+            async (word) => {
+                const result = await new DiscordMessageTransformer(
+                    bridge()
+                ).transformMessage(everyoneMessage(`${word} hi`, false));
+
+                expect(result.content).toBe(`@${ZWSP}${word.slice(1)} hi`);
+                expect(result.mentionEveryone).toBeUndefined();
+            }
+        );
+
+        it('keeps both words and a role ping in one permitted message', async () => {
+            const { lookup } = fakeRoleLookup({
+                fluxer: [{ id: '2001', name: 'Mods' }],
+            });
+            const withRoles = new MentionBridgeService(links.asLinkService(), {
+                roleLookup: lookup,
+            });
+            const result = await new DiscordMessageTransformer(
+                withRoles
+            ).transformMessage(
+                discordGuildMessage(
+                    '@everyone @here <@&1001>',
+                    [MODS_DISCORD],
+                    {
+                        extra: {
+                            mentions: { users: new Map(), everyone: true },
+                        },
+                    }
+                ) as never
+            );
+
+            expect(result.content).toBe('@everyone @here <@&2001>');
+            expect(result.mentionEveryone).toBe(true);
+            expect(result.mentionRoleIds).toEqual(['2001']);
+        });
+
+        it('does not touch words that merely start with everyone/here', async () => {
+            const result = await new DiscordMessageTransformer(
+                bridge()
+            ).transformMessage(everyoneMessage('@everyonex @herent', false));
+
+            expect(result.content).toBe('@everyonex @herent');
+            expect(result.mentionEveryone).toBeUndefined();
+        });
+    });
+
+    describe('Fluxer -> Discord', () => {
+        const everyoneMessage = (content: string, everyone?: boolean) =>
+            fluxerGuildMessage(content, [], {
+                extra:
+                    everyone === undefined ? {} : { mentionEveryone: everyone },
+            }) as never;
+
+        it.each(['@everyone', '@here'])(
+            'keeps a permitted %s literal and flags it',
+            async (word) => {
+                const result = await new FluxerMessageTransformer(
+                    bridge()
+                ).transformMessage(everyoneMessage(`${word} hi`, true));
+
+                expect(result.content).toBe(`${word} hi`);
+                expect(result.mentionEveryone).toBe(true);
+            }
+        );
+
+        it.each(['@everyone', '@here'])(
+            'breaks an unpermitted %s and sets no flag',
+            async (word) => {
+                for (const flag of [false, undefined]) {
+                    const result = await new FluxerMessageTransformer(
+                        bridge()
+                    ).transformMessage(everyoneMessage(`${word} hi`, flag));
+
+                    expect(result.content).toBe(`@${ZWSP}${word.slice(1)} hi`);
+                    expect(result.mentionEveryone).toBeUndefined();
+                }
+            }
+        );
+
+        it('keeps both words and a role ping in one permitted message', async () => {
+            const { lookup } = fakeRoleLookup({
+                discord: [{ id: '1001', name: 'Mods' }],
+            });
+            const withRoles = new MentionBridgeService(links.asLinkService(), {
+                roleLookup: lookup,
+            });
+            const result = await new FluxerMessageTransformer(
+                withRoles
+            ).transformMessage(
+                fluxerGuildMessage('@everyone @here <@&2001>', [MODS_FLUXER], {
+                    extra: { mentionEveryone: true },
+                }) as never
+            );
+
+            expect(result.content).toBe('@everyone @here <@&1001>');
+            expect(result.mentionEveryone).toBe(true);
+            expect(result.mentionRoleIds).toEqual(['1001']);
+        });
+
+        it('still breaks other @ mentions in a permitted message', async () => {
+            const result = await new FluxerMessageTransformer(
+                bridge()
+            ).transformMessage(everyoneMessage('@everyone @bob', true));
+
+            expect(result.content).toBe(`@everyone @${ZWSP}bob`);
+        });
     });
 });
