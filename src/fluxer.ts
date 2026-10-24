@@ -327,6 +327,7 @@ const startFluxerClient = async ({
                 maxCount: botConfig.history.maxCount,
             },
             delayMs: botConfig.history.delayMs,
+            triggerPrefixes: botConfig.commands.triggerPrefixes,
         });
         for (const name of HISTORY_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, historyHandler);
@@ -677,7 +678,20 @@ const startFluxerClient = async ({
                   )
                 : null;
         // Short-trigger invocations are never relayed or meowed at.
-        const isShortInvocation = isReminderInvocation || cleanTrigger !== null;
+        // Any registered command as `!<command>`; unknown names fall through
+        // and are bridged as ordinary chat.
+        const commandTrigger =
+            !isBotCommand && !reminderTrigger && !cleanTrigger
+                ? parseCommandTrigger(
+                      message.content,
+                      botConfig.commands.triggerPrefixes,
+                      commandRegistry.getCommandNames()
+                  )
+                : null;
+        const isShortInvocation =
+            isReminderInvocation ||
+            cleanTrigger !== null ||
+            commandTrigger !== null;
 
         if (isBotCommand) {
             const { command, args } = parseCommandString(
@@ -735,6 +749,21 @@ const startFluxerClient = async ({
                     handler,
                     cleanTrigger.command,
                     cleanTrigger.rawArgs.split(/\s+/).filter(Boolean)
+                );
+            }
+        } else if (
+            commandTrigger &&
+            !message.author.bot &&
+            !message.webhookId
+        ) {
+            const handler = commandRegistry.getCommandHandler(
+                commandTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    commandTrigger.command,
+                    commandTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
             }
         }

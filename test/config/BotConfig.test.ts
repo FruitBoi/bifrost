@@ -133,6 +133,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             claudeRequests: DEFAULT_BOT_CONFIG.claudeRequests,
+            commands: DEFAULT_BOT_CONFIG.commands,
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
@@ -163,6 +164,7 @@ describe('loadBotConfig parsing', () => {
             },
             roles: DEFAULT_BOT_CONFIG.roles,
             claudeRequests: DEFAULT_BOT_CONFIG.claudeRequests,
+            commands: DEFAULT_BOT_CONFIG.commands,
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
@@ -385,6 +387,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'categories',
             'roles',
             'claudeRequests',
+            'commands',
             'clean',
             'history',
             'meow',
@@ -596,6 +599,44 @@ describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => 
                 applied: true,
             },
         ]);
+    });
+});
+
+describe('commands', () => {
+    it('defaults to the ! trigger prefix with slash commands on', () => {
+        expect(DEFAULT_BOT_CONFIG.commands).toEqual({
+            triggerPrefixes: ['!'],
+            slashCommands: true,
+        });
+    });
+
+    it('merges custom prefixes and the slash toggle', () => {
+        const { config } = mergeBotConfig({
+            commands: { triggerPrefixes: ['.', '$'], slashCommands: false },
+        });
+
+        expect(config.commands).toEqual({
+            triggerPrefixes: ['.', '$'],
+            slashCommands: false,
+        });
+    });
+
+    it('accepts an empty trigger prefix list', () => {
+        const { config } = mergeBotConfig({
+            commands: { triggerPrefixes: [] },
+        });
+
+        expect(config.commands.triggerPrefixes).toEqual([]);
+        expect(config.commands.slashCommands).toBe(true);
+    });
+
+    it('rejects invalid values', () => {
+        expect(() =>
+            mergeBotConfig({ commands: { slashCommands: 'yes' } })
+        ).toThrow(BotConfigError);
+        expect(() =>
+            mergeBotConfig({ commands: { triggerPrefixes: '!' } })
+        ).toThrow(BotConfigError);
     });
 });
 

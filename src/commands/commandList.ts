@@ -267,6 +267,17 @@ const commandList: Command[] = [
     },
 ];
 
+/**
+ * The Discord usage info of the command listed under `commandName` (its
+ * primary name, not an alias), or undefined when no Discord command is
+ * listed under that name.
+ */
+export function getDiscordCommandInfo(
+    commandName: string
+): CommandInfo | undefined {
+    return commandList.find((cmd) => cmd.name === commandName)?.discord;
+}
+
 function getStringCommandUsage(
     commandName: string,
     platform: CommandPlatform

@@ -15,4 +15,8 @@ export default class CommandRegistry<T extends CommandHandler<any, any>> {
     public getCommandHandler(command: string): T | undefined {
         return this.commandHandlers.get(command);
     }
+
+    public getCommandNames(): string[] {
+        return [...this.commandHandlers.keys()];
+    }
 }

@@ -51,6 +51,10 @@ import DiscordReminderDeliverer from './services/reminders/DiscordReminderDelive
 import { parseReminderTrigger } from './commands/reminderTrigger';
 import CleanDiscordCommandHandler from './commands/discord/handlers/CleanDiscordCommandHandler';
 import { parseCommandTrigger } from './commands/commandTrigger';
+import {
+    handleSlashCommand,
+    registerSlashCommands,
+} from './commands/discord/slashCommands';
 import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsDiscordCommandHandler from './commands/discord/handlers/ExpressionsDiscordCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
@@ -297,6 +301,7 @@ const startDiscordClient = async ({
                 maxCount: botConfig.history.maxCount,
             },
             delayMs: botConfig.history.delayMs,
+            triggerPrefixes: botConfig.commands.triggerPrefixes,
         });
         for (const name of HISTORY_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, historyHandler);
@@ -334,6 +339,14 @@ const startDiscordClient = async ({
             'discord',
             new DiscordClaudeRequestNotifier(client)
         );
+
+        if (botConfig.commands.slashCommands) {
+            void registerSlashCommands(
+                client,
+                commandRegistry,
+                commandRegistry.getCommandNames()
+            );
+        }
 
         if (queueService) {
             queueService
@@ -599,6 +612,16 @@ const startDiscordClient = async ({
         }
     });
 
+    client.on(Events.InteractionCreate, async (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+        if (!botConfig.commands.slashCommands) return;
+        try {
+            await handleSlashCommand(interaction, commandRegistry);
+        } catch (error) {
+            logger.error('❌ Error handling Discord slash command:', error);
+        }
+    });
+
     client.on(Events.MessageCreate, async (message) => {
         if (message.author.id === client.user?.id) return;
 
@@ -629,7 +652,20 @@ const startDiscordClient = async ({
                       CLEAN_COMMAND_NAMES
                   )
                 : null;
-        const isShortInvocation = isReminderInvocation || cleanTrigger !== null;
+        // Any registered command as `!<command>`; unknown names fall through
+        // and are bridged as ordinary chat.
+        const commandTrigger =
+            !isBotCommand && !reminderTrigger && !cleanTrigger
+                ? parseCommandTrigger(
+                      message.content,
+                      botConfig.commands.triggerPrefixes,
+                      commandRegistry.getCommandNames()
+                  )
+                : null;
+        const isShortInvocation =
+            isReminderInvocation ||
+            cleanTrigger !== null ||
+            commandTrigger !== null;
 
         const runCommand = async (
             handler: DiscordCommandHandler,
@@ -702,6 +738,17 @@ const startDiscordClient = async ({
                     handler,
                     cleanTrigger.command,
                     cleanTrigger.rawArgs.split(/\s+/).filter(Boolean)
+                );
+            }
+        } else if (commandTrigger && !message.author.bot) {
+            const handler = commandRegistry.getCommandHandler(
+                commandTrigger.command
+            );
+            if (handler) {
+                await runCommand(
+                    handler,
+                    commandTrigger.command,
+                    commandTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
             }
         }

@@ -47,6 +47,8 @@ export interface HistoryDiscordCommandOptions {
     messageRelay: DiscordToFluxerMessageRelay;
     historyService: HistoryTransferService;
     moderatorRoleIds: readonly string[];
+    /** Short trigger prefixes (`commands.triggerPrefixes`) besides the bot prefix. */
+    triggerPrefixes?: readonly string[];
     limits: HistoryArgsLimits;
     delayMs: number;
 }
@@ -172,7 +174,7 @@ export default class HistoryDiscordCommandHandler extends DiscordCommandHandler 
         const raw =
             stripCommandInvocation(
                 message.content,
-                [COMMAND_PREFIX],
+                [COMMAND_PREFIX, ...(this.options.triggerPrefixes ?? [])],
                 HISTORY_COMMAND_NAMES
             ) ?? args.join(' ');
         const parsed = parseHistoryArgs(raw, this.options.limits);

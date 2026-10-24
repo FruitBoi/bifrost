@@ -91,6 +91,17 @@ claudeRequests:
     # checked for being closed.
     notifyPollMs: 120000
 
+commands:
+    # Prefixes that run any command without the bot prefix, so `!help`,
+    # `!link 123` and `!list` work like `!b help` etc. Only registered command
+    # names match; other `!foo` messages are bridged as normal chat. The bot
+    # prefix form always works. An empty list disables the shortcuts.
+    triggerPrefixes: ["!"]
+    # Register every command as a Discord slash command (`/link args:123`).
+    # Needs the `applications.commands` scope on the bot invite. Fluxer has no
+    # slash commands.
+    slashCommands: true
+
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`
     # messages (1-100) in the channel, or only those by the given user, and

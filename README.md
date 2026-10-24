@@ -33,6 +33,12 @@ Threads can be bridged like channels. A link always pairs two *locations*, and e
 
 Commands below use the default prefix `!b `. The prefix is configurable with `BF_COMMAND_PREFIX`.
 
+Every command also works as `!<command>` without the `b` (`!help`, `!link 123`, `!list`). Only registered command names match, so other messages starting with `!` are bridged as normal chat, and `!b ...` always stays the bot prefix. The short prefixes are set by `commands.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form. Like other commands, these messages are not bridged and are deleted when `BF_DELETE_INVOCATION` is on.
+
+### Slash commands
+
+On Discord every command is also available as a slash command `/<command>` (under its main name; aliases such as `/clear` are left out to keep the menu short) with one optional text option `args`, for example `/link args:123`. This is toggled by `commands.slashCommands` (default `true`). The bot must be invited with the `applications.commands` scope. Commands are registered globally on startup and may take a while to appear. Fluxer has no slash commands, so there use `!<command>`.
+
 ### Automatic thread bridging
 
 Every channel↔channel link has an **auto-sync threads** toggle (off by default). When it is on, any new thread created in either linked channel gets a counterpart thread in the other channel and the two threads are linked immediately as a thread↔thread link.
@@ -319,7 +325,7 @@ Examples:
 
 ### History transfer
 
-Linking two channels bridges new messages only. `history` (alias `backfill`) copies the messages that were already there: run it inside a linked channel or thread on either platform and it posts that channel's history to the linked counterpart, oldest first, through the same pipeline as live bridging. Copies look like bridged messages (the author's name and avatar via the webhook, attachments, embeds, replies, emojis), and each one starts with a small `<t:…>` line showing when the original was written. It is a **moderator command** (see [Permissions](#permissions-4) below) and only answers to the bot prefix: `!b history …`, never `?history`.
+Linking two channels bridges new messages only. `history` (alias `backfill`) copies the messages that were already there: run it inside a linked channel or thread on either platform and it posts that channel's history to the linked counterpart, oldest first, through the same pipeline as live bridging. Copies look like bridged messages (the author's name and avatar via the webhook, attachments, embeds, replies, emojis), and each one starts with a small `<t:…>` line showing when the original was written. It is a **moderator command** (see [Permissions](#permissions-4) below) and answers to the bot prefix (`!b history …`) and the generic short prefix (`!history …`), but never to `?history`.
 
 **Scope.** Three ways to say what to copy:
 
@@ -416,6 +422,8 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `claudeRequests.label` | `"claude"` | Label put on every issue. |
 | `claudeRequests.notifyOnClose` | `true` | When the issue filed by `clauderequest` is closed, reply to the request in its channel and ping the requester. See [Claude requests](#claude-requests). |
 | `claudeRequests.notifyPollMs` | `120000` | How often (ms, at least 30000) tracked issues are checked for being closed. |
+| `commands.triggerPrefixes` | `["!"]` | Prefixes that run any command without the bot prefix (`!help`, `!link 123`). Only registered command names match. `!b help` always works; an empty list disables the shortcuts. |
+| `commands.slashCommands` | `true` | Register every command as a Discord slash command (`/link args:123`) on startup. Needs the `applications.commands` invite scope; Fluxer has no slash commands. |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |
