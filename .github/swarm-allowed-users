@@ -1,0 +1,4 @@
+# GitHub logins allowed to start a Claude swarm by commenting `/swarm` on an issue.
+# One login per line; blank lines and lines starting with # are ignored.
+# The watcher (scripts/swarm-watch) reads this file from the feat/thread-bridging branch on GitHub.
+Melting-Cube

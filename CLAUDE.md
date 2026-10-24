@@ -14,6 +14,9 @@ When you finish one of these requests:
    [issue #6](https://github.com/FruitBoi/bifrost/issues/6).
 4. Close the issue.
 
+Users listed in `.github/swarm-allowed-users` can start this from GitHub by commenting `/swarm` on the
+issue; the dev server's watcher (`scripts/swarm-watch`) then runs `/swarm-issue <n>` unattended.
+
 Example comment:
 
 ```

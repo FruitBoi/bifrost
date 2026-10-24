@@ -1,0 +1,10 @@
+[Unit]
+Description=Start Claude swarms from /swarm comments on FruitBoi/bifrost issues
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/bifrost-swarm.env
+ExecStart=%h/Documents/dev/bifrost/scripts/swarm-watch/swarm-watch.sh
+TimeoutStartSec=4h
