@@ -30,7 +30,7 @@ export type ClaudeRequestFailure =
     | 'github_error';
 
 export type ClaudeRequestResult =
-    | { ok: true; number: number; url: string }
+    | { ok: true; number: number; url: string; title: string }
     | {
           ok: false;
           reason: ClaudeRequestFailure;
@@ -184,7 +184,12 @@ export default class ClaudeRequestService {
                 typeof data.html_url === 'string'
             ) {
                 this.cooldowns.set(key, this.now() + this.cooldownMs);
-                return { ok: true, number: data.number, url: data.html_url };
+                return {
+                    ok: true,
+                    number: data.number,
+                    url: data.html_url,
+                    title,
+                };
             }
             this.cooldowns.delete(key);
             const detail = [response.status, data.message]

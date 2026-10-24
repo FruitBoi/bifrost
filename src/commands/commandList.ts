@@ -217,12 +217,12 @@ const commandList: Command[] = [
         name: 'clauderequest',
         discord: {
             description:
-                "Files the rest of the message (newlines kept, up to 4000 characters) as an issue labelled `claude` in the bot's GitHub repository, for Claude to work on, and replies with the link. One request per minute per user. Needs `BF_GITHUB_TOKEN`. Restricted to the roles configured in `roles.claudeRequest`.",
+                "Files the rest of the message (newlines kept, up to 4000 characters) as an issue labelled `claude` in the bot's GitHub repository, for Claude to work on, and replies with the link. One request per minute per user. Needs `BF_GITHUB_TOKEN`. Restricted to the roles configured in `roles.claudeRequest`. The bot pings the requester in the channel when the issue is closed.",
             usageArgs: ['<request>'],
         },
         fluxer: {
             description:
-                "Files the rest of the message (newlines kept, up to 4000 characters) as an issue labelled `claude` in the bot's GitHub repository, for Claude to work on, and replies with the link. One request per minute per user. Needs `BF_GITHUB_TOKEN`. Restricted to the roles configured in `roles.claudeRequest`.",
+                "Files the rest of the message (newlines kept, up to 4000 characters) as an issue labelled `claude` in the bot's GitHub repository, for Claude to work on, and replies with the link. One request per minute per user. Needs `BF_GITHUB_TOKEN`. Restricted to the roles configured in `roles.claudeRequest`. The bot pings the requester in the channel when the issue is closed.",
             usageArgs: ['<request>'],
         },
     },

@@ -355,6 +355,8 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 - **Who may run it.** Members with one of the roles in `roles.claudeRequest` (by default the same Fluxer roles as `roles.identity`; add a Discord role ID to allow it on Discord). One request per minute per user.
 - **Setup.** Set `BF_GITHUB_TOKEN` (or `BF_GITHUB_TOKEN_FILE`) to a GitHub token that may create issues and apply labels in the repository, for example a fine-grained token limited to that repository with **Issues: Read and write**. Without it the command replies that it is not configured. `claudeRequests.enabled: false` switches the command off.
 
+- **Done notification.** The bot remembers which channel and message each request came from. Once the issue is closed on GitHub it replies to the original message there, pinging the requester (checked every `claudeRequests.notifyPollMs`, default 2 minutes; survives restarts). `claudeRequests.notifyOnClose: false` turns this off.
+
 Filing an issue does not start any work by itself; see [CLAUDE.md](CLAUDE.md) for how Claude requests are picked up.
 
 ## Lines
@@ -412,6 +414,8 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `claudeRequests.enabled` | `true` | Enable the `clauderequest` command on both platforms. It also needs `BF_GITHUB_TOKEN`. |
 | `claudeRequests.repo` | `"FruitBoi/bifrost"` | Repository (`owner/name`) the issues are opened in. |
 | `claudeRequests.label` | `"claude"` | Label put on every issue. |
+| `claudeRequests.notifyOnClose` | `true` | When the issue filed by `clauderequest` is closed, reply to the request in its channel and ping the requester. See [Claude requests](#claude-requests). |
+| `claudeRequests.notifyPollMs` | `120000` | How often (ms, at least 30000) tracked issues are checked for being closed. |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |

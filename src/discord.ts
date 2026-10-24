@@ -58,6 +58,8 @@ import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/express
 import HistoryDiscordCommandHandler from './commands/discord/handlers/HistoryDiscordCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestDiscordCommandHandler from './commands/discord/handlers/ClaudeRequestDiscordCommandHandler';
+import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
+import DiscordClaudeRequestNotifier from './services/claudeRequest/DiscordClaudeRequestNotifier';
 import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
@@ -86,6 +88,7 @@ const startDiscordClient = async ({
     reminderService,
     historyService,
     claudeRequestService,
+    claudeRequestNotifyService,
     claudeLinesService,
     botConfig,
 }: {
@@ -106,6 +109,7 @@ const startDiscordClient = async ({
     reminderService: ReminderService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
+    claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
     botConfig: BotConfig;
 }): Promise<Client> => {
@@ -303,7 +307,8 @@ const startDiscordClient = async ({
         const claudeRequestHandler = new ClaudeRequestDiscordCommandHandler(
             client,
             claudeRequestService,
-            botConfig.roles.claudeRequest
+            botConfig.roles.claudeRequest,
+            claudeRequestNotifyService
         );
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
@@ -324,6 +329,10 @@ const startDiscordClient = async ({
         reminderService.setDeliverer(
             'discord',
             new DiscordReminderDeliverer(client)
+        );
+        claudeRequestNotifyService?.setNotifier(
+            'discord',
+            new DiscordClaudeRequestNotifier(client)
         );
 
         if (queueService) {

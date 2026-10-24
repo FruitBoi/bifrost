@@ -8,7 +8,7 @@ import { ReminderDeliverer, ReminderDeliveryError } from './ReminderDeliverer';
  * reminder's channel: Unknown Channel, Unknown Guild, Missing Access and
  * Missing Permissions.
  */
-const PERMANENT_FETCH_CODES: ReadonlySet<number> = new Set([
+export const PERMANENT_FETCH_CODES: ReadonlySet<number> = new Set([
     10003, 10004, 50001, 50013,
 ]);
 
@@ -17,7 +17,7 @@ const PERMANENT_FETCH_CODES: ReadonlySet<number> = new Set([
  * Form Body (50035): the payload itself is rejected, so a retry would fail
  * the same way.
  */
-const PERMANENT_SEND_CODES: ReadonlySet<number> = new Set([
+export const PERMANENT_SEND_CODES: ReadonlySet<number> = new Set([
     ...PERMANENT_FETCH_CODES,
     50007,
     50035,
@@ -28,7 +28,7 @@ const PERMANENT_SEND_CODES: ReadonlySet<number> = new Set([
  * errors carry string codes such as `ECONNRESET`, so they stay transient).
  * Detection is duck-typed on top of `instanceof` so plain objects work too.
  */
-function discordErrorCode(err: unknown): number | null {
+export function discordErrorCode(err: unknown): number | null {
     if (err instanceof DiscordAPIError) {
         return typeof err.code === 'number' ? err.code : null;
     }

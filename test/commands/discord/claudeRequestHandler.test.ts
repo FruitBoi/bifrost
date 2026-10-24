@@ -6,6 +6,7 @@ import ClaudeRequestService, {
     ClaudeRequestResult,
     MAX_CLAUDE_REQUEST_LENGTH,
 } from '../../../src/services/claudeRequest/ClaudeRequestService';
+import ClaudeRequestNotifyService from '../../../src/services/claudeRequest/ClaudeRequestNotifyService';
 import { EmbedColors } from '../../../src/utils/embeds';
 
 const ALLOWED_ROLE = '1561105750388908139';
@@ -62,6 +63,7 @@ function makeService(
         ok: true,
         number: 42,
         url: 'https://github.com/o/r/issues/42',
+        title: 'do the thing',
     },
     configured = true
 ) {
@@ -84,12 +86,21 @@ describe('ClaudeRequestDiscordCommandHandler', () => {
 
     beforeEach(() => {
         submitMock = makeService();
+        track.mockClear();
     });
 
+    const track = vi.fn().mockResolvedValue(undefined);
+    const notifyService = {
+        track,
+    } as unknown as ClaudeRequestNotifyService;
+
     function handler(service = submitMock.service) {
-        return new ClaudeRequestDiscordCommandHandler(client, service, [
-            ALLOWED_ROLE,
-        ]);
+        return new ClaudeRequestDiscordCommandHandler(
+            client,
+            service,
+            [ALLOWED_ROLE],
+            notifyService
+        );
     }
 
     it('rejects authors without an allowed role', async () => {
@@ -150,6 +161,40 @@ describe('ClaudeRequestDiscordCommandHandler', () => {
         expect(embed.description).toContain(
             '[#42](https://github.com/o/r/issues/42)'
         );
+    });
+
+    it('tracks a successful request for the close notification', async () => {
+        const { message, reply } = makeMessage();
+        await handler().handleCommand(message, 'clauderequest', 'x');
+        expect(track).toHaveBeenCalledWith({
+            platform: 'discord',
+            issueNumber: 42,
+            issueUrl: 'https://github.com/o/r/issues/42',
+            title: 'do the thing',
+            userId: 'author',
+            guildId: 'guild-1',
+            channelId: 'chan-1',
+            messageId: '2000',
+        });
+        expect(description(reply).description).toContain("I'll let you know");
+    });
+
+    it('does not track a failed request', async () => {
+        const { service } = makeService({ ok: false, reason: 'too_long' });
+        const { message } = makeMessage();
+        await handler(service).handleCommand(message, 'clauderequest', 'x');
+        expect(track).not.toHaveBeenCalled();
+    });
+
+    it('works without a notify service', async () => {
+        const { message, reply } = makeMessage();
+        await new ClaudeRequestDiscordCommandHandler(
+            client,
+            submitMock.service,
+            [ALLOWED_ROLE],
+            null
+        ).handleCommand(message, 'clauderequest', 'x');
+        expect(description(reply).description).not.toContain("I'll let you");
     });
 
     it('passes multiline text through intact', async () => {

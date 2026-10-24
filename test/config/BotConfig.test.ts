@@ -869,6 +869,8 @@ describe('claudeRequests', () => {
             enabled: true,
             repo: 'FruitBoi/bifrost',
             label: 'claude',
+            notifyOnClose: true,
+            notifyPollMs: 120_000,
         });
     });
 
@@ -883,6 +885,8 @@ describe('claudeRequests', () => {
             enabled: true,
             repo: 'someone/fork',
             label: 'ai',
+            notifyOnClose: true,
+            notifyPollMs: 120_000,
         });
         expect(config.roles.claudeRequest).toEqual(['123']);
     });
@@ -896,6 +900,14 @@ describe('claudeRequests', () => {
             expect(attempt).toThrow('claudeRequests.repo');
         }
     );
+
+    it.each([29_999, 1.5, 0])('rejects notifyPollMs %j', (notifyPollMs) => {
+        const attempt = () =>
+            mergeBotConfig({ claudeRequests: { notifyPollMs } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('claudeRequests.notifyPollMs');
+    });
 
     it('rejects an empty label', () => {
         const attempt = () =>

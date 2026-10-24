@@ -7,6 +7,7 @@ import { VoiceLinkModel } from './VoiceLinkModel';
 import { UserLinkModel } from './UserLinkModel';
 import { ReminderModel } from './ReminderModel';
 import { HistoryMessageModel } from './HistoryMessageModel';
+import { ClaudeRequestModel } from './ClaudeRequestModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -115,4 +116,5 @@ export {
     UserLinkModel,
     ReminderModel,
     HistoryMessageModel,
+    ClaudeRequestModel,
 };

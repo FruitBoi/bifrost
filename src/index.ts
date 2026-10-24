@@ -13,6 +13,8 @@ import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeRemind
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
+import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
+import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
 import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
@@ -209,6 +211,31 @@ const main = async () => {
         );
     }
 
+    // Done notifications (issue #26): polls the issues the command filed and
+    // tells the requester in their channel once one is closed.
+    let claudeRequestNotifyService: ClaudeRequestNotifyService | null = null;
+    if (
+        botConfig.claudeRequests.enabled &&
+        botConfig.claudeRequests.notifyOnClose &&
+        GITHUB_TOKEN
+    ) {
+        claudeRequestNotifyService = new ClaudeRequestNotifyService(
+            new SequelizeClaudeRequestRepository(),
+            {
+                token: GITHUB_TOKEN,
+                repo: botConfig.claudeRequests.repo,
+                pollIntervalMs: botConfig.claudeRequests.notifyPollMs,
+            }
+        );
+    } else if (
+        botConfig.claudeRequests.enabled &&
+        !botConfig.claudeRequests.notifyOnClose
+    ) {
+        logger.info(
+            'Config: Claude request notifications are disabled (claudeRequests.notifyOnClose=false)'
+        );
+    }
+
     // `lines` (issue #19): counts the lines in Claude-co-authored commits of
     // the same repository; one service (and one cache) for both platforms.
     const claudeLinesService = new ClaudeLinesService({
@@ -299,6 +326,7 @@ const main = async () => {
         reminderService,
         historyService,
         claudeRequestService,
+        claudeRequestNotifyService,
         claudeLinesService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
@@ -424,6 +452,7 @@ const main = async () => {
             reminderService,
             historyService,
             claudeRequestService,
+            claudeRequestNotifyService,
             claudeLinesService,
         }),
         connectFluxer(),
@@ -441,6 +470,8 @@ const main = async () => {
         reminderService.start();
         logger.info('⏰ Reminder scheduler started');
     }
+
+    claudeRequestNotifyService?.start();
 
     if (voice) {
         discordVoiceTransport = new voice.DiscordVoiceTransport(discordClient);

@@ -13,8 +13,10 @@ import * as messageLinkAuthors from '../../src/db/migrations/00007-message-link-
 import * as userLinks from '../../src/db/migrations/00008-user-links';
 import * as reminders from '../../src/db/migrations/00009-reminders';
 import * as historyMessages from '../../src/db/migrations/00010-history-messages';
+import * as claudeRequests from '../../src/db/migrations/00011-claude-requests';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
+import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
@@ -71,6 +73,11 @@ const umzug = new Umzug({
             name: '00010-history-messages.js',
             up: historyMessages.up,
             down: historyMessages.down,
+        },
+        {
+            name: '00011-claude-requests.js',
+            up: claudeRequests.up,
+            down: claudeRequests.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1327,6 +1334,116 @@ describe('migration 00010-history-messages', () => {
         await umzug.up();
         expect(await executed()).toContain('00010-history-messages.js');
         expect(await qi.tableExists('history_messages')).toBe(true);
+        expect(await repo.count()).toBe(0);
+    });
+});
+
+describe('migration 00011-claude-requests', () => {
+    it('adds claude_requests with its index, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00011-claude-requests.js');
+        expect(await qi.tableExists('claude_requests')).toBe(true);
+
+        const cols = await qi.describeTable('claude_requests');
+        expect(cols.id).toMatchObject({ primaryKey: true, type: 'INTEGER' });
+        expect(cols.platform).toMatchObject({ allowNull: false });
+        expect(cols.issueNumber).toMatchObject({
+            allowNull: false,
+            type: 'INTEGER',
+        });
+        expect(cols.issueUrl).toMatchObject({ allowNull: false });
+        expect(cols.title).toMatchObject({ allowNull: false });
+        expect(cols.userId).toMatchObject({ allowNull: false });
+        expect(cols.guildId).toMatchObject({ allowNull: false });
+        expect(cols.channelId).toMatchObject({ allowNull: false });
+        expect(cols.messageId).toMatchObject({ allowNull: true });
+        expect(cols.attempts).toMatchObject({ allowNull: false });
+        expect(Number(cols.attempts.defaultValue)).toBe(0);
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('claude_requests');
+        expect(
+            indexes.find((i) => i.name === 'claude_requests_issue_number')
+        ).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'issueNumber' }],
+        });
+
+        const repo = new SequelizeClaudeRequestRepository();
+        expect(await repo.count()).toBe(0);
+        const base = {
+            issueUrl: 'https://github.com/o/r/issues/26',
+            title: 'Notify on completion',
+            guildId: 'g1',
+            channelId: 'c1',
+        };
+        const first = await repo.create({
+            ...base,
+            platform: 'discord',
+            issueNumber: 26,
+            userId: 'u1',
+            messageId: 'm1',
+        });
+        // The same issue may be tracked twice (no unique index).
+        const second = await repo.create({
+            ...base,
+            platform: 'fluxer',
+            issueNumber: 26,
+            userId: 'u2',
+            messageId: null,
+        });
+        const third = await repo.create({
+            ...base,
+            platform: 'discord',
+            issueNumber: 27,
+            userId: 'u1',
+            messageId: 'm3',
+        });
+        expect(first.id).toBe(1);
+        expect(second.id).toBe(first.id + 1);
+        expect(third.id).toBe(second.id + 1);
+        expect(first).toMatchObject({
+            platform: 'discord',
+            issueNumber: 26,
+            userId: 'u1',
+            messageId: 'm1',
+            attempts: 0,
+        });
+        expect(second.messageId).toBeNull();
+        expect(first.createdAt).toBeInstanceOf(Date);
+
+        // findAll: oldest first, optionally limited.
+        expect((await repo.findAll()).map((r) => r.id)).toEqual([
+            first.id,
+            second.id,
+            third.id,
+        ]);
+        expect((await repo.findAll(2)).map((r) => r.id)).toEqual([
+            first.id,
+            second.id,
+        ]);
+        expect((await repo.findById(second.id))?.messageId).toBeNull();
+        expect(await repo.findById(9999)).toBeNull();
+
+        await repo.incrementAttempts(third.id);
+        await repo.incrementAttempts(third.id);
+        expect((await repo.findById(third.id))?.attempts).toBe(2);
+        expect((await repo.findById(first.id))?.attempts).toBe(0);
+
+        expect(await repo.deleteById(first.id)).toBe(true);
+        expect(await repo.deleteById(first.id)).toBe(false);
+        expect(await repo.count()).toBe(2);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00011-claude-requests.js' });
+        expect(await executed()).not.toContain('00011-claude-requests.js');
+        expect(await executed()).toContain('00010-history-messages.js');
+        expect(await qi.tableExists('claude_requests')).toBe(false);
+        expect(await qi.tableExists('history_messages')).toBe(true);
+        expect(await qi.tableExists('reminders')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00011-claude-requests.js');
         expect(await repo.count()).toBe(0);
     });
 });

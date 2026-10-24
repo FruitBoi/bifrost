@@ -84,6 +84,12 @@ claudeRequests:
     repo: "FruitBoi/bifrost"
     # Label put on every issue.
     label: "claude"
+    # When the issue filed by `clauderequest` is closed, the bot replies to
+    # the request in the channel it was made in and pings the requester.
+    notifyOnClose: true
+    # How often (milliseconds, at least 30000) open tracked issues are
+    # checked for being closed.
+    notifyPollMs: 120000
 
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`

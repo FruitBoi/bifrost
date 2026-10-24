@@ -6,6 +6,7 @@ import ClaudeRequestService, {
     MAX_CLAUDE_REQUEST_LENGTH,
     stripClaudeRequestInvocation,
 } from '../../../services/claudeRequest/ClaudeRequestService';
+import ClaudeRequestNotifyService from '../../../services/claudeRequest/ClaudeRequestNotifyService';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
@@ -19,7 +20,8 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
     constructor(
         client: Client,
         private readonly claudeRequestService: ClaudeRequestService,
-        private readonly allowedRoleIds: readonly string[]
+        private readonly allowedRoleIds: readonly string[],
+        private readonly claudeRequestNotifyService: ClaudeRequestNotifyService | null = null
     ) {
         super(client);
     }
@@ -120,9 +122,19 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
                 );
                 await this.reply(
                     message,
-                    `Submitted Claude request [#${result.number}](${result.url}).`,
+                    `Submitted Claude request [#${result.number}](${result.url}).${this.claudeRequestNotifyService ? " I'll let you know here when it's done." : ''}`,
                     EmbedColors.Success
                 );
+                await this.claudeRequestNotifyService?.track({
+                    platform: 'fluxer',
+                    issueNumber: result.number,
+                    issueUrl: result.url,
+                    title: result.title,
+                    userId: message.author.id,
+                    guildId: message.guildId,
+                    channelId: message.channelId,
+                    messageId: message.id,
+                });
                 return;
             }
             const description = this.failureMessage(

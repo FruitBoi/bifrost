@@ -170,6 +170,7 @@ describe('ClaudeRequestService.submit', () => {
             ok: true,
             number: 42,
             url: 'https://github.com/x/y/issues/42',
+            title: expect.any(String),
         });
         const [url, init] = fetchImpl.mock.calls[0];
         expect(url).toBe(

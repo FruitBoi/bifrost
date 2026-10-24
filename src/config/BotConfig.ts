@@ -82,6 +82,13 @@ export interface BotConfig {
         repo: string;
         /** Label put on every issue (the one the Claude request template uses). */
         label: string;
+        /**
+         * When the issue filed by `clauderequest` is closed, the bot replies
+         * to the request in its channel, pinging the requester.
+         */
+        notifyOnClose: boolean;
+        /** How often (ms) tracked issues are checked for being closed. */
+        notifyPollMs: number;
     };
     clean: {
         /**
@@ -176,6 +183,8 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         enabled: true,
         repo: 'FruitBoi/bifrost',
         label: 'claude',
+        notifyOnClose: true,
+        notifyPollMs: 120_000,
     },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     history: {
@@ -386,6 +395,14 @@ function validateClaudeRequestsConfig(
     if (!claudeRequests.label.trim()) {
         throw new BotConfigError(
             'Config "claudeRequests.label" must not be empty'
+        );
+    }
+    if (
+        !Number.isInteger(claudeRequests.notifyPollMs) ||
+        claudeRequests.notifyPollMs < 30_000
+    ) {
+        throw new BotConfigError(
+            `Config "claudeRequests.notifyPollMs" must be a whole number of at least 30000, got ${claudeRequests.notifyPollMs}`
         );
     }
 }

@@ -73,6 +73,8 @@ import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/express
 import HistoryFluxerCommandHandler from './commands/fluxer/handlers/HistoryFluxerCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestFluxerCommandHandler from './commands/fluxer/handlers/ClaudeRequestFluxerCommandHandler';
+import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
+import FluxerClaudeRequestNotifier from './services/claudeRequest/FluxerClaudeRequestNotifier';
 import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
@@ -102,6 +104,7 @@ const startFluxerClient = async ({
     reminderService,
     historyService,
     claudeRequestService,
+    claudeRequestNotifyService,
     claudeLinesService,
     onClientCreated,
 }: {
@@ -124,6 +127,7 @@ const startFluxerClient = async ({
     reminderService: ReminderService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
+    claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
     /**
      * Called with the freshly created client before any listener is attached
@@ -333,7 +337,8 @@ const startFluxerClient = async ({
         const claudeRequestHandler = new ClaudeRequestFluxerCommandHandler(
             client,
             claudeRequestService,
-            botConfig.roles.claudeRequest
+            botConfig.roles.claudeRequest,
+            claudeRequestNotifyService
         );
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
@@ -359,6 +364,10 @@ const startFluxerClient = async ({
                 new FluxerReminderDeliverer(client)
             );
         }
+        claudeRequestNotifyService?.setNotifier(
+            'fluxer',
+            new FluxerClaudeRequestNotifier(client)
+        );
     });
 
     client.on(Events.Error, (error) => {
