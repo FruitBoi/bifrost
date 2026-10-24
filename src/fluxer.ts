@@ -33,6 +33,8 @@ import LinkFluxerCommandHandler from './commands/fluxer/handlers/LinkFluxerComma
 import UnlinkFluxerCommandHandler from './commands/fluxer/handlers/UnlinkFluxerCommandHandler';
 import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerCommandHandler';
 import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxerCommandHandler';
+import PinsFluxerCommandHandler from './commands/fluxer/handlers/PinsFluxerCommandHandler';
+import PinBridgeService from './services/pinBridge/PinBridgeService';
 import { WebhookService } from './services/WebhookService';
 import FluxerToDiscordMessageRelay from './services/messageRelay/FluxerToDiscordMessageRelay';
 import FluxerToDiscordReactionRelay from './services/reactionBridge/FluxerToDiscordReactionRelay';
@@ -109,6 +111,7 @@ const startFluxerClient = async ({
     reminderService,
     reminderTimezoneService,
     historyService,
+    pinBridgeService,
     claudeRequestService,
     claudeRequestNotifyService,
     claudeLinesService,
@@ -133,6 +136,7 @@ const startFluxerClient = async ({
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
+    pinBridgeService: PinBridgeService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
@@ -198,6 +202,7 @@ const startFluxerClient = async ({
         discordEntityResolver,
         threadSyncService,
     });
+    pinBridgeService.setFluxerRelay(messageRelay);
     const reactionRelay = new FluxerToDiscordReactionRelay({
         linkService,
         discordEntityResolver,
@@ -245,6 +250,10 @@ const startFluxerClient = async ({
     commandRegistry.registerCommand(
         'threads',
         new ThreadsFluxerCommandHandler(client, linkService)
+    );
+    commandRegistry.registerCommand(
+        'pins',
+        new PinsFluxerCommandHandler(client, linkService, pinBridgeService)
     );
     commandRegistry.registerCommand(
         'category',
@@ -489,6 +498,16 @@ const startFluxerClient = async ({
                     error
                 );
             }
+        });
+    }
+
+    // Pin bridging (issue #33): the event only says that a channel's pins
+    // changed, so the service diffs them against what it saw last and
+    // mirrors the change onto bridged messages. Off via `pins.enabled: false`.
+    if (botConfig.pins.enabled) {
+        client.on(Events.ChannelPinsUpdate, async (payload) => {
+            if (!payload.guildId) return;
+            await pinBridgeService.handleFluxerPinsUpdate(payload.channelId);
         });
     }
 

@@ -175,6 +175,16 @@ export interface BotConfig {
          */
         enabled: boolean;
     };
+    pins: {
+        /**
+         * Mirror pinning and unpinning of bridged messages onto the
+         * counterpart message on the other platform, done by the bot (it
+         * needs Pin Messages on both platforms). The `pins sync` command
+         * copies a channel's existing pins across regardless. See
+         * `services/pinBridge/`.
+         */
+        enabled: boolean;
+    };
     typing: {
         /**
          * Show the typing indicator on the other platform while someone types
@@ -216,6 +226,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     meow: { enabled: true },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
     reactions: { enabled: true },
+    pins: { enabled: true },
     typing: { enabled: true },
 };
 
@@ -502,6 +513,7 @@ const PERMISSION_BITS = {
     createPublicThreads: 2 ** 35,
     sendMessagesInThreads: 2 ** 38,
     createExpressions: 2 ** 43,
+    pinMessages: 2 ** 51,
 };
 
 /**
@@ -511,7 +523,9 @@ const PERMISSION_BITS = {
  * Messages in Threads, and reaction bridging adds Add Reactions (requested
  * even when `reactions.enabled` is off, so turning it on later needs no
  * re-invite). Emoji and sticker transfer (`expressions` command) adds Create
- * Expressions, which the bot needs on Fluxer to upload the copies. Manage
+ * Expressions, which the bot needs on Fluxer to upload the copies, and pin
+ * bridging adds Pin Messages (also requested regardless of `pins.enabled`,
+ * since the `pins sync` command needs it too). Manage
  * Threads is only requested when enabled in the config, because it also
  * grants deleting and archiving threads.
  */
@@ -529,6 +543,7 @@ export function inviteBotPermissions(config: BotConfig): string {
         PERMISSION_BITS.createPublicThreads,
         PERMISSION_BITS.sendMessagesInThreads,
         PERMISSION_BITS.createExpressions,
+        PERMISSION_BITS.pinMessages,
     ];
     if (config.permissions.manageThreads) {
         flags.push(PERMISSION_BITS.manageThreads);

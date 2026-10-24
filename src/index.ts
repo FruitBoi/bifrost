@@ -13,6 +13,7 @@ import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeRemind
 import { SequelizeUserTimezoneRepository } from './db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
+import PinBridgeService from './services/pinBridge/PinBridgeService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
@@ -202,6 +203,19 @@ const main = async () => {
         );
     }
 
+    // Pin bridging (issue #33): one service for both platforms, so the pin
+    // snapshots it keeps per link are shared by both directions.
+    const pinBridgeService = new PinBridgeService({
+        linkService,
+        discordEntityResolver,
+        fluxerEntityResolver,
+        metricsService,
+        delayMs: botConfig.history.delayMs,
+    });
+    if (!botConfig.pins.enabled) {
+        logger.info('Config: pin bridging is disabled (pins.enabled=false)');
+    }
+
     // Claude requests (issue #18): one service (and one per-user cooldown)
     // for both platforms.
     const claudeRequestService = new ClaudeRequestService({
@@ -334,6 +348,7 @@ const main = async () => {
         reminderService,
         reminderTimezoneService,
         historyService,
+        pinBridgeService,
         claudeRequestService,
         claudeRequestNotifyService,
         claudeLinesService,
@@ -461,6 +476,7 @@ const main = async () => {
             reminderService,
             reminderTimezoneService,
             historyService,
+            pinBridgeService,
             claudeRequestService,
             claudeRequestNotifyService,
             claudeLinesService,

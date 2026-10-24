@@ -139,6 +139,7 @@ describe('loadBotConfig parsing', () => {
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
+            pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
         });
     });
@@ -170,6 +171,7 @@ describe('loadBotConfig parsing', () => {
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
+            pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
         });
     });
@@ -328,7 +330,7 @@ describe('inviteBotPermissions', () => {
     it('requests the base set without Manage Threads by default', () => {
         const mask = inviteBotPermissions(DEFAULT_BOT_CONFIG);
 
-        expect(mask).toBe('9105904323648');
+        expect(mask).toBe('2260905718008896');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(0n);
     });
 
@@ -338,7 +340,7 @@ describe('inviteBotPermissions', () => {
             permissions: { manageThreads: true },
         });
 
-        expect(mask).toBe('9123084192832');
+        expect(mask).toBe('2260922897878080');
         expect(BigInt(mask) & MANAGE_THREADS).toBe(MANAGE_THREADS);
         expect(BigInt(mask) - MANAGE_THREADS).toBe(
             BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG))
@@ -374,6 +376,19 @@ describe('inviteBotPermissions', () => {
         );
     });
 
+    it('always requests Pin Messages for pin bridging', () => {
+        const PIN_MESSAGES = 1n << 51n;
+        const off = inviteBotPermissions({
+            ...DEFAULT_BOT_CONFIG,
+            pins: { enabled: false },
+        });
+
+        expect(
+            BigInt(inviteBotPermissions(DEFAULT_BOT_CONFIG)) & PIN_MESSAGES
+        ).toBe(PIN_MESSAGES);
+        expect(BigInt(off) & PIN_MESSAGES).toBe(PIN_MESSAGES);
+    });
+
     it('returns a decimal string', () => {
         expect(inviteBotPermissions(DEFAULT_BOT_CONFIG)).toMatch(/^\d+$/);
     });
@@ -393,6 +408,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'meow',
             'reminders',
             'reactions',
+            'pins',
             'typing',
         ]);
     });
@@ -875,6 +891,24 @@ describe('reactions', () => {
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('reactions.enabled');
         expect(attempt).toThrow('boolean');
+    });
+});
+
+describe('pins', () => {
+    it('defaults to enabled', () => {
+        expect(DEFAULT_BOT_CONFIG.pins).toEqual({ enabled: true });
+    });
+
+    it('merges pins.enabled: false from a YAML file', () => {
+        write('config.yml', 'pins:\n  enabled: false\n');
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            pins: { enabled: false },
+        });
     });
 });
 

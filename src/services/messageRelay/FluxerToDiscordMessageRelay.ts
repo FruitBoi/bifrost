@@ -12,10 +12,15 @@ import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
 import ThreadSyncService from '../threadSync/ThreadSyncService';
 
-/** System messages emitted alongside thread creation; never worth bridging. */
+/**
+ * System messages emitted alongside thread creation, and "X pinned a
+ * message" notices (the pin itself is bridged, which makes the other
+ * platform post its own notice); never worth bridging.
+ */
 const SKIPPED_MESSAGE_TYPES = new Set<number>([
     MessageType.ThreadCreated,
     MessageType.ThreadStarterMessage,
+    MessageType.ChannelPinnedMessage,
 ]);
 
 /** The link's Discord webhook could not be fetched (deleted or token revoked). */

@@ -107,6 +107,21 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'pins',
+        summary:
+            'Syncs the pinned messages of a linked channel or thread between Discord and Fluxer.',
+        discord: {
+            description:
+                'Syncs the pinned messages of the current linked channel or thread with Fluxer: already-bridged messages are pinned on both sides and unbridged pins are copied over. Needs Manage Messages. New pins and unpins on bridged messages sync automatically.',
+            usageArgs: ['sync'],
+        },
+        fluxer: {
+            description:
+                'Syncs the pinned messages of the current linked channel or thread with Discord: already-bridged messages are pinned on both sides and unbridged pins are copied over. Needs Manage Messages. New pins and unpins on bridged messages sync automatically.',
+            usageArgs: ['sync'],
+        },
+    },
+    {
         name: 'category',
         summary:
             'Bridges every text channel of a Discord category to threads in a Fluxer channel.',

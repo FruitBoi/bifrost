@@ -186,6 +186,18 @@ reactions:
     # reaction bridging must grant it to the bot's role or re-invite the bot.
     enabled: true
 
+pins:
+    # Mirror pinning and unpinning of bridged messages (channels and threads,
+    # originals and webhook copies alike) onto the counterpart message on the
+    # other platform. The bot does the pinning, so the other side shows the
+    # bot's own "pinned a message" notice. Until the bot has seen a channel's
+    # pins once after starting, it mirrors new pins only, not unpins. The
+    # `pins sync` command (copies a channel's existing pins across) works
+    # regardless of this setting. The bot needs Pin Messages on both
+    # platforms; installations invited before pin bridging must grant it to
+    # the bot's role or re-invite the bot.
+    enabled: true
+
 typing:
     # Show the typing indicator on the other platform while someone types in a
     # bridged channel or thread. Webhooks cannot type, so the other side sees

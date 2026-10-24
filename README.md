@@ -12,6 +12,7 @@
 - Support for messages, replies, attachments, emojis¹, stickers, embeds, join messages and polls
 - Bridge messages using webhooks
 - Bridge reactions: reacting to a bridged message adds the same emoji to its counterpart on the other platform (see [Reactions](#reactions))
+- Bridge pins: pinning or unpinning a bridged message does the same to its counterpart, and `!b pins sync` copies a channel's existing pins across (see [Pins](#pins))
 - Bridge typing: when someone types in a bridged channel or thread, the other platform shows the bot typing (see [Typing indicators](#typing-indicators))
 - Easy setup using our hosted bot or self-hosting with Docker
 - Customizable bot prefix and settings
@@ -30,7 +31,7 @@
 
 ## Threads
 
-Threads can be bridged like channels. A link always pairs two *locations*, and each side can be a text channel or a thread inside one, so channel↔channel, thread↔thread, channel↔thread and thread↔channel links are all possible. A thread does **not** have to belong to a linked channel to be linked itself. A link relays messages (send, edit and delete) in both directions; when both sides are threads, the thread name is kept in sync too. Everything else about a thread (archive state, lock state, members, pins, …) is intentionally left alone; reactions on messages in a linked thread are bridged like anywhere else (see [Reactions](#reactions)); see [docs/THREAD_SYNC_FUTURE.md](docs/THREAD_SYNC_FUTURE.md) for what could be added later.
+Threads can be bridged like channels. A link always pairs two *locations*, and each side can be a text channel or a thread inside one, so channel↔channel, thread↔thread, channel↔thread and thread↔channel links are all possible. A thread does **not** have to belong to a linked channel to be linked itself. A link relays messages (send, edit and delete) in both directions; when both sides are threads, the thread name is kept in sync too. Everything else about a thread (archive state, lock state, members, …) is intentionally left alone; reactions and pins on messages in a linked thread are bridged like anywhere else (see [Reactions](#reactions) and [Pins](#pins)); see [docs/THREAD_SYNC_FUTURE.md](docs/THREAD_SYNC_FUTURE.md) for what could be added later.
 
 Commands below use the default prefix `!b `. The prefix is configurable with `BF_COMMAND_PREFIX`.
 
@@ -110,6 +111,17 @@ When someone reacts to a bridged message, the bot adds the same reaction to the 
 - **Emojis.** Standard Unicode emojis are mirrored as-is. A custom emoji is mirrored only when the other server has a custom emoji with the **same name** (the same rule as for emojis inside messages); otherwise that reaction is simply not bridged.
 - **Toggle.** Reaction bridging is on by default; turn it off with `reactions.enabled: false` in the [configuration file](#configuration-file).
 - **Permissions.** The bot needs **Add Reactions** (and **Read Message History**, which bridging already requires) on both platforms. The invite links logged at startup include it; installations made before reaction bridging was added must grant it to the bot's role manually or re-invite the bot. On Discord the bot also needs the *Guild Message Reactions* gateway intent, which is requested automatically (it is not privileged).
+
+## Pins
+
+When someone pins or unpins a bridged message, the bot pins or unpins its counterpart on the other platform. This works in both directions, in channels and threads alike, for any message the bridge has linked (the original as well as its webhook copy).
+
+- **Done by the bot.** The mirrored pin is made by the bot, so the other platform shows its own "pinned a message" notice from the bot. The notice the pin produces on the source side is not bridged as a message.
+- **No loop.** The bot remembers which pins it mirrored, so its own pins and unpins are not bridged back.
+- **After a restart.** Neither platform says *which* message was pinned or unpinned, only that a channel's pins changed, so the bot compares the channel's pins with what it saw last. Until it has seen a channel's pins once since starting, it only mirrors new pins; an unpin in that window is not mirrored (run `pins sync` or unpin on the other side too).
+- **`pins sync`.** `!b pins sync`, run inside a linked channel or thread, syncs the pins that already exist: every pinned bridged message is pinned on the other side too, and a pinned message that was never bridged (for example one pinned before the channels were linked) is first copied to the other side, in the style of a bridged message, and then pinned there. Oldest pins go first, so the most recent pin stays on top. Copies are paced like [History transfer](#history-transfer) (`history.delayMs`). It only adds pins, never removes them. Needs **Manage Messages**. Only one sync per channel runs at a time.
+- **Toggle.** Automatic pin bridging is on by default; turn it off with `pins.enabled: false` in the [configuration file](#configuration-file). `pins sync` works either way.
+- **Permissions.** The bot needs **Pin Messages** on both platforms (Manage Messages on servers that predate that permission). The invite links logged at startup include it; installations made before pin bridging was added must grant it to the bot's role manually or re-invite the bot.
 
 ## Typing indicators
 
@@ -466,6 +478,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` / `timezone` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
+| `pins.enabled` | `true` | Mirror pins and unpins of bridged messages onto the counterpart message. Needs **Pin Messages** on both platforms. `pins sync` works regardless. See [Pins](#pins). |
 | `typing.enabled` | `true` | Show the bot typing on the other platform while someone types in a bridged channel or thread. Needs **Send Messages** only; on Discord it requests the *Guild Message Typing* intent while on. See [Typing indicators](#typing-indicators). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:

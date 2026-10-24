@@ -22,6 +22,8 @@ import LinkDiscordCommandHandler from './commands/discord/handlers/LinkDiscordCo
 import UnlinkDiscordCommandHandler from './commands/discord/handlers/UnlinkDiscordCommandHandler';
 import ListDiscordCommandHandler from './commands/discord/handlers/ListDiscordCommandHandler';
 import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDiscordCommandHandler';
+import PinsDiscordCommandHandler from './commands/discord/handlers/PinsDiscordCommandHandler';
+import PinBridgeService from './services/pinBridge/PinBridgeService';
 import { WebhookService } from './services/WebhookService';
 import DiscordToFluxerMessageRelay from './services/messageRelay/DiscordToFluxerMessageRelay';
 import DiscordToFluxerReactionRelay from './services/reactionBridge/DiscordToFluxerReactionRelay';
@@ -97,6 +99,7 @@ const startDiscordClient = async ({
     reminderService,
     reminderTimezoneService,
     historyService,
+    pinBridgeService,
     claudeRequestService,
     claudeRequestNotifyService,
     claudeLinesService,
@@ -119,6 +122,7 @@ const startDiscordClient = async ({
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
+    pinBridgeService: PinBridgeService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
@@ -180,6 +184,7 @@ const startDiscordClient = async ({
         fluxerEntityResolver,
         threadSyncService,
     });
+    pinBridgeService.setDiscordRelay(messageRelay);
     const reactionRelay = new DiscordToFluxerReactionRelay({
         linkService,
         fluxerEntityResolver,
@@ -225,6 +230,10 @@ const startDiscordClient = async ({
     commandRegistry.registerCommand(
         'threads',
         new ThreadsDiscordCommandHandler(client, linkService)
+    );
+    commandRegistry.registerCommand(
+        'pins',
+        new PinsDiscordCommandHandler(client, linkService, pinBridgeService)
     );
     commandRegistry.registerCommand(
         'category',
@@ -565,6 +574,16 @@ const startDiscordClient = async ({
                     error
                 );
             }
+        });
+    }
+
+    // Pin bridging (issue #33): the event only says that a channel's pins
+    // changed, so the service diffs them against what it saw last and
+    // mirrors the change onto bridged messages. Off via `pins.enabled: false`.
+    if (botConfig.pins.enabled) {
+        client.on(Events.ChannelPinsUpdate, async (channel) => {
+            if (channel.isDMBased()) return;
+            await pinBridgeService.handleDiscordPinsUpdate(channel.id);
         });
     }
 
