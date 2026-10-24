@@ -149,6 +149,17 @@ export interface BotConfig {
          */
         enabled: boolean;
     };
+    typing: {
+        /**
+         * Show the typing indicator on the other platform while someone types
+         * in a bridged channel or thread. Webhooks cannot type, so it appears
+         * as the bot ("<bot name> is typing…"), throttled to one trigger per
+         * channel every few seconds. On Discord it needs the Guild Message
+         * Typing gateway intent, which is requested only while this is on.
+         * See `services/typingBridge/`.
+         */
+        enabled: boolean;
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -176,6 +187,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     meow: { enabled: true },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
     reactions: { enabled: true },
+    typing: { enabled: true },
 };
 
 export const CONFIG_FILE_CANDIDATES = [

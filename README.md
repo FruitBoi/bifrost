@@ -12,6 +12,7 @@
 - Support for messages, replies, attachments, emojis¹, stickers, embeds, join messages and polls
 - Bridge messages using webhooks
 - Bridge reactions: reacting to a bridged message adds the same emoji to its counterpart on the other platform (see [Reactions](#reactions))
+- Bridge typing: when someone types in a bridged channel or thread, the other platform shows the bot typing (see [Typing indicators](#typing-indicators))
 - Easy setup using our hosted bot or self-hosting with Docker
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
@@ -100,6 +101,17 @@ When someone reacts to a bridged message, the bot adds the same reaction to the 
 - **Emojis.** Standard Unicode emojis are mirrored as-is. A custom emoji is mirrored only when the other server has a custom emoji with the **same name** (the same rule as for emojis inside messages); otherwise that reaction is simply not bridged.
 - **Toggle.** Reaction bridging is on by default; turn it off with `reactions.enabled: false` in the [configuration file](#configuration-file).
 - **Permissions.** The bot needs **Add Reactions** (and **Read Message History**, which bridging already requires) on both platforms. The invite links logged at startup include it; installations made before reaction bridging was added must grant it to the bot's role manually or re-invite the bot. On Discord the bot also needs the *Guild Message Reactions* gateway intent, which is requested automatically (it is not privileged).
+
+## Typing indicators
+
+When someone types in a bridged channel or thread, the other platform shows that the bot is typing in the linked channel or thread. This works in both directions.
+
+- **The bot's name, not the person's.** Webhooks cannot type, so the other side sees the bot's name followed by "is typing…" and never the name of the person who is typing.
+- **Throttled.** The bot triggers the indicator at most once every few seconds per channel, so a fast typist does not flood the gateway or the API.
+- **Lingering indicator.** Neither platform lets a bot stop typing, and a webhook message does not clear the bot's indicator. The indicator can therefore stay a few seconds after the bridged message appears.
+- **No loop.** The bot's own typing is never bridged back, so nothing loops.
+- **Toggle.** Typing bridging is on by default; turn it off with `typing.enabled: false` in the [configuration file](#configuration-file).
+- **Permissions.** No extra permissions beyond **Send Messages**, which bridging already needs. On Discord the bot also needs the *Guild Message Typing* gateway intent, which is requested automatically only while this feature is enabled (it is not privileged).
 
 ## Voice
 
@@ -410,6 +422,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
+| `typing.enabled` | `true` | Show the bot typing on the other platform while someone types in a bridged channel or thread. Needs **Send Messages** only; on Discord it requests the *Guild Message Typing* intent while on. See [Typing indicators](#typing-indicators). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:
 

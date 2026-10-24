@@ -36,6 +36,7 @@ import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxe
 import { WebhookService } from './services/WebhookService';
 import FluxerToDiscordMessageRelay from './services/messageRelay/FluxerToDiscordMessageRelay';
 import FluxerToDiscordReactionRelay from './services/reactionBridge/FluxerToDiscordReactionRelay';
+import TypingBridgeService from './services/typingBridge/TypingBridgeService';
 import HelpFluxerCommandHandler from './commands/fluxer/handlers/HelpFluxerCommandHandler';
 import AutolinkFluxerCommandHandler from './commands/fluxer/handlers/AutolinkFluxerCommandHandler';
 import HealthCheckService from './services/HealthCheckService';
@@ -193,6 +194,11 @@ const startFluxerClient = async ({
         metricsService,
     });
     reactionRelay.setFluxerClient(client);
+    const typingBridge = new TypingBridgeService({
+        linkService,
+        discordEntityResolver,
+        fluxerEntityResolver,
+    });
 
     const commandRegistry = new CommandRegistry<FluxerCommandHandler>();
     commandRegistry.registerCommand(
@@ -451,6 +457,20 @@ const startFluxerClient = async ({
                     '❌ Error mirroring Fluxer emoji clear to Discord:',
                     error
                 );
+            }
+        });
+    }
+
+    // Typing bridging (issue #25): show the bot typing in the linked Discord
+    // location while someone types here. Off via `typing.enabled: false`.
+    if (botConfig.typing.enabled) {
+        client.on(Events.TypingStart, async (payload) => {
+            if (!payload.guildId) return;
+            if (payload.userId === client.user?.id) return;
+            try {
+                await typingBridge.handleFluxerTyping(payload.channelId);
+            } catch (error) {
+                logger.error('❌ Error mirroring Fluxer typing:', error);
             }
         });
     }

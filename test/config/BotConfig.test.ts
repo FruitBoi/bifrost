@@ -138,6 +138,7 @@ describe('loadBotConfig parsing', () => {
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
+            typing: DEFAULT_BOT_CONFIG.typing,
         });
     });
 
@@ -167,6 +168,7 @@ describe('loadBotConfig parsing', () => {
             meow: DEFAULT_BOT_CONFIG.meow,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
+            typing: DEFAULT_BOT_CONFIG.typing,
         });
     });
 
@@ -388,6 +390,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'meow',
             'reminders',
             'reactions',
+            'typing',
         ]);
     });
 });
@@ -830,6 +833,32 @@ describe('reactions', () => {
 
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('reactions.enabled');
+        expect(attempt).toThrow('boolean');
+    });
+});
+
+describe('typing', () => {
+    it('defaults to enabled', () => {
+        expect(DEFAULT_BOT_CONFIG.typing).toEqual({ enabled: true });
+    });
+
+    it('merges typing.enabled: false from a YAML file', () => {
+        write('config.yml', 'typing:\n  enabled: false\n');
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            typing: { enabled: false },
+        });
+    });
+
+    it('rejects a non-boolean enabled flag', () => {
+        const attempt = () => mergeBotConfig({ typing: { enabled: 'no' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('typing.enabled');
         expect(attempt).toThrow('boolean');
     });
 });

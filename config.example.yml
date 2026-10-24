@@ -166,3 +166,13 @@ reactions:
     # bot needs Add Reactions on both platforms; installations invited before
     # reaction bridging must grant it to the bot's role or re-invite the bot.
     enabled: true
+
+typing:
+    # Show the typing indicator on the other platform while someone types in a
+    # bridged channel or thread. Webhooks cannot type, so the other side sees
+    # "<bot name> is typing…" rather than the person's name, triggered at most
+    # once every few seconds per channel. The indicator can linger a few
+    # seconds after the bridged message appears. The bot's own typing is never
+    # bridged back. On Discord the bot requests the Guild Message Typing
+    # gateway intent only while this is on; no extra permissions are needed.
+    enabled: true

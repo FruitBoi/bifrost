@@ -25,6 +25,7 @@ import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDis
 import { WebhookService } from './services/WebhookService';
 import DiscordToFluxerMessageRelay from './services/messageRelay/DiscordToFluxerMessageRelay';
 import DiscordToFluxerReactionRelay from './services/reactionBridge/DiscordToFluxerReactionRelay';
+import TypingBridgeService from './services/typingBridge/TypingBridgeService';
 import HelpDiscordCommandHandler from './commands/discord/handlers/HelpDiscordCommandHandler';
 import AutolinkDiscordCommandHandler from './commands/discord/handlers/AutolinkDiscordCommandHandler';
 import HealthCheckService from './services/HealthCheckService';
@@ -115,6 +116,10 @@ const startDiscordClient = async ({
             GatewayIntentBits.MessageContent,
             GatewayIntentBits.GuildVoiceStates,
             GatewayIntentBits.GuildMessageReactions,
+            // Typing events are frequent; only subscribe when they're bridged.
+            ...(botConfig.typing.enabled
+                ? [GatewayIntentBits.GuildMessageTyping]
+                : []),
         ],
         // Reaction/User partials: without them discord.js drops reaction
         // events on uncached messages and removals by uncached users.
@@ -164,6 +169,11 @@ const startDiscordClient = async ({
         linkService,
         fluxerEntityResolver,
         metricsService,
+    });
+    const typingBridge = new TypingBridgeService({
+        linkService,
+        discordEntityResolver,
+        fluxerEntityResolver,
     });
 
     const commandRegistry = new CommandRegistry<DiscordCommandHandler>();
@@ -511,6 +521,20 @@ const startDiscordClient = async ({
                     '❌ Error mirroring Discord reaction emoji clear:',
                     error
                 );
+            }
+        });
+    }
+
+    // Typing bridging (issue #25): show the bot typing in the linked Fluxer
+    // location while someone types here. Off via `typing.enabled: false`.
+    if (botConfig.typing.enabled) {
+        client.on(Events.TypingStart, async (typing) => {
+            if (!typing.inGuild()) return;
+            if (typing.user.id === client.user?.id) return;
+            try {
+                await typingBridge.handleDiscordTyping(typing.channel.id);
+            } catch (error) {
+                logger.error('❌ Error mirroring Discord typing:', error);
             }
         });
     }
