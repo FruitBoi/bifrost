@@ -20,12 +20,12 @@ Comments from anyone else, on pull requests, or on closed issues are ignored.
 - `.claude/` is gitignored, so the clone symlinks `.claude/skills` from the main checkout, and the
   clone's Claude project memory is symlinked to the main checkout's.
 - Dependencies are installed in the clone with podman when `pnpm-lock.yaml` changes.
-- Claude runs headless with `--permission-mode auto` and `BIFROST_SWARM_UNATTENDED=1`.
+- Claude runs headless on Opus (`--model opus`) with `--permission-mode auto` and `BIFROST_SWARM_UNATTENDED=1`.
 - State and logs live in `~/.local/state/bifrost-swarm/`. The first run only records the current
   time, so older comments never trigger a swarm.
 
 Settings can be overridden in `~/.config/bifrost-swarm.env` (`SWARM_REPO`, `SWARM_BRANCH`,
-`SWARM_WORKDIR`, `SWARM_MAIN_CHECKOUT`, `SWARM_PERMISSION_MODE`, ...; see the top of `swarm-watch.sh`).
+`SWARM_WORKDIR`, `SWARM_MAIN_CHECKOUT`, `SWARM_MODEL`, `SWARM_PERMISSION_MODE`, ...; see the top of `swarm-watch.sh`).
 
 ## Install
 

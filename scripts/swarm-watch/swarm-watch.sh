@@ -11,6 +11,7 @@ WORKDIR="${SWARM_WORKDIR:-$HOME/bifrost-swarm}"
 MAIN_CHECKOUT="${SWARM_MAIN_CHECKOUT:-$HOME/Documents/dev/bifrost}"
 STATE_DIR="${SWARM_STATE_DIR:-$HOME/.local/state/bifrost-swarm}"
 PERMISSION_MODE="${SWARM_PERMISSION_MODE:-auto}"
+MODEL="${SWARM_MODEL:-opus}"
 NODE_IMAGE="${SWARM_NODE_IMAGE:-docker.io/library/node:20}"
 
 export GH_PAGER=cat
@@ -79,7 +80,7 @@ run_swarm() { # issue comment_id login
 
   if prepare_workdir >>"$logfile" 2>&1 &&
     (cd "$WORKDIR" && BIFROST_SWARM_UNATTENDED=1 claude -p "/swarm-issue $issue" \
-      --permission-mode "$PERMISSION_MODE" </dev/null >>"$logfile" 2>&1); then
+      --model "$MODEL" --permission-mode "$PERMISSION_MODE" </dev/null >>"$logfile" 2>&1); then
     log "issue #$issue finished"
   else
     log "issue #$issue failed"
