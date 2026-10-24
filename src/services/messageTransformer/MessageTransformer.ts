@@ -23,6 +23,31 @@ export default abstract class MessageTransformer<SourceMessage, TargetMessage> {
         options?: TransformOptions
     ): Promise<TargetMessage>;
 
+    /**
+     * Description for the quote embed of a replied-to message that has no
+     * text (only attachments, stickers or embeds). Discord rejects an embed
+     * with an empty description, which dropped the whole relayed reply.
+     */
+    protected describeTextlessMessage(counts: {
+        attachments: number;
+        stickers: number;
+        embeds: number;
+    }): string {
+        const plural = (n: number, word: string) =>
+            n === 1 ? word : `${n} ${word}s`;
+        const parts: string[] = [];
+        if (counts.attachments > 0) {
+            parts.push(`📎 ${plural(counts.attachments, 'attachment')}`);
+        }
+        if (counts.stickers > 0) {
+            parts.push(`🏷️ ${plural(counts.stickers, 'sticker')}`);
+        }
+        if (counts.embeds > 0) {
+            parts.push(`🔗 ${plural(counts.embeds, 'embed')}`);
+        }
+        return parts.length > 0 ? `*${parts.join(' · ')}*` : '*No text*';
+    }
+
     protected replaceEmojis(content: string, emojis: GeneralEmoji[]): string {
         return replaceEmojis(content, (emoji) => {
             const matchingEmoji = emojis.find((e) => e.name === emoji.name);

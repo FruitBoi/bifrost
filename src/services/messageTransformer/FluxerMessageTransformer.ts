@@ -185,23 +185,26 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         );
 
         const allMentionUserIds = directMentions.map((m) => m.counterpartId);
-        if (message.referencedMessage) {
+        const referenced = message.referencedMessage;
+        if (referenced) {
             allMentionUserIds.push(
-                ...(await this.resolveReplyMention(
-                    message,
-                    message.referencedMessage
-                ))
+                ...(await this.resolveReplyMention(message, referenced))
             );
-            const content = this.sanitizeContent(message.referencedMessage);
+            const content = this.sanitizeContent(referenced);
             embeds.unshift(
                 new WebhookEmbed({
-                    description: `${content}`,
+                    description:
+                        content.trim() !== ''
+                            ? content
+                            : this.describeTextlessMessage({
+                                  attachments: referenced.attachments.size,
+                                  stickers: referenced.stickers.length,
+                                  embeds: referenced.embeds.length,
+                              }),
                     color: 0x252529,
                     author: {
-                        name: message.referencedMessage.author.username + ' ↩️',
-                        iconURL:
-                            message.referencedMessage.author.avatarURL() ||
-                            undefined,
+                        name: referenced.author.username + ' ↩️',
+                        iconURL: referenced.author.avatarURL() || undefined,
                     },
                     timestamp: null,
                 })

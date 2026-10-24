@@ -59,8 +59,9 @@ export default class WebhookEmbed {
     }) {
         this.fields = options?.fields ?? [];
         this.footer = options?.footer ?? null;
-        this.title = options?.title ?? null;
-        this.description = options?.description ?? null;
+        // Discord rejects empty-string titles and descriptions; omit them.
+        this.title = options?.title || null;
+        this.description = options?.description || null;
         this.url = options?.url ?? null;
         this.color = options?.color ?? null;
         this.timestamp = options?.timestamp ?? null;

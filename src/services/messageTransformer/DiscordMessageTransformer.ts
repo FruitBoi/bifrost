@@ -328,9 +328,18 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                 embeds.push(...this.buildRichEmbeds(referencedMessage));
             }
 
-            const content = this.sanitizeContent(referencedMessage);
+            const sanitized = this.sanitizeContent(referencedMessage);
+            const hasText = !!sanitized && sanitized.trim() !== '';
+            const content =
+                hasText || isForwarded
+                    ? sanitized
+                    : this.describeTextlessMessage({
+                          attachments: referencedMessage.attachments?.size ?? 0,
+                          stickers: referencedMessage.stickers?.size ?? 0,
+                          embeds: referencedMessage.embeds?.length ?? 0,
+                      });
             const refrenceEmoji = isForwarded ? '⏩' : '↩️';
-            if (content && content.trim() !== '') {
+            if (hasText || !isForwarded) {
                 const referencedAuthor = referencedMessage.author;
                 const footer = isForwarded
                     ? this.buildForwardSourceFooter(message)
