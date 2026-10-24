@@ -110,6 +110,17 @@ export interface BotConfig {
          * `applications.commands` scope on the bot invite.
          */
         slashCommands: boolean;
+        /**
+         * Keep commands to Fluxer (issue #39): Discord only runs the
+         * moderator bridging commands (`link`, `unlink`, `autolink`, `list`,
+         * `threads`, `directory`, `pins`, `category`, `voice`,
+         * `expressions`, `history`) and the YAGPDB ones (`remindme`,
+         * `reminder`, `timezone`, `clean`), aliases included. Any other
+         * command on Discord gets a teasing "use Fluxer" reply, and only the
+         * allowed ones are registered as slash commands. See
+         * `commands/discord/fluxerOnly.ts`.
+         */
+        fluxerOnly: boolean;
     };
     clean: {
         /**
@@ -217,7 +228,11 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         notifyOnClose: true,
         notifyPollMs: 120_000,
     },
-    commands: { triggerPrefixes: ['!', '/'], slashCommands: true },
+    commands: {
+        triggerPrefixes: ['!', '/'],
+        slashCommands: true,
+        fluxerOnly: true,
+    },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     history: {
         enabled: true,

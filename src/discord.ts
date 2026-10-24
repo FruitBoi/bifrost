@@ -68,6 +68,10 @@ import {
     handleSlashCommand,
     registerSlashCommands,
 } from './commands/discord/slashCommands';
+import {
+    discordAllowedCommandNames,
+    pickFluxerOnlyReply,
+} from './commands/discord/fluxerOnly';
 import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsDiscordCommandHandler from './commands/discord/handlers/ExpressionsDiscordCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
@@ -404,6 +408,13 @@ const startDiscordClient = async ({
         commandRegistry.registerCommand(name, fishTradeHandler);
     }
 
+    // Issue #39: with `commands.fluxerOnly`, Discord only runs the bridging
+    // and YAGPDB commands; everything else gets a "use Fluxer" reply.
+    const fluxerOnly = botConfig.commands.fluxerOnly;
+    const discordAllowed = discordAllowedCommandNames(commandRegistry);
+    const isDiscordAllowed = (command: string) =>
+        !fluxerOnly || discordAllowed.has(command);
+
     client.once(Events.ClientReady, () => {
         logger.info(`💬 Discord bot logged in as ${client.user?.tag}`);
 
@@ -420,7 +431,7 @@ const startDiscordClient = async ({
             void registerSlashCommands(
                 client,
                 commandRegistry,
-                commandRegistry.getCommandNames()
+                commandRegistry.getCommandNames().filter(isDiscordAllowed)
             );
         }
 
@@ -708,7 +719,11 @@ const startDiscordClient = async ({
         if (!interaction.isChatInputCommand()) return;
         if (!botConfig.commands.slashCommands) return;
         try {
-            await handleSlashCommand(interaction, commandRegistry);
+            await handleSlashCommand(
+                interaction,
+                commandRegistry,
+                isDiscordAllowed
+            );
         } catch (error) {
             logger.error('❌ Error handling Discord slash command:', error);
         }
@@ -785,12 +800,27 @@ const startDiscordClient = async ({
             }
         };
 
+        const replyFluxerOnly = async () => {
+            await message
+                .reply({
+                    content: pickFluxerOnlyReply(),
+                    allowedMentions: { parse: [], repliedUser: true },
+                })
+                .catch((err) =>
+                    logger.error('❌ Failed to send a Fluxer-only reply:', err)
+                );
+        };
+
         if (isBotCommand && !message.author.bot) {
             const { command, args } = parseCommandString(
                 message.content,
                 COMMAND_PREFIX
             );
             const handler = commandRegistry.getCommandHandler(command);
+            if (!isDiscordAllowed(command)) {
+                await replyFluxerOnly();
+                return;
+            }
             if (!handler) {
                 await message.reply({
                     embeds: [
@@ -836,7 +866,9 @@ const startDiscordClient = async ({
             const handler = commandRegistry.getCommandHandler(
                 commandTrigger.command
             );
-            if (handler) {
+            if (!isDiscordAllowed(commandTrigger.command)) {
+                await replyFluxerOnly();
+            } else if (handler) {
                 await runCommand(
                     handler,
                     commandTrigger.command,

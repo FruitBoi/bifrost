@@ -29,6 +29,7 @@ import DiscordCommandHandler, {
 import { COMMAND_PREFIX } from '../../utils/env';
 import { EmbedColors } from '../../utils/embeds';
 import logger from '../../utils/logging/logger';
+import { pickFluxerOnlyReply } from './fluxerOnly';
 
 /** Discord allows at most this many global chat input commands. */
 export const SLASH_COMMANDS_MAX = 100;
@@ -199,13 +200,28 @@ function errorEmbed(description: string): EmbedBuilder {
  * reply, later ones are follow-ups. If the handler never replies (`clean`
  * posts a self-deleting notice, `list all` answers by DM) the "thinking…"
  * placeholder is deleted. Handler errors are logged and shown as an error
- * embed. Interactions outside a cached guild are refused.
+ * embed. Interactions outside a cached guild are refused. A command
+ * `isAllowed` rejects (one kept to Fluxer by `commands.fluxerOnly`, issue
+ * #39, whose slash command is still registered from before) gets a "use
+ * Fluxer" reply instead.
  */
 export async function handleSlashCommand(
     interaction: ChatInputCommandInteraction,
-    registry: CommandRegistry<DiscordCommandHandler>
+    registry: CommandRegistry<DiscordCommandHandler>,
+    isAllowed: (command: string) => boolean = () => true
 ): Promise<void> {
     const command = interaction.commandName;
+    if (!isAllowed(command)) {
+        await interaction
+            .reply({
+                content: pickFluxerOnlyReply(),
+                allowedMentions: { parse: [] },
+            })
+            .catch((err) =>
+                logger.error('❌ Failed to send a Fluxer-only reply:', err)
+            );
+        return;
+    }
     const handler = registry.getCommandHandler(command);
     if (!handler) {
         await interaction

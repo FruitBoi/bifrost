@@ -619,21 +619,27 @@ describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => 
 });
 
 describe('commands', () => {
-    it('defaults to the ! and / trigger prefixes with slash commands on', () => {
+    it('defaults to the ! and / trigger prefixes with slash commands on and Fluxer-only commands', () => {
         expect(DEFAULT_BOT_CONFIG.commands).toEqual({
             triggerPrefixes: ['!', '/'],
             slashCommands: true,
+            fluxerOnly: true,
         });
     });
 
-    it('merges custom prefixes and the slash toggle', () => {
+    it('merges custom prefixes and the slash and Fluxer-only toggles', () => {
         const { config } = mergeBotConfig({
-            commands: { triggerPrefixes: ['.', '$'], slashCommands: false },
+            commands: {
+                triggerPrefixes: ['.', '$'],
+                slashCommands: false,
+                fluxerOnly: false,
+            },
         });
 
         expect(config.commands).toEqual({
             triggerPrefixes: ['.', '$'],
             slashCommands: false,
+            fluxerOnly: false,
         });
     });
 
@@ -649,6 +655,9 @@ describe('commands', () => {
     it('rejects invalid values', () => {
         expect(() =>
             mergeBotConfig({ commands: { slashCommands: 'yes' } })
+        ).toThrow(BotConfigError);
+        expect(() =>
+            mergeBotConfig({ commands: { fluxerOnly: 'yes' } })
         ).toThrow(BotConfigError);
         expect(() =>
             mergeBotConfig({ commands: { triggerPrefixes: '!' } })

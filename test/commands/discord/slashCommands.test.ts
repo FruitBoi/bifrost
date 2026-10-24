@@ -16,6 +16,7 @@ import {
     SLASH_COMMANDS_MAX,
     toInteractionOptions,
 } from '../../../src/commands/discord/slashCommands';
+import { FLUXER_ONLY_REPLIES } from '../../../src/commands/discord/fluxerOnly';
 import { stripCommandInvocation } from '../../../src/commands/commandTrigger';
 import { COMMAND_PREFIX } from '../../../src/utils/env';
 import { EmbedColors } from '../../../src/utils/embeds';
@@ -289,6 +290,21 @@ describe('handleSlashCommand', () => {
         const options = interaction.reply.mock.calls[0][0];
         expect(options.flags).toBe(MessageFlags.Ephemeral);
         expect(options.embeds[0].data.description).toContain('`gone`');
+    });
+
+    it('answers commands kept to Fluxer with a Fluxer-only reply', async () => {
+        const run = vi.fn();
+        const { interaction, typed } = makeInteraction('stats');
+        await handleSlashCommand(
+            typed,
+            makeRegistry({ stats: new FakeHandler(run) }),
+            (name) => name !== 'stats'
+        );
+        expect(run).not.toHaveBeenCalled();
+        expect(interaction.deferReply).not.toHaveBeenCalled();
+        const options = interaction.reply.mock.calls[0][0];
+        expect(FLUXER_ONLY_REPLIES).toContain(options.content);
+        expect(options.allowedMentions).toEqual({ parse: [] });
     });
 
     it('refuses interactions outside a cached guild', async () => {

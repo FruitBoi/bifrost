@@ -106,6 +106,13 @@ commands:
     # Needs the `applications.commands` scope on the bot invite. Fluxer has no
     # bot slash commands; there `/` above makes typed `/help` work.
     slashCommands: true
+    # Keep commands to Fluxer: Discord only runs the moderator bridging
+    # commands (link, unlink, autolink, list, threads, directory, pins,
+    # category, voice, expressions, history) and the YAGPDB ones (remindme,
+    # reminder, timezone, clean), aliases included. Any other command used on
+    # Discord gets a teasing "come to Fluxer" reply, and only the allowed
+    # commands are registered as slash commands.
+    fluxerOnly: true
 
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`
