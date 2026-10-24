@@ -14,6 +14,7 @@ import { SequelizeUserTimezoneRepository } from './db/sequelizerepos/SequelizeUs
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
+import IdentityClaimService from './services/identityClaim/IdentityClaimService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
@@ -51,6 +52,7 @@ import {
     REPO_URL,
     WEB_PORT,
     GITHUB_TOKEN,
+    COMMAND_PREFIX,
 } from './utils/env';
 import { createWebApp } from './web/app';
 import {
@@ -216,6 +218,13 @@ const main = async () => {
         logger.info('Config: pin bridging is disabled (pins.enabled=false)');
     }
 
+    // Self-service identity mapping (issue #3): one service for both
+    // platforms, so a claim made on one side is confirmed on the other.
+    const identityClaimService = new IdentityClaimService({
+        linkService,
+        commandPrefix: COMMAND_PREFIX,
+    });
+
     // Claude requests (issue #18): one service (and one per-user cooldown)
     // for both platforms.
     const claudeRequestService = new ClaudeRequestService({
@@ -349,6 +358,7 @@ const main = async () => {
         reminderTimezoneService,
         historyService,
         pinBridgeService,
+        identityClaimService,
         claudeRequestService,
         claudeRequestNotifyService,
         claudeLinesService,
@@ -477,6 +487,7 @@ const main = async () => {
             reminderTimezoneService,
             historyService,
             pinBridgeService,
+            identityClaimService,
             claudeRequestService,
             claudeRequestNotifyService,
             claudeLinesService,

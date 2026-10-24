@@ -168,6 +168,21 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'iam',
+        summary:
+            'Links your Discord and Fluxer accounts so pings reach you on both sides.',
+        discord: {
+            description:
+                'Links your Discord account to your Fluxer account so pings of either reach you on both sides, built from a reply: reply `iam` to the bridged copy of a message you wrote on Fluxer, and the bot asks that Fluxer account (in reply to the original message) to confirm with `iam yes` within 10 minutes; `iam no` dismisses a request. Never replaces an existing link: run `iam remove` (alias `unlink`) first, or have an admin use `role` / `map` on Fluxer. `iam` alone shows your link and any request waiting for you; `yes` also works as `confirm`, `no` as `deny`. One request per minute. Open to everyone. The request itself must be a message reply, so `/iam` only answers, unlinks or shows the status.',
+            usageArgs: ['[yes | no | remove]'],
+        },
+        fluxer: {
+            description:
+                'Links your Fluxer account to your Discord account so pings of either reach you on both sides, built from a reply: reply `iam` to the bridged copy of a message you wrote on Discord, and the bot asks that Discord account (in reply to the original message) to confirm with `iam yes` within 10 minutes; `iam no` dismisses a request. Never replaces an existing link: run `iam remove` (alias `unlink`) first, or have an admin use `role` / `map` on Fluxer. `iam` alone shows your link and any request waiting for you; `yes` also works as `confirm`, `no` as `deny`. One request per minute. Open to everyone.',
+            usageArgs: ['[yes | no | remove]'],
+        },
+    },
+    {
         name: 'expressions',
         summary: 'Copies custom emojis and stickers to the linked server.',
         aliases: ['emotes', 'emojis'],

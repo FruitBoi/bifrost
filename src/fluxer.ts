@@ -35,6 +35,10 @@ import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerComma
 import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxerCommandHandler';
 import PinsFluxerCommandHandler from './commands/fluxer/handlers/PinsFluxerCommandHandler';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
+import IdentityClaimService from './services/identityClaim/IdentityClaimService';
+import FluxerIdentityClaimPromptSender from './services/identityClaim/FluxerIdentityClaimPromptSender';
+import IamFluxerCommandHandler from './commands/fluxer/handlers/IamFluxerCommandHandler';
+import { IAM_COMMAND_NAMES } from './services/identityClaim/iamCommand';
 import { WebhookService } from './services/WebhookService';
 import FluxerToDiscordMessageRelay from './services/messageRelay/FluxerToDiscordMessageRelay';
 import FluxerToDiscordReactionRelay from './services/reactionBridge/FluxerToDiscordReactionRelay';
@@ -112,6 +116,7 @@ const startFluxerClient = async ({
     reminderTimezoneService,
     historyService,
     pinBridgeService,
+    identityClaimService,
     claudeRequestService,
     claudeRequestNotifyService,
     claudeLinesService,
@@ -137,6 +142,7 @@ const startFluxerClient = async ({
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
     pinBridgeService: PinBridgeService;
+    identityClaimService: IdentityClaimService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
@@ -255,6 +261,18 @@ const startFluxerClient = async ({
         'pins',
         new PinsFluxerCommandHandler(client, linkService, pinBridgeService)
     );
+    identityClaimService.setPromptSender(
+        'fluxer',
+        new FluxerIdentityClaimPromptSender(client)
+    );
+    const iamHandler = new IamFluxerCommandHandler(
+        client,
+        linkService,
+        identityClaimService
+    );
+    for (const name of IAM_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, iamHandler);
+    }
     commandRegistry.registerCommand(
         'category',
         new CategoryFluxerCommandHandler(

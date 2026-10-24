@@ -24,6 +24,10 @@ import ListDiscordCommandHandler from './commands/discord/handlers/ListDiscordCo
 import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDiscordCommandHandler';
 import PinsDiscordCommandHandler from './commands/discord/handlers/PinsDiscordCommandHandler';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
+import IdentityClaimService from './services/identityClaim/IdentityClaimService';
+import DiscordIdentityClaimPromptSender from './services/identityClaim/DiscordIdentityClaimPromptSender';
+import IamDiscordCommandHandler from './commands/discord/handlers/IamDiscordCommandHandler';
+import { IAM_COMMAND_NAMES } from './services/identityClaim/iamCommand';
 import { WebhookService } from './services/WebhookService';
 import DiscordToFluxerMessageRelay from './services/messageRelay/DiscordToFluxerMessageRelay';
 import DiscordToFluxerReactionRelay from './services/reactionBridge/DiscordToFluxerReactionRelay';
@@ -100,6 +104,7 @@ const startDiscordClient = async ({
     reminderTimezoneService,
     historyService,
     pinBridgeService,
+    identityClaimService,
     claudeRequestService,
     claudeRequestNotifyService,
     claudeLinesService,
@@ -123,6 +128,7 @@ const startDiscordClient = async ({
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
     pinBridgeService: PinBridgeService;
+    identityClaimService: IdentityClaimService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
@@ -235,6 +241,18 @@ const startDiscordClient = async ({
         'pins',
         new PinsDiscordCommandHandler(client, linkService, pinBridgeService)
     );
+    identityClaimService.setPromptSender(
+        'discord',
+        new DiscordIdentityClaimPromptSender(client)
+    );
+    const iamHandler = new IamDiscordCommandHandler(
+        client,
+        linkService,
+        identityClaimService
+    );
+    for (const name of IAM_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, iamHandler);
+    }
     commandRegistry.registerCommand(
         'category',
         new CategoryDiscordCommandHandler(

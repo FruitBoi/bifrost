@@ -20,7 +20,7 @@
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
-- Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
+- Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role. Members can link their own accounts with `!b iam`, which the other account must confirm (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` or `?remindme Monday 7pm call mum` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
@@ -201,6 +201,27 @@ The `role` command does three things at once and reports the outcome of each:
 1. **Roles** — every Fluxer role with the same name as one of the Discord user's roles is added to the Fluxer member.
 2. **Identity mapping** — the two accounts are recorded as the same person for this server pair. Mappings are one-to-one: re-running the command for either account replaces that account's previous mapping. They are removed together with the server link.
 3. **Thread membership** — for every bridged thread pair (thread↔thread link) whose Discord thread the Discord user is a member of, the Fluxer member is added to the Fluxer thread. Adding someone to a public Fluxer thread requires the bot to be able to manage the parent channel; threads it could not add the member to are listed in the reply.
+
+### Self-service linking
+
+Members can link their own accounts with `iam`, without an admin. Reply to the bridged copy of a message you wrote on the other platform (for example, on Fluxer, reply to the copy of your own Discord message) and run `!b iam`. The bot posts a confirmation request on the other platform, replying to your original message and pinging only that account. The request is only a question: the other account has to confirm it, so nobody can link an account they do not control.
+
+From the other account, run `!b iam yes` (alias `confirm`) within 10 minutes, anywhere in the linked server. The two accounts are then mapped exactly as `!b role` would map them, so pings reach you on both sides. `!b iam no` (alias `deny`) dismisses the request instead.
+
+The bot never guesses mappings from names, IDs, or who replies to whom. In addition:
+
+- `iam` never replaces an existing mapping. If either account is already mapped, it refuses. Run `!b iam remove` (alias `unlink`) to remove your own mapping first, or ask an admin to change it with `!b role`.
+- There is one pending request per target account; a new request replaces the old one. You can send one request per minute.
+- Any member may use `iam`; the `roles.identity` restriction does not apply to it. Members who may run `!b role` (the roles in `roles.identity`) can still map anyone, as before.
+
+### Commands
+
+- `iam` — with no reply, shows whether you are mapped and to which account. Replying to a bridged copy of your own message sends a confirmation request to its counterpart (see [Self-service linking](#self-service-linking)).
+- `iam yes` (alias `confirm`) — confirms a pending request for your account within 10 minutes and maps the two accounts.
+- `iam no` (alias `deny`) — dismisses a pending request for your account.
+- `iam remove` (alias `unlink`) — removes your own mapping.
+
+On Discord, `/iam` is also a slash command. A slash command cannot reply to a message, so there `/iam` only supports `yes`, `no`, `remove` and the status.
 
 ### Pings
 
