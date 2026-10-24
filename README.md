@@ -149,11 +149,7 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 
 ## Identity mapping
 
-Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with two Fluxer commands, `map` and `role`. Both take the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run them:
-
-- `!b map <@fluxerUser> <discordUserId>` — records the mapping, and only when neither account is mapped yet. If the same mapping already exists, nothing changes; if either account is mapped differently, the existing mapping is shown and left alone (use `!b role` to replace it).
-
-- `!b role <@fluxerUser> <discordUserId>` — everything `!b map` does, plus roles and thread membership for someone who has just moved over, and it replaces an existing mapping instead of leaving it alone.
+Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with the Fluxer command `!b role <@fluxerUser> <discordUserId>` (alias `!b map`; both names do exactly the same). It takes the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.
 
 The `role` command does three things at once and reports the outcome of each:
 
@@ -398,7 +394,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
 | `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`, `history`); see [Clean](#clean) and [History transfer](#history-transfer). IDs are matched on the platform the command is run on, so add a Discord role ID to allow them on Discord. Quote the IDs, unquoted numbers lose precision. |
-| `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity commands `!b role` and `!b map`; see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
+| `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity command `!b role` (alias `!b map`); see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
 | `roles.bridgeMentions` | `true` | Relay role mentions as real pings of the role with the same name in the linked server on the other platform, if the author could ping the role on their own side. Without a same-named role the mention stays plaintext `@RoleName`; `@everyone`/`@here` are never bridged and edits never re-ping. `false` relays every role mention as plaintext. See [Pings](#pings). |
 | `roles.claudeRequest` | `["1561105750388908139", "1561105750388908112"]` | Role IDs whose members may run `!b clauderequest`; see [Claude requests](#claude-requests). Quote the IDs, unquoted numbers lose precision. |
 | `claudeRequests.enabled` | `true` | Enable the `clauderequest` command on both platforms. It also needs `BF_GITHUB_TOKEN`. |

@@ -16,17 +16,14 @@ export interface CommandInfo {
 
 export interface Command {
     name: string;
+    /** Other names that run the same command (and show its usage). */
+    aliases?: string[];
     /** Omitted for commands that only exist on Fluxer. */
     discord?: CommandInfo;
     fluxer: CommandInfo;
 }
 
 export type CommandPlatform = 'discord' | 'fluxer';
-
-/** Shared by the Fluxer identity commands `role` and `map`. */
-const IDENTITY_USAGE_ARGS = ['<@fluxerUser> <discordUserId>'];
-const IDENTITY_RESTRICTION =
-    'Restricted to the roles configured in `roles.identity`.';
 
 const commandList: Command[] = [
     {
@@ -132,16 +129,11 @@ const commandList: Command[] = [
     },
     {
         name: 'role',
+        aliases: ['map'],
         fluxer: {
-            description: `Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. ${IDENTITY_RESTRICTION}`,
-            usageArgs: IDENTITY_USAGE_ARGS,
-        },
-    },
-    {
-        name: 'map',
-        fluxer: {
-            description: `Records that the mentioned Fluxer member is the given Discord user, so pings of either account are bridged to the other. Only works when neither account is mapped yet; existing mappings are shown and left alone. \`role\` does the same and also copies roles and thread memberships, replacing an existing mapping. ${IDENTITY_RESTRICTION}`,
-            usageArgs: IDENTITY_USAGE_ARGS,
+            description:
+                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Alias `map`. Restricted to the roles configured in `roles.identity`.',
+            usageArgs: ['<@fluxerUser> <discordUserId>'],
         },
     },
     {
@@ -279,7 +271,9 @@ function getStringCommandUsage(
     commandName: string,
     platform: CommandPlatform
 ): string {
-    const command = commandList.find((cmd) => cmd.name === commandName);
+    const command = commandList.find(
+        (cmd) => cmd.name === commandName || cmd.aliases?.includes(commandName)
+    );
     if (!command) return `Command \`${commandName}\` not found.`;
     const commandInfo =
         platform === 'discord' ? command.discord : command.fluxer;

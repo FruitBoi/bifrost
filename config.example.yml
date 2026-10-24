@@ -44,10 +44,9 @@ roles:
     # Discord role ID here.
     moderator:
         - "1561105750388908139"
-    # Identity commands (Fluxer only). `!b map <@user> <discordUserId>`
-    # maps the mentioned Fluxer member and that Discord user to each other,
-    # so pings of either are bridged to the other, when neither account is
-    # mapped yet. `!b role <@user> <discordUserId>` does the same (replacing
+    # Identity command (Fluxer only). `!b role <@user> <discordUserId>`
+    # (alias `!b map`) maps the mentioned Fluxer member and that Discord user
+    # to each other, so pings of either are bridged to the other (replacing
     # an existing mapping; one mapping per account), adds every Fluxer role
     # named like one of that Discord user's roles, and adds the member to
     # every bridged thread the Discord user is in. This key used to be called

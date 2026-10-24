@@ -104,7 +104,6 @@ function makeServices(discordRoles: FakeDiscordRole[] = []) {
         link: { id: 'ul-1' },
         unchanged: false,
         replaced: [],
-        conflicting: [],
     });
     const linkService = {
         getGuildLinkForFluxerGuild: vi.fn().mockResolvedValue(GUILD_LINK),
@@ -212,9 +211,7 @@ describe('IdentityFluxerCommandHandler', () => {
                 FLUXER_USER,
                 DISCORD_USER
             );
-            expect(services.setUserLink).toHaveBeenCalledWith(PAIR, {
-                replaceExisting: false,
-            });
+            expect(services.setUserLink).toHaveBeenCalledWith(PAIR);
         });
 
         it('reports an unlinked server', async () => {
@@ -275,94 +272,12 @@ describe('IdentityFluxerCommandHandler', () => {
         });
     });
 
-    describe('map', () => {
+    // `map` is an alias of `role`: both names must behave identically.
+    describe.each(['role', 'map'])('%s', (command) => {
         const run = async (message: Message) =>
             services.handler.handleCommand(
                 message,
-                'map',
-                `<@!${FLUXER_USER}>`,
-                DISCORD_USER
-            );
-
-        it('maps unmapped accounts without replacing anything', async () => {
-            const { message, reply } = makeMessage();
-            await run(message);
-            expect(services.setUserLink).toHaveBeenCalledTimes(1);
-            expect(services.setUserLink).toHaveBeenCalledWith(PAIR, {
-                replaceExisting: false,
-            });
-            expect(replyEmbed(reply)).toMatchObject({
-                description: `Mapped <@${FLUXER_USER}> and Discord user \`${DISCORD_USER}\` (disco). Pings of either account are now bridged to the other.`,
-                color: EmbedColors.Success,
-            });
-            expect(
-                services.addFluxerUserToDiscordUsersThreads
-            ).not.toHaveBeenCalled();
-        });
-
-        it('says so when the mapping already exists', async () => {
-            services.setUserLink.mockResolvedValueOnce({
-                link: { id: 'ul-1' },
-                unchanged: true,
-                replaced: [],
-                conflicting: [],
-            });
-            const { message, reply } = makeMessage();
-            await run(message);
-            expect(replyEmbed(reply)).toMatchObject({
-                description: `<@${FLUXER_USER}> and Discord user \`${DISCORD_USER}\` (disco) are already mapped to each other; nothing changed.`,
-                color: EmbedColors.Info,
-            });
-        });
-
-        it('lists conflicting mappings and points at role', async () => {
-            services.setUserLink.mockResolvedValueOnce({
-                link: null,
-                unchanged: false,
-                replaced: [],
-                conflicting: [
-                    {
-                        id: 'ul-9',
-                        guildLinkId: GUILD_LINK.id,
-                        discordUserId: DISCORD_USER,
-                        fluxerUserId: '999999999999999999',
-                    },
-                    {
-                        id: 'ul-8',
-                        guildLinkId: GUILD_LINK.id,
-                        discordUserId: '888888888888888888',
-                        fluxerUserId: FLUXER_USER,
-                    },
-                ],
-            });
-            const { message, reply } = makeMessage();
-            await run(message);
-            const embed = replyEmbed(reply);
-            expect(embed.color).toBe(EmbedColors.Warning);
-            expect(embed.description?.split('\n')).toEqual([
-                `Not mapped: <@${FLUXER_USER}> and Discord user \`${DISCORD_USER}\` (disco) would conflict with an existing mapping.`,
-                `- <@999999999999999999> is mapped to Discord user \`${DISCORD_USER}\``,
-                `- <@${FLUXER_USER}> is mapped to Discord user \`888888888888888888\``,
-                'Use the `role` command to replace a mapping.',
-            ]);
-        });
-
-        it('reports a failing service', async () => {
-            services.setUserLink.mockRejectedValueOnce(new Error('db down'));
-            const { message, reply } = makeMessage();
-            await run(message);
-            expect(replyEmbed(reply)).toMatchObject({
-                description: 'Could not record the mapping: db down',
-                color: EmbedColors.Error,
-            });
-        });
-    });
-
-    describe('role', () => {
-        const run = async (message: Message) =>
-            services.handler.handleCommand(
-                message,
-                'role',
+                command,
                 `<@${FLUXER_USER}>`,
                 DISCORD_USER
             );
@@ -386,7 +301,6 @@ describe('IdentityFluxerCommandHandler', () => {
                         fluxerUserId: FLUXER_USER,
                     },
                 ],
-                conflicting: [],
             });
             services.addFluxerUserToDiscordUsersThreads.mockResolvedValueOnce({
                 examined: 2,
@@ -408,9 +322,7 @@ describe('IdentityFluxerCommandHandler', () => {
 
             expect(addRole).toHaveBeenCalledTimes(1);
             expect(addRole).toHaveBeenCalledWith('f-admin');
-            expect(services.setUserLink).toHaveBeenCalledWith(PAIR, {
-                replaceExisting: true,
-            });
+            expect(services.setUserLink).toHaveBeenCalledWith(PAIR);
             expect(
                 services.addFluxerUserToDiscordUsersThreads
             ).toHaveBeenCalledWith(PAIR);
@@ -433,7 +345,6 @@ describe('IdentityFluxerCommandHandler', () => {
                 link: { id: 'ul-1' },
                 unchanged: true,
                 replaced: [],
-                conflicting: [],
             });
             const { message, reply } = makeMessage();
             await run(message);

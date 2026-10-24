@@ -10,7 +10,6 @@ import { VoiceLink } from '../../src/db/entities/VoiceLink';
 import { UserLink } from '../../src/db/entities/UserLink';
 import {
     LinkService,
-    SetUserLinkOptions,
     SetUserLinkResult,
     VoiceLinkListener,
 } from '../../src/services/LinkService';
@@ -253,14 +252,11 @@ export class FakeLinkService {
         return this.userLinks.filter((u) => u.guildLinkId === guildLinkId);
     }
 
-    async setUserLink(
-        data: {
-            guildLinkId: string;
-            discordUserId: string;
-            fluxerUserId: string;
-        },
-        options: SetUserLinkOptions = {}
-    ): Promise<SetUserLinkResult> {
+    async setUserLink(data: {
+        guildLinkId: string;
+        discordUserId: string;
+        fluxerUserId: string;
+    }): Promise<SetUserLinkResult> {
         // Mirrors LinkService.setUserLink over the in-memory rows.
         const byDiscord = await this.getUserLinkForDiscordUser(
             data.guildLinkId,
@@ -281,27 +277,14 @@ export class FakeLinkService {
                 row.fluxerUserId === data.fluxerUserId
         );
         if (same) {
-            return {
-                link: same,
-                unchanged: true,
-                replaced: [],
-                conflicting: [],
-            };
-        }
-        if (existing.length > 0 && options.replaceExisting === false) {
-            return {
-                link: null,
-                unchanged: false,
-                replaced: [],
-                conflicting: existing,
-            };
+            return { link: same, unchanged: true, replaced: [] };
         }
         this.userLinks = this.userLinks.filter(
             (u) => !existing.some((r) => r.id === u.id)
         );
         const link = makeUserLink(data);
         this.userLinks.push(link);
-        return { link, unchanged: false, replaced: existing, conflicting: [] };
+        return { link, unchanged: false, replaced: existing };
     }
 
     async removeUserLink(id: string) {

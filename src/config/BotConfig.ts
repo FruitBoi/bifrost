@@ -50,8 +50,8 @@ export interface BotConfig {
         /** Moderator commands: `clean` and `history`. */
         moderator: string[];
         /**
-         * Identity commands: `role` (copies a Discord user's roles to a
-         * Fluxer member and maps the accounts) and `map`. Formerly
+         * Identity command `role`, alias `map` (copies a Discord user's
+         * roles to a Fluxer member and maps the accounts). Formerly
          * `roles.copyAllowedRoleIds`, which is still accepted as an alias.
          */
         identity: string[];

@@ -22,34 +22,14 @@ export interface VoiceLinkListener {
     onVoiceLinkChanged(voiceLinkId: string, link: VoiceLink | null): void;
 }
 
-/** Options for {@link LinkService.setUserLink}. */
-export interface SetUserLinkOptions {
-    /**
-     * When false, an existing mapping of either account blocks the call
-     * instead of being replaced. Defaults to true.
-     */
-    replaceExisting?: boolean;
-}
-
 /** Outcome of {@link LinkService.setUserLink}. */
 export interface SetUserLinkResult {
-    /**
-     * The row holding the mapping; null when `replaceExisting: false` and
-     * another mapping was in the way.
-     */
-    link: UserLink | null;
+    /** The row holding the mapping. */
+    link: UserLink;
     /** True when this exact mapping already existed and nothing changed. */
     unchanged: boolean;
-    /**
-     * Rows removed to keep the mapping one-to-one (at most two; only with
-     * `replaceExisting`).
-     */
+    /** Rows removed to keep the mapping one-to-one (at most two). */
     replaced: UserLink[];
-    /**
-     * Rows that blocked the mapping (only with `replaceExisting: false`; at
-     * most two).
-     */
-    conflicting: UserLink[];
 }
 
 export class LinkService {
@@ -469,18 +449,13 @@ export class LinkService {
      * Maps a Discord user to a Fluxer user inside a guild link. The mapping is
      * one-to-one. When the exact pair is already recorded nothing is written
      * and the row comes back as `unchanged`. Otherwise any existing row for
-     * either user is removed first and returned as `replaced`, unless
-     * `replaceExisting` is false: then those rows are returned as
-     * `conflicting`, `link` is null and nothing changes.
+     * either user is removed first and returned as `replaced`.
      */
-    async setUserLink(
-        data: {
-            guildLinkId: string;
-            discordUserId: string;
-            fluxerUserId: string;
-        },
-        options: SetUserLinkOptions = {}
-    ): Promise<SetUserLinkResult> {
+    async setUserLink(data: {
+        guildLinkId: string;
+        discordUserId: string;
+        fluxerUserId: string;
+    }): Promise<SetUserLinkResult> {
         const existing = await this.findUserLinksForPair(data);
 
         const same = existing.find(
@@ -489,28 +464,14 @@ export class LinkService {
                 row.fluxerUserId === data.fluxerUserId
         );
         if (same) {
-            return {
-                link: same,
-                unchanged: true,
-                replaced: [],
-                conflicting: [],
-            };
-        }
-
-        if (existing.length > 0 && options.replaceExisting === false) {
-            return {
-                link: null,
-                unchanged: false,
-                replaced: [],
-                conflicting: existing,
-            };
+            return { link: same, unchanged: true, replaced: [] };
         }
 
         for (const stale of existing) {
             await this.userRepo.deleteById(stale.id);
         }
         const link = await this.userRepo.create(data);
-        return { link, unchanged: false, replaced: existing, conflicting: [] };
+        return { link, unchanged: false, replaced: existing };
     }
 
     /**

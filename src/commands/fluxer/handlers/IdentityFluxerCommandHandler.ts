@@ -47,19 +47,13 @@ interface ResolvedUserPair {
 type IdentityOutcome =
     | { kind: 'mapped'; replaced: UserLink[] }
     | { kind: 'unchanged' }
-    | { kind: 'conflicting'; conflicting: UserLink[] }
     | { kind: 'error'; message: string };
 
 /**
- * The Fluxer commands that pair a Fluxer member with a Discord user. Both
- * take `<@fluxerUser> <discordUserId>`, and only members holding one of the
- * configured Fluxer role IDs may run them.
- *
- * `map` records that the mentioned Fluxer member is the given Discord user
- * (a user link, used to bridge pings), but only when neither account is
- * mapped yet. Existing mappings are reported and left alone.
- *
- * `role` treats the mentioned Fluxer member as the given Discord user and
+ * The Fluxer `role` command (alias `map`), which pairs a Fluxer member with a
+ * Discord user. It takes `<@fluxerUser> <discordUserId>`, only members
+ * holding one of the configured Fluxer role IDs may run it, and it treats the
+ * mentioned Fluxer member as the given Discord user:
  *
  * 1. adds every Fluxer role named like one of the Discord user's roles,
  * 2. records the identity mapping (replacing an existing one) so pings of
@@ -67,8 +61,7 @@ type IdentityOutcome =
  * 3. adds the Fluxer member to every bridged thread whose Discord side the
  *    Discord user is a member of.
  *
- * One instance is registered under both command names; the invoked name
- * decides which of the two runs.
+ * One instance is registered under both names; both do exactly the same.
  */
 export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -88,16 +81,8 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
     ): Promise<void> {
         const pair = await this.resolveUserPair(message, command, args);
         if (!pair) return;
-        if (command === 'map') {
-            await this.map(message, pair);
-        } else {
-            await this.role(message, pair);
-        }
+        await this.applyIdentity(message, pair);
     }
-
-    // ----------------------------------------------------------------------
-    // Shared pieces
-    // ----------------------------------------------------------------------
 
     private async reply(
         message: Message,
@@ -229,27 +214,20 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
     }
 
     /**
-     * Records the identity mapping of `pair` (used to bridge pings). With
-     * `replaceExisting`, any mapping of either account is replaced; without
-     * it, an existing mapping of either account blocks the new one.
+     * Records the identity mapping of `pair` (used to bridge pings),
+     * replacing any existing mapping of either account.
      */
-    private async recordIdentity(
-        { guildLink, discordMember, targetUserId }: ResolvedUserPair,
-        { replaceExisting }: { replaceExisting: boolean }
-    ): Promise<IdentityOutcome> {
+    private async recordIdentity({
+        guildLink,
+        discordMember,
+        targetUserId,
+    }: ResolvedUserPair): Promise<IdentityOutcome> {
         try {
-            const { link, unchanged, replaced, conflicting } =
-                await this.linkService.setUserLink(
-                    {
-                        guildLinkId: guildLink.id,
-                        discordUserId: discordMember.id,
-                        fluxerUserId: targetUserId,
-                    },
-                    { replaceExisting }
-                );
-            if (!link) {
-                return { kind: 'conflicting', conflicting };
-            }
+            const { unchanged, replaced } = await this.linkService.setUserLink({
+                guildLinkId: guildLink.id,
+                discordUserId: discordMember.id,
+                fluxerUserId: targetUserId,
+            });
             logger.info(
                 `👥 Mapped Fluxer user ${targetUserId} to Discord user ${discordMember.id} in guild link ${guildLink.id}${unchanged ? ' (unchanged)' : ''}`
             );
@@ -265,62 +243,8 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
         }
     }
 
-    // ----------------------------------------------------------------------
-    // map
-    // ----------------------------------------------------------------------
-
-    private async map(message: Message, pair: ResolvedUserPair): Promise<void> {
-        const who = `<@${pair.targetUserId}> and ${this.describeDiscordUser(pair.discordMember)}`;
-        const outcome = await this.recordIdentity(pair, {
-            replaceExisting: false,
-        });
-
-        switch (outcome.kind) {
-            case 'mapped':
-                await this.reply(
-                    message,
-                    `Mapped ${who}. Pings of either account are now bridged to the other.`,
-                    EmbedColors.Success
-                );
-                return;
-            case 'unchanged':
-                await this.reply(
-                    message,
-                    `${who} are already mapped to each other; nothing changed.`,
-                    EmbedColors.Info
-                );
-                return;
-            case 'conflicting': {
-                const lines = [
-                    `Not mapped: ${who} would conflict with an existing mapping.`,
-                    ...outcome.conflicting.map(
-                        (link) =>
-                            `- <@${link.fluxerUserId}> is mapped to Discord user \`${link.discordUserId}\``
-                    ),
-                    'Use the `role` command to replace a mapping.',
-                ];
-                await this.reply(
-                    message,
-                    lines.join('\n'),
-                    EmbedColors.Warning
-                );
-                return;
-            }
-            case 'error':
-                await this.reply(
-                    message,
-                    `Could not record the mapping: ${outcome.message}`,
-                    EmbedColors.Error
-                );
-                return;
-        }
-    }
-
-    // ----------------------------------------------------------------------
-    // role
-    // ----------------------------------------------------------------------
-
-    private async role(
+    /** Copies roles, records the mapping and syncs threads, then replies once. */
+    private async applyIdentity(
         message: Message,
         pair: ResolvedUserPair
     ): Promise<void> {
@@ -391,11 +315,8 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
         // 2. Identity mapping (used to bridge pings)
         // ------------------------------------------------------------------
 
-        const identity = await this.recordIdentity(pair, {
-            replaceExisting: true,
-        });
-        const identityFailed =
-            identity.kind === 'error' || identity.kind === 'conflicting';
+        const identity = await this.recordIdentity(pair);
+        const identityFailed = identity.kind === 'error';
         let identityLine: string;
         switch (identity.kind) {
             case 'mapped': {
@@ -413,11 +334,6 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
             }
             case 'unchanged':
                 identityLine = `**Identity:** <@${targetUserId}> was already mapped to Discord user \`${discordMember.id}\`; pings keep bridging between them.`;
-                break;
-            case 'conflicting':
-                // Unreachable in replace mode; reported like any failure.
-                identityLine =
-                    '**Identity:** could not record the mapping: an existing mapping was in the way.';
                 break;
             case 'error':
                 identityLine = `**Identity:** could not record the mapping: ${identity.message}`;
