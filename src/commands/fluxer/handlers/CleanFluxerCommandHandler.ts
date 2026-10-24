@@ -21,6 +21,10 @@ import {
     CleanSource,
     collectMessagesToClean,
 } from '../../../services/clean/cleanFilter';
+import {
+    cleanDeleteFailureMessage,
+    deleteInBatches,
+} from '../../../services/clean/cleanDelete';
 import { COMMAND_PREFIX, DELETE_INVOCATION } from '../../../utils/env';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
@@ -217,13 +221,25 @@ export default class CleanFluxerCommandHandler extends FluxerCommandHandler {
                     EmbedColors.Info
                 );
             } else {
-                await channel.bulkDelete(ids);
+                const result = await deleteInBatches(ids, async (batch) => {
+                    await channel.bulkDelete(batch);
+                    return batch.length;
+                });
+                if (result.error !== null) {
+                    logger.error('❌ Clean failed on Fluxer:', result.error);
+                    await this.reply(
+                        message,
+                        cleanDeleteFailureMessage(result),
+                        EmbedColors.Error
+                    );
+                    return;
+                }
                 logger.info(
-                    `🧹 Cleaned ${ids.length} message(s) in Fluxer channel ${channel.id} for ${message.author.id}`
+                    `🧹 Cleaned ${result.deleted} message(s) in Fluxer channel ${channel.id} for ${message.author.id}`
                 );
                 await this.sendTransient(
                     message,
-                    `Deleted ${ids.length} message(s)! :')`,
+                    `Deleted ${result.deleted} message(s)! :')`,
                     EmbedColors.Success
                 );
             }

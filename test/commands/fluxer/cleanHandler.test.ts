@@ -277,7 +277,7 @@ describe('CleanFluxerCommandHandler', () => {
         });
         await handler.handleCommand(message, 'clean', 'lots');
         expect(embedDescriptions(reply)[0]).toBe(
-            '`lots` is not a valid number of messages; give a whole number from 1 to 100.'
+            '`lots` is not a valid number of messages; give a whole number from 1 to 1000.'
         );
         expect(embedTitles(reply)[1]).toBe('Command Usage');
         expect(fetch).not.toHaveBeenCalled();
@@ -462,6 +462,69 @@ describe('CleanFluxerCommandHandler', () => {
         await handler.handleCommand(message, 'clean', '2');
         expect(embedDescriptions(reply)).toEqual([
             'Failed to delete messages: Missing Permissions',
+        ]);
+        expect(send).not.toHaveBeenCalled();
+        expect(deleteInvocation).not.toHaveBeenCalled();
+    });
+
+    it('deletes more than 100 messages in batches of 100', async () => {
+        const history = makeHistory(260);
+        const { message, reply, send, bulkDelete } = makeMessage({
+            content: '?clean 250',
+            history,
+        });
+        await handler.handleCommand(message, 'clean', '250');
+        expect(reply).not.toHaveBeenCalled();
+        const ids = history.slice(0, 250).map((m) => m.id);
+        expect(bulkDelete.mock.calls).toEqual([
+            [ids.slice(0, 100)],
+            [ids.slice(100, 200)],
+            [ids.slice(200, 250)],
+        ]);
+        expect(embedDescriptions(send)).toEqual([
+            "Deleted 250 message(s)! :')",
+        ]);
+    });
+
+    it('retries a batch that Fluxer rate-limits', async () => {
+        const { message, reply, send, bulkDelete } = makeMessage({
+            content: '?clean 150',
+            history: makeHistory(150),
+        });
+        bulkDelete
+            .mockImplementationOnce(async (ids: string[]) => ids)
+            .mockRejectedValueOnce(
+                Object.assign(new Error('Too Many Requests'), {
+                    name: 'RateLimitError',
+                    statusCode: 429,
+                    retryAfter: 2,
+                })
+            );
+        const done = handler.handleCommand(message, 'clean', '150');
+        await vi.advanceTimersByTimeAsync(2_000);
+        await done;
+        expect(bulkDelete).toHaveBeenCalledTimes(3);
+        expect(bulkDelete.mock.calls[2][0]).toEqual(
+            bulkDelete.mock.calls[1][0]
+        );
+        expect(reply).not.toHaveBeenCalled();
+        expect(embedDescriptions(send)).toEqual([
+            "Deleted 150 message(s)! :')",
+        ]);
+    });
+
+    it('reports how many were deleted when a later batch fails', async () => {
+        const { message, reply, send, bulkDelete, deleteInvocation } =
+            makeMessage({
+                content: '?clean 150',
+                history: makeHistory(150),
+            });
+        bulkDelete
+            .mockImplementationOnce(async (ids: string[]) => ids)
+            .mockRejectedValueOnce(new Error('Missing Permissions'));
+        await handler.handleCommand(message, 'clean', '150');
+        expect(embedDescriptions(reply)).toEqual([
+            'Deleted 100 message(s), then failed to delete the rest: Missing Permissions',
         ]);
         expect(send).not.toHaveBeenCalled();
         expect(deleteInvocation).not.toHaveBeenCalled();

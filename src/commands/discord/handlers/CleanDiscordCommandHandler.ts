@@ -19,6 +19,10 @@ import {
     collectMessagesToClean,
     DISCORD_BULK_DELETE_MAX_AGE_MS,
 } from '../../../services/clean/cleanFilter';
+import {
+    cleanDeleteFailureMessage,
+    deleteInBatches,
+} from '../../../services/clean/cleanDelete';
 import { COMMAND_PREFIX, DELETE_INVOCATION } from '../../../utils/env';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
@@ -208,10 +212,22 @@ export default class CleanDiscordCommandHandler extends DiscordCommandHandler {
                     EmbedColors.Info
                 );
             } else {
-                const deleted = await channel.bulkDelete(ids, true);
+                const result = await deleteInBatches(
+                    ids,
+                    async (batch) =>
+                        (await channel.bulkDelete(batch, true)).size
+                );
+                if (result.error !== null) {
+                    logger.error('❌ Clean failed on Discord:', result.error);
+                    await this.replyError(
+                        message,
+                        cleanDeleteFailureMessage(result)
+                    );
+                    return;
+                }
                 await this.sendTransient(
                     message,
-                    `Deleted ${deleted.size} message(s)! :')`,
+                    `Deleted ${result.deleted} message(s)! :')`,
                     EmbedColors.Success
                 );
             }

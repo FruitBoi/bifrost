@@ -4,7 +4,7 @@
  *
  *     clean <num> [user] [switches]      clean [user] <num> [switches]
  *
- * `num` is the number of messages to delete (1–100) and `user` an optional
+ * `num` is the number of messages to delete (1–1000) and `user` an optional
  * mention or user ID that limits the deletion to that user's messages. The
  * switches, which may appear anywhere:
  *
@@ -29,8 +29,8 @@ import { parseDuration } from '../reminders/reminderArgs';
 export const CLEAN_COMMAND_NAMES = ['clean', 'clear', 'cl'] as const;
 export type CleanCommandName = (typeof CLEAN_COMMAND_NAMES)[number];
 
-/** Most messages one invocation deletes (the bulk-delete limit on both platforms). */
-export const MAX_CLEAN_COUNT = 100;
+/** Most messages one invocation deletes (sent to the platform in batches of 100). */
+export const MAX_CLEAN_COUNT = 1000;
 /** Longest accepted `-r` pattern; longer ones are rejected as invalid. */
 export const MAX_CLEAN_REGEX_LENGTH = 256;
 

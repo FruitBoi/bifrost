@@ -106,7 +106,7 @@ commands:
 
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`
-    # messages (1-100) in the channel, or only those by the given user, and
+    # messages (1-1000) in the channel, or only those by the given user, and
     # switches narrow it down (`-r <regex>`, `-ma <time>`, `-minage <time>`,
     # `-nopin`, `-a`, `-bots`, `-from <id>`, `-to <id>`; see the README).
     # Aliases `clear` and `cl`. It looks through the last 1000 messages at

@@ -48,7 +48,7 @@ describe('constants', () => {
     });
 
     it('limits the count and the regex length', () => {
-        expect(MAX_CLEAN_COUNT).toBe(100);
+        expect(MAX_CLEAN_COUNT).toBe(1000);
         expect(MAX_CLEAN_REGEX_LENGTH).toBe(256);
     });
 });
@@ -124,18 +124,27 @@ describe('parseCleanArgs positionals', () => {
         expect(parseOk('1').count).toBe(1);
         expect(parseOk(String(MAX_CLEAN_COUNT)).count).toBe(MAX_CLEAN_COUNT);
         expect(parseOk('100').count).toBe(100);
+        expect(parseOk('1000').count).toBe(1000);
     });
 
-    it.each(['0', '101', '-5', '-0', 'ten', '1.5', '0x10', '1e2', '+5', '10a'])(
-        'rejects the count %s',
-        (value) => {
-            expect(parseCleanArgs(value)).toEqual({
-                ok: false,
-                reason: 'invalid_count',
-                value,
-            });
-        }
-    );
+    it.each([
+        '0',
+        '1001',
+        '-5',
+        '-0',
+        'ten',
+        '1.5',
+        '0x10',
+        '1e2',
+        '+5',
+        '10a',
+    ])('rejects the count %s', (value) => {
+        expect(parseCleanArgs(value)).toEqual({
+            ok: false,
+            reason: 'invalid_count',
+            value,
+        });
+    });
 
     it('rejects a count above the limit even by one', () => {
         expect(parseCleanArgs(String(MAX_CLEAN_COUNT + 1))).toEqual({

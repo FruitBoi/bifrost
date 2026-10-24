@@ -261,7 +261,7 @@ describe('CleanDiscordCommandHandler', () => {
         const { message, reply } = makeMessage({ content: '!b clean lots' });
         await handler.handleCommand(message, 'clean', 'lots');
         expect(replied(reply)[0]).toBe(
-            '`lots` is not a valid number of messages; give a whole number from 1 to 100.'
+            '`lots` is not a valid number of messages; give a whole number from 1 to 1000.'
         );
         expect(titles(reply)[1]).toBe('Command Usage');
     });
@@ -478,6 +478,58 @@ describe('CleanDiscordCommandHandler', () => {
         await handler.handleCommand(message, 'clean', '3');
         expect(replied(reply)).toEqual([
             'Failed to delete messages: Missing Access',
+        ]);
+        expect(channel.send).not.toHaveBeenCalled();
+        expect(del).not.toHaveBeenCalled();
+    });
+
+    it('deletes more than 100 messages in batches of 100', async () => {
+        const history = makeHistory(260);
+        const { message, reply, channel } = makeMessage({
+            content: '?clean 250',
+            channel: makeChannel(history),
+        });
+        await handler.handleCommand(message, 'clean', '250');
+        expect(reply).not.toHaveBeenCalled();
+        const ids = history.slice(0, 250).map((m) => m.id);
+        expect(channel.bulkDelete.mock.calls).toEqual([
+            [ids.slice(0, 100), true],
+            [ids.slice(100, 200), true],
+            [ids.slice(200, 250), true],
+        ]);
+        expect(sent(channel.send)).toEqual(["Deleted 250 message(s)! :')"]);
+    });
+
+    it('accepts clean 1000 and deletes in ten batches', async () => {
+        const history = makeHistory(1000);
+        const { message, channel } = makeMessage({
+            content: '?clean 1000',
+            channel: makeChannel(history),
+        });
+        await handler.handleCommand(message, 'clean', '1000');
+        expect(channel.bulkDelete).toHaveBeenCalledTimes(10);
+        expect(sent(channel.send)).toEqual(["Deleted 1000 message(s)! :')"]);
+    });
+
+    it('reports how many were deleted when a later batch fails', async () => {
+        const channel = makeChannel(makeHistory(150));
+        channel.bulkDelete
+            .mockImplementationOnce(
+                async (ids: string[]) => new Map(ids.map((id) => [id, { id }]))
+            )
+            .mockRejectedValueOnce(new Error('Missing Access'));
+        const {
+            message,
+            reply,
+            delete: del,
+        } = makeMessage({
+            content: '?clean 150',
+            channel,
+        });
+        await handler.handleCommand(message, 'clean', '150');
+        expect(channel.bulkDelete).toHaveBeenCalledTimes(2);
+        expect(replied(reply)).toEqual([
+            'Deleted 100 message(s), then failed to delete the rest: Missing Access',
         ]);
         expect(channel.send).not.toHaveBeenCalled();
         expect(del).not.toHaveBeenCalled();

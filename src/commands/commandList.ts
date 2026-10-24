@@ -248,7 +248,7 @@ const commandList: Command[] = [
         aliases: ['clear', 'cl'],
         discord: {
             description:
-                'Deletes the last `num` messages (1–100) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages; messages older than two weeks cannot be deleted. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
+                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages; messages older than two weeks cannot be deleted. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
             usageArgs: [
                 '<num> [user]',
                 '[-r <regex>] [-im] [-i] [-ma <time>] [-minage <time>] [-nopin] [-a] [-bots] [-from <id>] [-to <id>]',
@@ -256,7 +256,7 @@ const commandList: Command[] = [
         },
         fluxer: {
             description:
-                'Deletes the last `num` messages (1–100) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
+                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
             usageArgs: [
                 '<num> [user]',
                 '[-r <regex>] [-im] [-i] [-ma <time>] [-minage <time>] [-nopin] [-a] [-bots] [-from <id>] [-to <id>]',

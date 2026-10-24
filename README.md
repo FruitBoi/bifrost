@@ -350,7 +350,7 @@ There are three ways to run it:
 
 The aliases `clear` and `cl` work everywhere `clean` does (`?clear 5`, `!b cl 3`), and a space or capital after the short prefix is fine, so `? Clean 10` as typed on a phone keyboard works too. The short prefixes are set by `clean.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form, and `clean.enabled: false` switches the command off entirely.
 
-**Arguments.** `clean <num> [user]` or `clean [user] <num>`: `num` is how many messages to delete (1–100) and `user`, a mention or a user ID, limits the deletion to that user's messages. Switches can go anywhere after the command:
+**Arguments.** `clean <num> [user]` or `clean [user] <num>`: `num` is how many messages to delete (1–1000) and `user`, a mention or a user ID, limits the deletion to that user's messages. Switches can go anywhere after the command:
 
 | Switch | Effect |
 | --- | --- |
@@ -376,7 +376,7 @@ Examples:
 
 #### Limits
 
-- At most **100** messages are deleted per run. Without filters exactly the last `num` messages are looked at; with a user or any switch, up to `num × 50` messages are searched, and never more than the last **1000**.
+- At most **1000** messages are deleted per run (sent to the platform in batches of 100). Without filters exactly the last `num` messages are looked at; with a user or any switch, up to `num × 50` messages are searched, and never more than the last **1000**.
 - On **Discord**, messages older than two weeks cannot be bulk-deleted, so the search stops at the first one it reaches. Fluxer has no such age limit.
 - The command message itself is never counted and is deleted as well.
 - When it is done, Bifröst posts `Deleted N message(s)! :')` (or `No messages matched.`) and removes that confirmation after 5 seconds.
