@@ -1,7 +1,7 @@
 # swarm-watch
 
 Starts a Claude swarm (`/swarm-issue <n>`) when an allowed user comments `/swarm` on an open issue in
-FruitBoi/bifrost. It runs on the dev server as a systemd user timer that polls GitHub every minute.
+FruitBoi/bifrost. It runs on the dev server as a systemd user timer that polls GitHub every 30 seconds.
 
 ## Triggering
 

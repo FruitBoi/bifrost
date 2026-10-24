@@ -3,7 +3,8 @@ Description=Poll FruitBoi/bifrost issue comments for /swarm
 
 [Timer]
 OnBootSec=1min
-OnUnitInactiveSec=1min
+OnUnitInactiveSec=30s
+AccuracySec=1s
 
 [Install]
 WantedBy=timers.target
