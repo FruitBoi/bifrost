@@ -1,13 +1,15 @@
 import {
     Message,
+    MessageAttachment,
     MessageAttachmentFlags,
+    MessageSticker,
     PermissionFlags,
 } from '@fluxerjs/core';
 import MessageTransformer, { TransformOptions } from './MessageTransformer';
-import { WebhookMessageData } from '../WebhookService';
+import { WebhookAttachment, WebhookMessageData } from '../WebhookService';
 import { breakMentions, sanitizeMentions } from '../../utils/sanitizeMentions';
 import { buildFluxerStickerUrl } from '../../utils/buildStickerUrl';
-import WebhookEmbed from '../WebhookEmbed';
+import WebhookEmbed, { WebhookEmbedFooter } from '../WebhookEmbed';
 import { GeneralEmoji } from '../../utils/emojis';
 import MentionBridgeService, {
     ResolvedRoleMention,
@@ -94,10 +96,11 @@ export default class FluxerMessageTransformer extends MessageTransformer<
     private sanitizeContent(
         message: Message,
         renderUserMention?: (id: string) => string | null,
-        renderRoleMention?: (id: string) => string | null
+        renderRoleMention?: (id: string) => string | null,
+        content: string = message.content
     ): string {
         return breakMentions(
-            sanitizeMentions(message.content, {
+            sanitizeMentions(content, {
                 renderUserMention,
                 renderRoleMention,
                 resolveUser: (id) => {
@@ -115,6 +118,57 @@ export default class FluxerMessageTransformer extends MessageTransformer<
                 },
             })
         );
+    }
+
+    private buildAttachments(
+        messageAttachments: Iterable<MessageAttachment>,
+        stickers: MessageSticker[]
+    ): WebhookAttachment[] {
+        const attachments: WebhookAttachment[] = [];
+        for (const attachment of messageAttachments) {
+            if (!attachment.url) continue;
+            attachments.push({
+                url: attachment.url,
+                name: attachment.filename || 'attachment',
+                spoiler:
+                    attachment.flags &&
+                    attachment.flags & MessageAttachmentFlags.IS_SPOILER
+                        ? true
+                        : false,
+            });
+        }
+
+        stickers.forEach((sticker) => {
+            attachments.push({
+                url: buildFluxerStickerUrl(
+                    sticker.id,
+                    sticker.animated || false,
+                    160
+                ),
+                name: sticker.name + '.webp',
+                spoiler: false,
+            });
+        });
+        return attachments;
+    }
+
+    private buildForwardSourceFooter(message: Message): WebhookEmbedFooter {
+        const reference = message.messageReference;
+        const guild = reference?.guildId
+            ? message.client.guilds.get(reference.guildId)
+            : null;
+        const channel = reference
+            ? message.client.channels.get(reference.channelId)
+            : null;
+        const channelName = channel?.name ? `#${channel.name}` : null;
+
+        if (guild && channelName) {
+            return { text: `From ${channelName} in ${guild.name}` };
+        }
+        if (guild) {
+            return { text: `From ${guild.name}` };
+        }
+        return { text: 'From another server' };
     }
 
     public async transformMessage(
@@ -150,39 +204,55 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             discordEmojis
         );
 
-        const attachments = message.attachments
-            .filter(
-                (attachment) =>
-                    attachment.url !== null &&
-                    attachment.url !== undefined &&
-                    attachment.url !== '' &&
-                    !!attachment.url
-            )
-            .map((attachment) => ({
-                url: attachment.url!,
-                name: attachment.filename || 'attachment',
-                spoiler:
-                    attachment.flags &&
-                    attachment.flags & MessageAttachmentFlags.IS_SPOILER
-                        ? true
-                        : false,
-            }));
-
-        message.stickers.forEach((sticker) => {
-            attachments.push({
-                url: buildFluxerStickerUrl(
-                    sticker.id,
-                    sticker.animated || false,
-                    160
-                ),
-                name: sticker.name + '.webp',
-                spoiler: false,
-            });
-        });
+        const attachments = this.buildAttachments(
+            message.attachments.values(),
+            message.stickers
+        );
 
         const embeds: WebhookEmbed[] = message.embeds.map((embed) =>
             WebhookEmbed.fromFluxerEmbed(embed)
         );
+
+        // A forward carries no content of its own: the forwarded text, files
+        // and embeds live in its snapshot. Without this the webhook payload
+        // is empty and Discord rejects it (50006).
+        const snapshot = message.messageSnapshots?.[0];
+        if (snapshot) {
+            attachments.push(
+                ...this.buildAttachments(
+                    snapshot.attachments ?? [],
+                    snapshot.stickers ?? []
+                )
+            );
+            embeds.push(
+                ...(snapshot.embeds ?? []).map((embed) =>
+                    WebhookEmbed.fromFluxerEmbed(embed)
+                )
+            );
+            const content = this.sanitizeContent(
+                message,
+                undefined,
+                undefined,
+                snapshot.content ?? ''
+            );
+            embeds.unshift(
+                new WebhookEmbed({
+                    description:
+                        content.trim() !== ''
+                            ? content
+                            : this.describeTextlessMessage({
+                                  attachments:
+                                      snapshot.attachments?.length ?? 0,
+                                  stickers: snapshot.stickers?.length ?? 0,
+                                  embeds: snapshot.embeds?.length ?? 0,
+                              }),
+                    color: 0x252529,
+                    author: { name: 'Forwarded message ⏩' },
+                    footer: this.buildForwardSourceFooter(message),
+                    timestamp: null,
+                })
+            );
+        }
 
         const allMentionUserIds = directMentions.map((m) => m.counterpartId);
         const referenced = message.referencedMessage;

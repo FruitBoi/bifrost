@@ -190,3 +190,98 @@ describe('WebhookEmbed', () => {
         expect(() => embed.toFluxerEmbed()).not.toThrow();
     });
 });
+
+// A Fluxer forward has empty content of its own; the forwarded message lives
+// in `messageSnapshots`. Ignoring it produced an empty webhook payload that
+// Discord rejects with "Cannot send an empty message" (50006).
+describe('FluxerMessageTransformer forwarded messages', () => {
+    function snapshot(overrides: Record<string, unknown> = {}) {
+        return {
+            content: '',
+            createdAt: new Date(0),
+            editedAt: null,
+            mentionUserIds: [],
+            mentionRoles: [],
+            embeds: [],
+            attachments: [],
+            stickers: [],
+            ...overrides,
+        };
+    }
+
+    it('quotes the forwarded text in an embed', async () => {
+        const result = await new FluxerMessageTransformer().transformMessage(
+            fakeFluxerMessage({
+                content: '',
+                messageReference: {
+                    channelId: 'c1',
+                    messageId: 'm1',
+                    guildId: null,
+                },
+                messageSnapshots: [snapshot({ content: 'forwarded text' })],
+            }) as never
+        );
+
+        expect(result.embeds).toHaveLength(1);
+        const json = result.embeds![0].toDiscordEmbed().toJSON();
+        expect(json.description).toBe('forwarded text');
+        expect(json.author?.name).toBe('Forwarded message ⏩');
+        expect(json.footer?.text).toBe('From another server');
+    });
+
+    it('carries over forwarded attachments and names the source channel', async () => {
+        const result = await new FluxerMessageTransformer().transformMessage(
+            fakeFluxerMessage({
+                content: '',
+                client: {
+                    users: { get: () => null },
+                    channels: {
+                        get: (id: string) =>
+                            id === 'c1' ? { name: 'general' } : null,
+                    },
+                    guilds: {
+                        get: (id: string) =>
+                            id === 'g1' ? { name: 'Lemon Land' } : null,
+                    },
+                },
+                messageReference: {
+                    channelId: 'c1',
+                    messageId: 'm1',
+                    guildId: 'g1',
+                },
+                messageSnapshots: [snapshot({ attachments: [image] })],
+            }) as never
+        );
+
+        expect(result.attachments).toEqual([
+            { url: image.url, name: image.filename, spoiler: false },
+        ]);
+        const json = result.embeds![0].toDiscordEmbed().toJSON();
+        expect(json.description).toBe('*📎 attachment*');
+        expect(json.footer?.text).toBe('From #general in Lemon Land');
+    });
+
+    it('never sends an empty payload for a forward without anything bridgeable', async () => {
+        const result = await new FluxerMessageTransformer().transformMessage(
+            fakeFluxerMessage({
+                content: '',
+                messageReference: null,
+                messageSnapshots: [snapshot()],
+            }) as never
+        );
+
+        expect(result.embeds).toHaveLength(1);
+        expect(result.embeds![0].toDiscordEmbed().toJSON().description).toBe(
+            '*No text*'
+        );
+    });
+
+    it('leaves plain messages without snapshots untouched', async () => {
+        const result = await new FluxerMessageTransformer().transformMessage(
+            fakeFluxerMessage({ messageSnapshots: [] }) as never
+        );
+
+        expect(result.content).toBe('hello');
+        expect(result.embeds).toEqual([]);
+    });
+});
