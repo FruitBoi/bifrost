@@ -93,13 +93,15 @@ claudeRequests:
 
 commands:
     # Prefixes that run any command without the bot prefix, so `!help`,
-    # `!link 123` and `!list` work like `!b help` etc. Only registered command
-    # names match; other `!foo` messages are bridged as normal chat. The bot
-    # prefix form always works. An empty list disables the shortcuts.
-    triggerPrefixes: ["!"]
+    # `/link 123` and `!list` work like `!b help` etc. Only registered command
+    # names match; other `!foo` or `/shrug` messages are bridged as normal
+    # chat. `/` lets Fluxer users type commands slash-style (Fluxer bots
+    # cannot register real slash commands). The bot prefix form always works.
+    # An empty list disables the shortcuts.
+    triggerPrefixes: ["!", "/"]
     # Register every command as a Discord slash command (`/link args:123`).
     # Needs the `applications.commands` scope on the bot invite. Fluxer has no
-    # slash commands.
+    # bot slash commands; there `/` above makes typed `/help` work.
     slashCommands: true
 
 clean:

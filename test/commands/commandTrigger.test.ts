@@ -180,6 +180,18 @@ describe('parseCommandTrigger', () => {
         });
     });
 
+    it('recognises typed slash commands with the / prefix', () => {
+        const slash = ['!', '/'];
+        expect(parseCommandTrigger('/clean 10', slash, names)).toEqual({
+            command: 'clean',
+            rawArgs: '10',
+        });
+        expect(parseCommandTrigger('/shrug', slash, names)).toBeNull();
+        expect(
+            parseCommandTrigger('see /usr/bin/clean', slash, names)
+        ).toBeNull();
+    });
+
     it('returns null for non-triggers and empty content', () => {
         expect(parseCommandTrigger('clean 10', prefixes, names)).toBeNull();
         expect(parseCommandTrigger('?ping', prefixes, names)).toBeNull();

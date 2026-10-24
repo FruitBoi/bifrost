@@ -93,15 +93,18 @@ export interface BotConfig {
     commands: {
         /**
          * Prefixes that run any command directly, without the bot prefix
-         * (`!help`, `!link 123`, `!list`). Only registered command names
-         * match, so other `!foo` messages are bridged like any chat message.
+         * (`!help`, `/link 123`, `!list`). Only registered command names
+         * match, so other `!foo` or `/shrug` messages are bridged like any
+         * chat message. `/` lets Fluxer users type commands slash-style,
+         * since Fluxer bots cannot register real slash commands.
          * `BF_COMMAND_PREFIX` keeps working too (`!b help`). An empty list
          * disables the shortcuts.
          */
         triggerPrefixes: string[];
         /**
          * Register every command as a Discord slash command (`/link
-         * args:123`) on startup. Fluxer has no slash commands. Needs the
+         * args:123`) on startup. Fluxer has no bot slash commands (see
+         * `triggerPrefixes`). Needs the
          * `applications.commands` scope on the bot invite.
          */
         slashCommands: boolean;
@@ -202,7 +205,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         notifyOnClose: true,
         notifyPollMs: 120_000,
     },
-    commands: { triggerPrefixes: ['!'], slashCommands: true },
+    commands: { triggerPrefixes: ['!', '/'], slashCommands: true },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     history: {
         enabled: true,

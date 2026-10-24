@@ -603,9 +603,9 @@ describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => 
 });
 
 describe('commands', () => {
-    it('defaults to the ! trigger prefix with slash commands on', () => {
+    it('defaults to the ! and / trigger prefixes with slash commands on', () => {
         expect(DEFAULT_BOT_CONFIG.commands).toEqual({
-            triggerPrefixes: ['!'],
+            triggerPrefixes: ['!', '/'],
             slashCommands: true,
         });
     });
