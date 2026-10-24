@@ -10,6 +10,7 @@
 - Link channels between Discord and Fluxer
 - Sync messages between linked channels
 - Support for messages, replies, attachments, emojis¹, stickers, embeds, join messages and polls
+- Fluxer files too big for a Discord upload (10 MB, or 50/100 MB in servers with boost level 2/3), such as long videos, are bridged as a link that Discord embeds as a playable video instead of failing
 - Bridge messages using webhooks
 - Bridge reactions: reacting to a bridged message adds the same emoji to its counterpart on the other platform (see [Reactions](#reactions))
 - Bridge pins: pinning or unpinning a bridged message does the same to its counterpart, and `!b pins sync` copies a channel's existing pins across (see [Pins](#pins))

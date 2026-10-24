@@ -135,6 +135,7 @@ export default class FluxerMessageTransformer extends MessageTransformer<
                     attachment.flags & MessageAttachmentFlags.IS_SPOILER
                         ? true
                         : false,
+                size: attachment.size,
             });
         }
 

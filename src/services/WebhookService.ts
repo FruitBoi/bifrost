@@ -13,6 +13,12 @@ import {
 } from 'discord.js';
 import logger from '../utils/logging/logger';
 import { sanitizeDiscordWebhookUsername } from '../utils/sanitizeDiscordWebhookUsername';
+import {
+    appendAttachmentLinks,
+    DISCORD_DEFAULT_UPLOAD_LIMIT,
+    discordUploadLimitForTier,
+    splitOversizedAttachments,
+} from './discordUploadLimit';
 import WebhookEmbed from './WebhookEmbed';
 
 type DiscordWebhook = WebhookClient;
@@ -21,6 +27,8 @@ export type WebhookAttachment = {
     url: string;
     name: string;
     spoiler?: boolean;
+    /** File size in bytes, when known; used to keep uploads within Discord's limit. */
+    size?: number;
 };
 
 export type WebhookMessageData = {
@@ -82,6 +90,8 @@ function appendQuery(route: string, key: string, value: string): string {
 export class WebhookService {
     private discordClient: DiscordClient | null = null;
     private fluxerClient: FluxerClient | null = null;
+    /** Guild of each fetched Discord webhook, to look up its upload limit. */
+    private discordWebhookGuildIds = new Map<string, string>();
 
     setDiscordClient(client: DiscordClient) {
         this.discordClient = client;
@@ -127,6 +137,9 @@ export class WebhookService {
                 webhookToken
             );
             if (!webhook) return null;
+            if (webhook.guildId) {
+                this.discordWebhookGuildIds.set(webhookId, webhook.guildId);
+            }
             const webhookClient = new WebhookClient({
                 id: webhookId,
                 token: webhookToken,
@@ -142,6 +155,56 @@ export class WebhookService {
     }
 
     /**
+     * Upload limit in bytes for a Discord webhook, from the boost tier of its
+     * guild; the 10 MiB default when the guild is unknown or not cached.
+     */
+    private discordUploadLimitFor(webhook: DiscordWebhook): number {
+        const webhookId = (webhook as { id?: string }).id;
+        const guildId = webhookId
+            ? this.discordWebhookGuildIds.get(webhookId)
+            : undefined;
+        const guild = guildId
+            ? this.discordClient?.guilds.cache.get(guildId)
+            : undefined;
+        return guild
+            ? discordUploadLimitForTier(guild.premiumTier)
+            : DISCORD_DEFAULT_UPLOAD_LIMIT;
+    }
+
+    /**
+     * Builds the files to upload with a Discord webhook message. Attachments
+     * that would push the request over the upload limit are not uploaded;
+     * their URLs are appended to the content instead so Discord embeds them.
+     */
+    private prepareDiscordFiles(
+        webhook: DiscordWebhook,
+        data: WebhookMessageData
+    ): { content: string; files: AttachmentBuilder[] | undefined } {
+        if (!data.attachments)
+            return { content: data.content, files: undefined };
+
+        const limit = this.discordUploadLimitFor(webhook);
+        const { upload, linked } = splitOversizedAttachments(
+            data.attachments,
+            limit
+        );
+        if (linked.length > 0) {
+            logger.info(
+                `🔗 Linking ${linked.length} attachment(s) over Discord's ${limit}-byte upload limit instead of uploading: ${linked.map((att) => att.name).join(', ')}`
+            );
+        }
+
+        const files = upload.map((att) => {
+            const attBuilder = new AttachmentBuilder(att.url, {
+                name: att.name,
+            });
+            if (att.spoiler) attBuilder.setSpoiler(true);
+            return attBuilder;
+        });
+        return { content: appendAttachmentLinks(data.content, linked), files };
+    }
+
+    /**
      * Sends a message through a Discord webhook. When `threadId` is given the
      * message is posted into that thread of the webhook's channel.
      */
@@ -151,16 +214,10 @@ export class WebhookService {
         threadId?: string | null
     ): Promise<{ messageId: string }> {
         try {
-            const files = data.attachments?.map((att) => {
-                const attBuilder = new AttachmentBuilder(att.url, {
-                    name: att.name,
-                });
-                if (att.spoiler) attBuilder.setSpoiler(true);
-                return attBuilder;
-            });
+            const { content, files } = this.prepareDiscordFiles(webhook, data);
 
             const { id } = await webhook.send({
-                content: data.content,
+                content,
                 username: sanitizeDiscordWebhookUsername(data.username),
                 avatarURL: data.avatarURL,
                 files,
@@ -187,16 +244,10 @@ export class WebhookService {
         threadId?: string | null
     ): Promise<void> {
         try {
-            const files = data.attachments?.map((att) => {
-                const attBuilder = new AttachmentBuilder(att.url, {
-                    name: att.name,
-                });
-                if (att.spoiler) attBuilder.setSpoiler(true);
-                return attBuilder;
-            });
+            const { content, files } = this.prepareDiscordFiles(webhook, data);
 
             await webhook.editMessage(messageId, {
-                content: data.content,
+                content,
                 files,
                 embeds:
                     data.embeds?.map((embed) => embed.toDiscordEmbed()) || [],
