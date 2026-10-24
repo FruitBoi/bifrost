@@ -37,7 +37,7 @@ function classifyError(
  * Tells the requester in their Discord channel that their Claude request was
  * closed: a ping of the requester (the only mention allowed to resolve),
  * replying to the invoking message when it still exists, plus an embed
- * linking the issue.
+ * linking the issue. Resolves with the notice's message ID.
  */
 export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifier {
     constructor(private readonly client: Client) {}
@@ -45,7 +45,7 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
     public async notify(
         request: ClaudeRequest,
         outcome: ClaudeRequestOutcome
-    ): Promise<void> {
+    ): Promise<string | null> {
         let channel;
         try {
             channel = await this.client.channels.fetch(request.channelId);
@@ -71,7 +71,7 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
 
         const notice = buildClaudeRequestNotice(request, outcome);
         try {
-            await channel.send({
+            const sent = await channel.send({
                 content: notice.content,
                 embeds: [
                     new EmbedBuilder()
@@ -91,6 +91,7 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
                       }
                     : {}),
             });
+            return sent?.id ?? null;
         } catch (err) {
             throw classifyError(
                 err,

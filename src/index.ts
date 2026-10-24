@@ -18,6 +18,7 @@ import IdentityClaimService from './services/identityClaim/IdentityClaimService'
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
+import { SequelizeClaudeRequestNoticeRepository } from './db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
@@ -243,7 +244,8 @@ const main = async () => {
     }
 
     // Done notifications (issue #26): polls the issues the command filed and
-    // tells the requester in their channel once one is closed.
+    // tells the requester in their channel once one is closed. Posted notices
+    // are remembered so replies to them reach the issue (issue #35).
     let claudeRequestNotifyService: ClaudeRequestNotifyService | null = null;
     if (
         botConfig.claudeRequests.enabled &&
@@ -256,6 +258,7 @@ const main = async () => {
                 token: GITHUB_TOKEN,
                 repo: botConfig.claudeRequests.repo,
                 pollIntervalMs: botConfig.claudeRequests.notifyPollMs,
+                notices: new SequelizeClaudeRequestNoticeRepository(),
             }
         );
     } else if (

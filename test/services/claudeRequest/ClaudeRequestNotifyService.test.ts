@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeRequest } from '../../../src/db/entities/ClaudeRequest';
+import {
+    ClaudeRequest,
+    ClaudeRequestPlatform,
+} from '../../../src/db/entities/ClaudeRequest';
+import { ClaudeRequestNotice } from '../../../src/db/entities/ClaudeRequestNotice';
+import {
+    ClaudeRequestNoticeRepository,
+    CreateClaudeRequestNoticeData,
+} from '../../../src/db/repositories/ClaudeRequestNoticeRepository';
 import {
     ClaudeRequestRepository,
     CreateClaudeRequestData,
@@ -10,6 +18,7 @@ import {
     ClaudeRequestOutcome,
 } from '../../../src/services/claudeRequest/ClaudeRequestNotifier';
 import ClaudeRequestNotifyService, {
+    NOTICE_RETENTION_MS,
     TrackClaudeRequestInput,
 } from '../../../src/services/claudeRequest/ClaudeRequestNotifyService';
 import logger from '../../../src/utils/logging/logger';
@@ -57,20 +66,79 @@ class MemoryClaudeRequestRepository implements ClaudeRequestRepository {
     }
 }
 
+/** In-memory ClaudeRequestNoticeRepository, unique per platform + message. */
+class MemoryClaudeRequestNoticeRepository implements ClaudeRequestNoticeRepository {
+    rows: ClaudeRequestNotice[] = [];
+    private seq = 0;
+    failCreate = false;
+    failFind = false;
+    failDelete = false;
+    deleteCalls: Date[] = [];
+    /** Clock stamped on created rows. */
+    now = () => Date.now();
+
+    async create(
+        data: CreateClaudeRequestNoticeData
+    ): Promise<ClaudeRequestNotice> {
+        if (this.failCreate) throw new Error('db down');
+        if (
+            this.rows.some(
+                (r) =>
+                    r.platform === data.platform &&
+                    r.noticeMessageId === data.noticeMessageId
+            )
+        ) {
+            throw new Error('UNIQUE constraint failed');
+        }
+        const row: ClaudeRequestNotice = {
+            id: ++this.seq,
+            ...data,
+            createdAt: new Date(this.now()),
+        };
+        this.rows.push(row);
+        return { ...row };
+    }
+    async findByNoticeMessage(
+        platform: ClaudeRequestPlatform,
+        noticeMessageId: string
+    ) {
+        if (this.failFind) throw new Error('db down');
+        const row = this.rows.find(
+            (r) =>
+                r.platform === platform && r.noticeMessageId === noticeMessageId
+        );
+        return row ? { ...row } : null;
+    }
+    async deleteOlderThan(cutoff: Date) {
+        this.deleteCalls.push(cutoff);
+        if (this.failDelete) throw new Error('db down');
+        const before = this.rows.length;
+        this.rows = this.rows.filter(
+            (r) => r.createdAt.getTime() >= cutoff.getTime()
+        );
+        return before - this.rows.length;
+    }
+}
+
 /** A notifier that records calls and fails the way it is told to. */
 class FakeNotifier implements ClaudeRequestNotifier {
     notified: { request: ClaudeRequest; outcome: ClaudeRequestOutcome }[] = [];
     failWith: unknown = null;
     /** When set, notify() awaits this before finishing. */
     gate: Promise<void> | null = null;
+    /** ID resolved for the posted notice; `notice-<n>` by default. */
+    messageId: string | null | undefined = undefined;
 
     async notify(
         request: ClaudeRequest,
         outcome: ClaudeRequestOutcome
-    ): Promise<void> {
+    ): Promise<string | null> {
         if (this.gate) await this.gate;
         if (this.failWith) throw this.failWith;
         this.notified.push({ request, outcome });
+        return this.messageId === undefined
+            ? `notice-${this.notified.length}`
+            : this.messageId;
     }
 }
 
@@ -407,6 +475,154 @@ describe('ClaudeRequestNotifyService', () => {
             service.stop();
             await vi.advanceTimersByTimeAsync(5000);
             expect(fetchImpl).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    describe('notices (issue #35)', () => {
+        let notices: MemoryClaudeRequestNoticeRepository;
+        let clock: number;
+
+        beforeEach(() => {
+            notices = new MemoryClaudeRequestNoticeRepository();
+            clock = Date.UTC(2026, 0, 1);
+            notices.now = () => clock;
+            service = new ClaudeRequestNotifyService(repo, {
+                token: TOKEN,
+                repo: REPO,
+                fetchImpl: fetchImpl as unknown as typeof fetch,
+                maxAttempts: 3,
+                notices,
+                now: () => clock,
+            });
+            service.setNotifier('discord', discord);
+            service.setNotifier('fluxer', fluxer);
+        });
+
+        it('stores the posted notice and finds it by message ID', async () => {
+            issues[26] = { state: 'closed', state_reason: 'completed' };
+            await service.track(input());
+            await service.checkClosed();
+
+            expect(repo.rows).toEqual([]);
+            expect(notices.rows).toHaveLength(1);
+            expect(notices.rows[0]).toMatchObject({
+                platform: 'discord',
+                issueNumber: 26,
+                issueUrl: 'https://github.com/owner/bifrost/issues/26',
+                title: 'Notify on completion',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                noticeMessageId: 'notice-1',
+            });
+
+            expect(
+                await service.findNotice('discord', 'notice-1')
+            ).toMatchObject({ issueNumber: 26, userId: 'u1' });
+            expect(await service.findNotice('fluxer', 'notice-1')).toBeNull();
+            expect(await service.findNotice('discord', 'other')).toBeNull();
+        });
+
+        it('stores nothing when the notifier reports no message ID', async () => {
+            issues[26] = { state: 'closed', state_reason: 'not_planned' };
+            discord.messageId = null;
+            await service.track(input());
+            await service.checkClosed();
+            expect(discord.notified).toHaveLength(1);
+            expect(repo.rows).toEqual([]);
+            expect(notices.rows).toEqual([]);
+        });
+
+        it('still deletes the request when storing the notice fails', async () => {
+            issues[26] = { state: 'closed', state_reason: 'completed' };
+            notices.failCreate = true;
+            await service.track(input());
+            await service.checkClosed();
+            expect(discord.notified).toHaveLength(1);
+            expect(repo.rows).toEqual([]);
+            expect(logger.error).toHaveBeenCalled();
+
+            // Not retried: nobody is pinged twice.
+            await service.checkClosed();
+            expect(discord.notified).toHaveLength(1);
+        });
+
+        it('does not store a notice for a failed notification', async () => {
+            issues[26] = { state: 'closed', state_reason: 'completed' };
+            discord.failWith = new Error('ECONNRESET');
+            await service.track(input());
+            await service.checkClosed();
+            expect(notices.rows).toEqual([]);
+            expect(repo.rows[0].attempts).toBe(1);
+        });
+
+        it('findNotice never rejects', async () => {
+            notices.failFind = true;
+            await expect(
+                service.findNotice('discord', 'notice-1')
+            ).resolves.toBeNull();
+            expect(logger.error).toHaveBeenCalled();
+        });
+
+        it('findNotice resolves null without a notices repository', async () => {
+            const bare = new ClaudeRequestNotifyService(repo, {
+                token: TOKEN,
+                repo: REPO,
+            });
+            await expect(bare.findNotice('discord', 'x')).resolves.toBeNull();
+        });
+
+        it('prunes notices older than 180 days at most once a day', async () => {
+            const day = 24 * 60 * 60 * 1000;
+            await notices.create({
+                platform: 'discord',
+                issueNumber: 1,
+                issueUrl: 'u',
+                title: 't',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                noticeMessageId: 'old',
+            });
+            clock += 100 * day;
+            await notices.create({
+                platform: 'discord',
+                issueNumber: 2,
+                issueUrl: 'u',
+                title: 't',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                noticeMessageId: 'young',
+            });
+
+            clock += 81 * day; // "old" is 181 days old, "young" 81
+            await service.checkClosed();
+            expect(notices.deleteCalls).toEqual([
+                new Date(clock - NOTICE_RETENTION_MS),
+            ]);
+            expect(notices.rows.map((r) => r.noticeMessageId)).toEqual([
+                'young',
+            ]);
+
+            clock += day - 1;
+            await service.checkClosed();
+            expect(notices.deleteCalls).toHaveLength(1);
+
+            clock += 1;
+            await service.checkClosed();
+            expect(notices.deleteCalls).toHaveLength(2);
+        });
+
+        it('never lets a failed prune break the tick', async () => {
+            notices.failDelete = true;
+            issues[26] = { state: 'closed', state_reason: 'completed' };
+            await service.track(input());
+            await service.checkClosed();
+            expect(notices.deleteCalls).toHaveLength(1);
+            expect(logger.warn).toHaveBeenCalled();
+            expect(discord.notified).toHaveLength(1);
+            expect(notices.rows).toHaveLength(1);
         });
     });
 });

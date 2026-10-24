@@ -35,7 +35,7 @@ function mayRetryWithoutReply(err: unknown): boolean {
  * closed: a line pinging the requester (only that user may be mentioned),
  * replying to the invoking message when there is one, plus an embed linking
  * the issue. Fluxer has no `failIfNotExists`, so a reply that is rejected is
- * retried once as a plain message.
+ * retried once as a plain message. Resolves with the notice's message ID.
  */
 export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifier {
     constructor(private readonly client: Client) {}
@@ -43,7 +43,7 @@ export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifie
     async notify(
         request: ClaudeRequest,
         outcome: ClaudeRequestOutcome
-    ): Promise<void> {
+    ): Promise<string | null> {
         const notice = buildClaudeRequestNotice(request, outcome);
         const payload = {
             content: notice.content,
@@ -60,20 +60,27 @@ export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifie
         try {
             if (request.messageId) {
                 try {
-                    await this.client.channels.send(request.channelId, {
-                        ...payload,
-                        replyTo: {
-                            channelId: request.channelId,
-                            messageId: request.messageId,
-                            guildId: request.guildId,
-                        },
-                    });
-                    return;
+                    const sent = await this.client.channels.send(
+                        request.channelId,
+                        {
+                            ...payload,
+                            replyTo: {
+                                channelId: request.channelId,
+                                messageId: request.messageId,
+                                guildId: request.guildId,
+                            },
+                        }
+                    );
+                    return sent?.id ?? null;
                 } catch (err) {
                     if (!mayRetryWithoutReply(err)) throw err;
                 }
             }
-            await this.client.channels.send(request.channelId, payload);
+            const sent = await this.client.channels.send(
+                request.channelId,
+                payload
+            );
+            return sent?.id ?? null;
         } catch (err) {
             if (isPermanentFluxerDeliveryError(err)) {
                 throw new ClaudeRequestNotifyError(

@@ -31,7 +31,7 @@ function makeChannel(
         isTextBased: () => overrides.isTextBased ?? true,
         isDMBased: () => overrides.isDMBased ?? false,
         isSendable: () => overrides.isSendable ?? true,
-        send: overrides.send ?? vi.fn().mockResolvedValue(undefined),
+        send: overrides.send ?? vi.fn().mockResolvedValue({ id: 'notice-1' }),
     };
 }
 
@@ -59,7 +59,9 @@ describe('DiscordClaudeRequestNotifier', () => {
         const channel = makeChannel();
         const notifier = makeNotifier(vi.fn().mockResolvedValue(channel));
 
-        await notifier.notify(request, 'completed');
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
 
         expect(channel.send).toHaveBeenCalledTimes(1);
         const payload = channel.send.mock.calls[0][0];
@@ -80,6 +82,15 @@ describe('DiscordClaudeRequestNotifier', () => {
         );
         expect(embed.description).toContain('has been implemented');
         expect(embed.color).toBe(EmbedColors.Success);
+    });
+
+    it('resolves null when Discord does not hand back the message', async () => {
+        const channel = makeChannel({
+            send: vi.fn().mockResolvedValue(undefined),
+        });
+        const notifier = makeNotifier(vi.fn().mockResolvedValue(channel));
+
+        await expect(notifier.notify(request, 'completed')).resolves.toBeNull();
     });
 
     it('sends a plain message when there is no invoking message', async () => {

@@ -8,6 +8,7 @@ import { UserLinkModel } from './UserLinkModel';
 import { ReminderModel } from './ReminderModel';
 import { HistoryMessageModel } from './HistoryMessageModel';
 import { ClaudeRequestModel } from './ClaudeRequestModel';
+import { ClaudeRequestNoticeModel } from './ClaudeRequestNoticeModel';
 import { UserTimezoneModel } from './UserTimezoneModel';
 
 // Guild -> Channel
@@ -118,5 +119,6 @@ export {
     ReminderModel,
     HistoryMessageModel,
     ClaudeRequestModel,
+    ClaudeRequestNoticeModel,
     UserTimezoneModel,
 };

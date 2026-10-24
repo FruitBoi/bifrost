@@ -44,14 +44,16 @@ describe('FluxerClaudeRequestNotifier', () => {
     let notifier: FluxerClaudeRequestNotifier;
 
     beforeEach(() => {
-        send = vi.fn().mockResolvedValue({});
+        send = vi.fn().mockResolvedValue({ id: 'notice-1' });
         notifier = new FluxerClaudeRequestNotifier({
             channels: { send },
         } as unknown as Client);
     });
 
     it('replies to the invoking message with a ping and a completed embed', async () => {
-        await notifier.notify(request, 'completed');
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
 
         expect(send).toHaveBeenCalledTimes(1);
         const [channelId, payload] = send.mock.calls[0] as [
@@ -77,8 +79,15 @@ describe('FluxerClaudeRequestNotifier', () => {
         expect(payload.embeds[0].data.color).toBe(EmbedColors.Success);
     });
 
+    it('resolves null when the sent message has no ID', async () => {
+        send.mockResolvedValue({});
+        await expect(notifier.notify(request, 'completed')).resolves.toBeNull();
+    });
+
     it('sends without a reply when there is no invoking message', async () => {
-        await notifier.notify({ ...request, messageId: null }, 'not_planned');
+        await expect(
+            notifier.notify({ ...request, messageId: null }, 'not_planned')
+        ).resolves.toBe('notice-1');
 
         expect(send).toHaveBeenCalledTimes(1);
         const payload = send.mock.calls[0][1] as SentPayload;
@@ -92,8 +101,11 @@ describe('FluxerClaudeRequestNotifier', () => {
 
     it('falls back to a plain message when the reply is rejected', async () => {
         send.mockRejectedValueOnce(new FakeApiError(400, 'UNKNOWN_MESSAGE'));
+        send.mockResolvedValueOnce({ id: 'notice-2' });
 
-        await notifier.notify(request, 'completed');
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-2'
+        );
 
         expect(send).toHaveBeenCalledTimes(2);
         expect((send.mock.calls[0][1] as SentPayload).replyTo).toBeDefined();

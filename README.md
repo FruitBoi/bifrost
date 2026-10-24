@@ -428,6 +428,7 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 - **Setup.** Set `BF_GITHUB_TOKEN` (or `BF_GITHUB_TOKEN_FILE`) to a GitHub token that may create issues and apply labels in the repository, for example a fine-grained token limited to that repository with **Issues: Read and write**. Without it the command replies that it is not configured. `claudeRequests.enabled: false` switches the command off.
 
 - **Done notification.** The bot remembers which channel and message each request came from. Once the issue is closed on GitHub it replies to the original message there, pinging the requester (checked every `claudeRequests.notifyPollMs`, default 2 minutes; survives restarts). `claudeRequests.notifyOnClose: false` turns this off.
+- **Reply to reopen.** Replying to one of those notices ("Claude request implemented" or "closed") posts your reply as a comment on the GitHub issue, reopens it and tells you again once it is closed. Only members allowed to run `clauderequest` can do this; for everyone else the reply is ordinary chat. The reply is still bridged as usual, and it shares the one-per-minute limit with new requests. Notices can be replied to for 180 days. Needs a token that may comment on and reopen issues (the **Issues: Read and write** token above is enough).
 
 Filing an issue does not start any work by itself; see [CLAUDE.md](CLAUDE.md) for how Claude requests are picked up.
 

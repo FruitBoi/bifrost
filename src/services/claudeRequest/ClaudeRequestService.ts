@@ -40,6 +40,47 @@ export type ClaudeRequestResult =
           detail?: string;
       };
 
+/**
+ * A reply to a "Claude request implemented/closed" notice (issue #35), to be
+ * commented on the GitHub issue before it is reopened.
+ */
+export interface ClaudeRequestReplyInput {
+    issueNumber: number;
+    /** Raw reply text, whitespace/newlines preserved. */
+    text: string;
+    platform: 'discord' | 'fluxer';
+    authorId: string;
+    /** Username of the author. */
+    authorName: string;
+    guildName?: string | null;
+    channelName?: string | null;
+    /** Jump link to the reply message when known. */
+    messageUrl?: string | null;
+}
+
+export type ClaudeRequestReplyResult =
+    | {
+          ok: true;
+          number: number;
+          url: string;
+          /** Issue title as GitHub reports it, or '' when unknown. */
+          title: string;
+          /**
+           * Whether the issue is open again. False means the comment was
+           * posted but reopening failed; `detail` then says why.
+           */
+          reopened: boolean;
+          detail?: string;
+      }
+    | {
+          ok: false;
+          reason: ClaudeRequestFailure;
+          /** Remaining cooldown, for `cooldown`. */
+          retryAfterMs?: number;
+          /** Short status/message, for `github_error`. */
+          detail?: string;
+      };
+
 export interface ClaudeRequestServiceOptions {
     token: string;
     repo: string;
@@ -111,6 +152,77 @@ export function buildClaudeRequestIssue(input: ClaudeRequestInput): {
     return { title, body };
 }
 
+/**
+ * Builds the GitHub comment for a reply to a notice (issue #35). The first
+ * line is always the bot's attribution header, never user text: the repo's
+ * swarm watcher acts on comments whose first line is `/swarm`.
+ */
+export function buildClaudeRequestReplyComment(
+    input: ClaudeRequestReplyInput
+): string {
+    const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim();
+    const platformName = input.platform === 'discord' ? 'Discord' : 'Fluxer';
+    let header = `**Reply from ${platformName} by ${oneLine(input.authorName)} (\`${oneLine(input.authorId)}\`)**`;
+    const guildName = input.guildName ? oneLine(input.guildName) : '';
+    const channelName = input.channelName ? oneLine(input.channelName) : '';
+    if (guildName && channelName) {
+        header += ` in ${guildName} #${channelName}`;
+    } else if (guildName) {
+        header += ` in ${guildName}`;
+    } else if (channelName) {
+        header += ` in #${channelName}`;
+    }
+    if (input.messageUrl)
+        header += ` ([message](${oneLine(input.messageUrl)}))`;
+    return `${neutralizeGitHubMentions(header)}\n\n${neutralizeGitHubMentions(input.text.trim())}\n`;
+}
+
+/**
+ * The embed text and colour kind answering a reply to a notice (issue #35),
+ * or null for `empty` (the reply handlers never send empty text).
+ */
+export function describeClaudeRequestReplyResult(
+    result: ClaudeRequestReplyResult
+): { kind: 'success' | 'warning' | 'error'; description: string } | null {
+    if (result.ok) {
+        const link = `[#${result.number}](${result.url})`;
+        return result.reopened
+            ? {
+                  kind: 'success',
+                  description: `Posted your reply on ${link} and reopened it. I'll let you know here when it's done.`,
+              }
+            : {
+                  kind: 'warning',
+                  description: `Posted your reply on ${link}, but could not reopen it: ${result.detail ?? 'unknown error'}`,
+              };
+    }
+    switch (result.reason) {
+        case 'not_configured':
+            return {
+                kind: 'error',
+                description:
+                    'Claude requests are not configured on this bot (BF_GITHUB_TOKEN is not set).',
+            };
+        case 'too_long':
+            return {
+                kind: 'error',
+                description: `Replies can be at most ${MAX_CLAUDE_REQUEST_LENGTH} characters.`,
+            };
+        case 'cooldown':
+            return {
+                kind: 'error',
+                description: `Please wait ${Math.max(1, Math.ceil((result.retryAfterMs ?? 0) / 1000))} seconds before sending another reply.`,
+            };
+        case 'github_error':
+            return {
+                kind: 'error',
+                description: `Could not post your reply on GitHub: ${result.detail ?? 'unknown error'}`,
+            };
+        case 'empty':
+            return null;
+    }
+}
+
 /** Submits Claude requests as labelled GitHub issues, with a per-user cooldown. */
 export default class ClaudeRequestService {
     private readonly token: string;
@@ -161,13 +273,7 @@ export default class ClaudeRequestService {
                 `https://api.github.com/repos/${this.repo}/issues`,
                 {
                     method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${this.token}`,
-                        Accept: 'application/vnd.github+json',
-                        'X-GitHub-Api-Version': '2022-11-28',
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'bifrost-bot',
-                    },
+                    headers: this.headers(),
                     body: JSON.stringify({ title, body, labels: [this.label] }),
                 }
             );
@@ -209,10 +315,164 @@ export default class ClaudeRequestService {
         }
     }
 
+    /**
+     * Comments a reply to a "Claude request implemented/closed" notice on its
+     * issue and reopens it (issue #35). Shares the per-user cooldown with
+     * {@link submit}. The issue is always PATCHed to open without checking
+     * its state first: GitHub accepts reopening an open issue, and the
+     * notice only exists because the issue was closed. A failed reopen after
+     * a posted comment is still `ok` (with `reopened: false`), since the
+     * reply did reach GitHub and keeps the cooldown.
+     */
+    async reopenWithReply(
+        input: ClaudeRequestReplyInput
+    ): Promise<ClaudeRequestReplyResult> {
+        if (!this.isConfigured())
+            return { ok: false, reason: 'not_configured' };
+        if (input.text.trim().length === 0)
+            return { ok: false, reason: 'empty' };
+        if (input.text.trim().length > MAX_CLAUDE_REQUEST_LENGTH) {
+            return { ok: false, reason: 'too_long' };
+        }
+
+        const key = `${input.platform}:${input.authorId}`;
+        const now = this.now();
+        this.pruneCooldowns(now);
+        const until = this.cooldowns.get(key);
+        if (until !== undefined && until > now) {
+            return { ok: false, reason: 'cooldown', retryAfterMs: until - now };
+        }
+
+        this.cooldowns.set(key, now + this.cooldownMs);
+        const issueApiUrl = `https://api.github.com/repos/${this.repo}/issues/${input.issueNumber}`;
+        try {
+            const commentResponse = await this.fetchImpl(
+                `${issueApiUrl}/comments`,
+                {
+                    method: 'POST',
+                    headers: this.headers(),
+                    body: JSON.stringify({
+                        body: buildClaudeRequestReplyComment(input),
+                    }),
+                }
+            );
+            const comment = await readJson<{ message?: string }>(
+                commentResponse
+            );
+            if (commentResponse.status !== 201) {
+                this.cooldowns.delete(key);
+                const detail = describeFailure(
+                    commentResponse.status,
+                    comment.message
+                );
+                logger.error(
+                    `❌ GitHub rejected the reply to Claude request #${input.issueNumber}: ${detail}`
+                );
+                return { ok: false, reason: 'github_error', detail };
+            }
+        } catch (error) {
+            this.cooldowns.delete(key);
+            const message = this.scrub(error);
+            logger.error(
+                `❌ Failed to post the reply to Claude request #${input.issueNumber}: ${message}`
+            );
+            return { ok: false, reason: 'github_error', detail: message };
+        }
+        this.cooldowns.set(key, this.now() + this.cooldownMs);
+
+        const fallbackUrl = `https://github.com/${this.repo}/issues/${input.issueNumber}`;
+        try {
+            const response = await this.fetchImpl(issueApiUrl, {
+                method: 'PATCH',
+                headers: this.headers(),
+                body: JSON.stringify({
+                    state: 'open',
+                    state_reason: 'reopened',
+                }),
+            });
+            const data = await readJson<{
+                html_url?: string;
+                title?: string;
+                state?: string;
+                message?: string;
+            }>(response);
+            const url =
+                typeof data.html_url === 'string' ? data.html_url : fallbackUrl;
+            const title = typeof data.title === 'string' ? data.title : '';
+            if (response.status === 200 && data.state === 'open') {
+                return {
+                    ok: true,
+                    number: input.issueNumber,
+                    url,
+                    title,
+                    reopened: true,
+                };
+            }
+            const detail = describeFailure(response.status, data.message);
+            logger.error(
+                `❌ GitHub refused to reopen Claude request #${input.issueNumber}: ${detail}`
+            );
+            return {
+                ok: true,
+                number: input.issueNumber,
+                url,
+                title,
+                reopened: false,
+                detail,
+            };
+        } catch (error) {
+            const message = this.scrub(error);
+            logger.error(
+                `❌ Failed to reopen Claude request #${input.issueNumber}: ${message}`
+            );
+            return {
+                ok: true,
+                number: input.issueNumber,
+                url: fallbackUrl,
+                title: '',
+                reopened: false,
+                detail: message,
+            };
+        }
+    }
+
+    private headers(): Record<string, string> {
+        return {
+            Authorization: `Bearer ${this.token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json',
+            'User-Agent': 'bifrost-bot',
+        };
+    }
+
+    /** An error's message with the token blanked out. */
+    private scrub(error: unknown): string {
+        return (error instanceof Error ? error.message : 'unknown error')
+            .split(this.token)
+            .join('***');
+    }
+
     /** Drops expired cooldown entries so the map cannot grow forever. */
     private pruneCooldowns(now: number): void {
         for (const [key, until] of this.cooldowns) {
             if (until <= now) this.cooldowns.delete(key);
         }
     }
+}
+
+/** The parsed JSON body of `response`, or `{}` when it is not JSON. */
+async function readJson<T extends object>(response: Response): Promise<T> {
+    try {
+        return ((await response.json()) ?? {}) as T;
+    } catch {
+        return {} as T;
+    }
+}
+
+/** `"<status> <message>"`, omitting a missing message. */
+function describeFailure(status: number, message?: string): string {
+    return [status, message]
+        .filter((part) => part !== undefined && part !== '')
+        .join(' ');
 }

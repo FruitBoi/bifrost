@@ -73,6 +73,7 @@ import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestDiscordCommandHandler from './commands/discord/handlers/ClaudeRequestDiscordCommandHandler';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
 import DiscordClaudeRequestNotifier from './services/claudeRequest/DiscordClaudeRequestNotifier';
+import DiscordClaudeRequestReplyHandler from './services/claudeRequest/DiscordClaudeRequestReplyHandler';
 import ClaudeRequestService, {
     CLAUDE_REQUEST_COMMAND_NAMES,
 } from './services/claudeRequest/ClaudeRequestService';
@@ -350,6 +351,16 @@ const startDiscordClient = async ({
             commandRegistry.registerCommand(name, historyHandler);
         }
     }
+
+    // Replies to "Claude request implemented/closed" notices (issue #35).
+    const claudeRequestReplyHandler =
+        botConfig.claudeRequests.enabled && claudeRequestNotifyService
+            ? new DiscordClaudeRequestReplyHandler(
+                  claudeRequestService,
+                  claudeRequestNotifyService,
+                  botConfig.roles.claudeRequest
+              )
+            : null;
 
     if (botConfig.claudeRequests.enabled) {
         const claudeRequestHandler = new ClaudeRequestDiscordCommandHandler(
@@ -809,6 +820,13 @@ const startDiscordClient = async ({
                     commandTrigger.rawArgs.split(/\s+/).filter(Boolean)
                 );
             }
+        }
+
+        // A permitted reply to a Claude request notice (issue #35) is also
+        // commented on GitHub. Not awaited: it never rejects, and the
+        // message is still relayed below as ordinary chat.
+        if (claudeRequestReplyHandler && !isBotCommand && !isShortInvocation) {
+            void claudeRequestReplyHandler.handle(message);
         }
 
         if (

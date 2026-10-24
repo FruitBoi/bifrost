@@ -12,11 +12,20 @@
  * reminder rules: permanent ones drop the row, transient ones bump
  * `attempts` until `maxAttempts`. Ticks never overlap, and a platform whose
  * notifier is not registered (client not connected) is skipped until it is.
+ *
+ * Replies to notices (issue #35): each posted notice is stored in the
+ * optional notices repository so {@link ClaudeRequestNotifyService.findNotice}
+ * can tell a reply to it apart from any other message; such replies are
+ * commented on the issue, which is reopened. Notices older than
+ * {@link NOTICE_RETENTION_MS} are pruned at most once a day from the poll
+ * tick.
  */
 import {
     ClaudeRequest,
     ClaudeRequestPlatform,
 } from '../../db/entities/ClaudeRequest';
+import { ClaudeRequestNotice } from '../../db/entities/ClaudeRequestNotice';
+import { ClaudeRequestNoticeRepository } from '../../db/repositories/ClaudeRequestNoticeRepository';
 import { ClaudeRequestRepository } from '../../db/repositories/ClaudeRequestRepository';
 import logger from '../../utils/logging/logger';
 import {
@@ -31,6 +40,10 @@ export type { ClaudeRequestPlatform };
 const MAX_STORED_TITLE_LENGTH = 200;
 /** Rows looked at per tick, oldest first. */
 const MAX_ROWS_PER_TICK = 500;
+/** How long a posted notice can still be replied to: 180 days. */
+export const NOTICE_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+/** Minimum time between two prunes of old notices: 24 hours. */
+const NOTICE_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export interface TrackClaudeRequestInput {
     platform: ClaudeRequestPlatform;
@@ -50,8 +63,14 @@ export interface ClaudeRequestNotifyServiceOptions {
     /** `owner/name` of the repository the issues are filed in. */
     repo: string;
     fetchImpl?: typeof fetch;
-    /** Clock; accepted for symmetry with the other services, currently unused. */
+    /** Clock used to prune old notices. Default `Date.now`. */
     now?: () => number;
+    /**
+     * Where posted notices are remembered so replies to them can be
+     * recognised (issue #35). Without it nothing is stored and
+     * {@link ClaudeRequestNotifyService.findNotice} always resolves null.
+     */
+    notices?: ClaudeRequestNoticeRepository | null;
     /** How often GitHub is polled. Default 2 minutes. */
     pollIntervalMs?: number;
     /** Failed notifications after which a request is dropped. Default 5. */
@@ -71,6 +90,10 @@ export default class ClaudeRequestNotifyService {
     private readonly fetchImpl: typeof fetch;
     private readonly pollIntervalMs: number;
     private readonly maxAttempts: number;
+    private readonly now: () => number;
+    private readonly notices: ClaudeRequestNoticeRepository | null;
+    /** When old notices were last pruned; null before the first prune. */
+    private lastPruneAt: number | null = null;
     private readonly notifiers = new Map<
         ClaudeRequestPlatform,
         ClaudeRequestNotifier
@@ -87,6 +110,8 @@ export default class ClaudeRequestNotifyService {
         this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
         this.pollIntervalMs = options.pollIntervalMs ?? 120_000;
         this.maxAttempts = options.maxAttempts ?? 5;
+        this.now = options.now ?? Date.now;
+        this.notices = options.notices ?? null;
     }
 
     isConfigured(): boolean {
@@ -128,6 +153,30 @@ export default class ClaudeRequestNotifyService {
     }
 
     /**
+     * The stored notice posted as `noticeMessageId` on `platform`, or null
+     * when the message is not a (still remembered) notice. Never rejects:
+     * repository errors are logged and resolve null.
+     */
+    async findNotice(
+        platform: ClaudeRequestPlatform,
+        noticeMessageId: string
+    ): Promise<ClaudeRequestNotice | null> {
+        if (!this.notices) return null;
+        try {
+            return await this.notices.findByNoticeMessage(
+                platform,
+                noticeMessageId
+            );
+        } catch (err) {
+            logger.error(
+                `❌ Failed to look up Claude request notice ${noticeMessageId} on ${platform}:`,
+                err
+            );
+            return null;
+        }
+    }
+
+    /**
      * One poll tick: notifies the requesters of every tracked issue that has
      * been closed. Never rejects; problems are logged. A tick that starts
      * while another one is still running returns immediately so a slow
@@ -137,6 +186,7 @@ export default class ClaudeRequestNotifyService {
         if (this.ticking || !this.isConfigured()) return;
         this.ticking = true;
         try {
+            await this.pruneNotices();
             const rows = await this.requests.findAll(MAX_ROWS_PER_TICK);
             const byIssue = new Map<number, ClaudeRequest[]>();
             for (const row of rows) {
@@ -172,6 +222,35 @@ export default class ClaudeRequestNotifyService {
             logger.error('❌ Claude request poll tick failed:', err);
         } finally {
             this.ticking = false;
+        }
+    }
+
+    /**
+     * Deletes notices older than {@link NOTICE_RETENTION_MS}, at most once
+     * per {@link NOTICE_PRUNE_INTERVAL_MS}. Never throws; a failed prune is
+     * retried after the next interval.
+     */
+    private async pruneNotices(): Promise<void> {
+        if (!this.notices) return;
+        const now = this.now();
+        if (
+            this.lastPruneAt !== null &&
+            now - this.lastPruneAt < NOTICE_PRUNE_INTERVAL_MS
+        ) {
+            return;
+        }
+        this.lastPruneAt = now;
+        try {
+            const removed = await this.notices.deleteOlderThan(
+                new Date(now - NOTICE_RETENTION_MS)
+            );
+            if (removed > 0) {
+                logger.info(
+                    `🤖 Pruned ${removed} Claude request notice(s) older than 180 days`
+                );
+            }
+        } catch (err) {
+            logger.warn('⚠️ Failed to prune old Claude request notices:', err);
         }
     }
 
@@ -244,12 +323,14 @@ export default class ClaudeRequestNotifyService {
         outcome: ClaudeRequestOutcome,
         notifier: ClaudeRequestNotifier
     ): Promise<void> {
+        let noticeMessageId: string | null;
         try {
-            await notifier.notify(request, outcome);
+            noticeMessageId = await notifier.notify(request, outcome);
         } catch (err) {
             await this.handleFailure(request, err);
             return;
         }
+        if (noticeMessageId) await this.storeNotice(request, noticeMessageId);
         try {
             await this.requests.deleteById(request.id);
             logger.info(
@@ -258,6 +339,35 @@ export default class ClaudeRequestNotifyService {
         } catch (err) {
             logger.error(
                 `❌ Claude request #${request.issueNumber} was reported but its row ${request.id} could not be deleted:`,
+                err
+            );
+        }
+    }
+
+    /**
+     * Remembers a posted notice so replies to it can be recognised. Never
+     * throws: the notice was already posted, so a failure here only costs
+     * the reply feature for that notice.
+     */
+    private async storeNotice(
+        request: ClaudeRequest,
+        noticeMessageId: string
+    ): Promise<void> {
+        if (!this.notices) return;
+        try {
+            await this.notices.create({
+                platform: request.platform,
+                issueNumber: request.issueNumber,
+                issueUrl: request.issueUrl,
+                title: request.title,
+                userId: request.userId,
+                guildId: request.guildId,
+                channelId: request.channelId,
+                noticeMessageId,
+            });
+        } catch (err) {
+            logger.error(
+                `❌ Failed to remember the notice ${noticeMessageId} of Claude request #${request.issueNumber}; replies to it will be ignored:`,
                 err
             );
         }

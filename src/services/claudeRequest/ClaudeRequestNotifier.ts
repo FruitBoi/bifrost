@@ -30,7 +30,9 @@ export class ClaudeRequestNotifyError extends Error {
  * request's GitHub issue was closed. Implemented once per platform (Discord
  * and Fluxer) and registered on the ClaudeRequestNotifyService.
  *
- * Contract: resolve when the notice was posted; throw a
+ * Contract: resolve with the ID of the posted notice message (null when the
+ * platform did not report one) once the notice was posted, so replies to it
+ * can be recognised (issue #35); throw a
  * {@link ClaudeRequestNotifyError} with `permanent: true` for failures that
  * will not go away (unknown channel, missing access, not a text channel);
  * throw anything else for transient failures such as network errors, which
@@ -40,7 +42,7 @@ export interface ClaudeRequestNotifier {
     notify(
         request: ClaudeRequest,
         outcome: ClaudeRequestOutcome
-    ): Promise<void>;
+    ): Promise<string | null>;
 }
 
 /** Longest issue title shown in a notice. */

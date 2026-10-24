@@ -15,9 +15,11 @@ import * as reminders from '../../src/db/migrations/00009-reminders';
 import * as historyMessages from '../../src/db/migrations/00010-history-messages';
 import * as claudeRequests from '../../src/db/migrations/00011-claude-requests';
 import * as userTimezones from '../../src/db/migrations/00012-user-timezones';
+import * as claudeRequestNotices from '../../src/db/migrations/00013-claude-request-notices';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
+import { SequelizeClaudeRequestNoticeRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
@@ -85,6 +87,11 @@ const umzug = new Umzug({
             name: '00012-user-timezones.js',
             up: userTimezones.up,
             down: userTimezones.down,
+        },
+        {
+            name: '00013-claude-request-notices.js',
+            up: claudeRequestNotices.up,
+            down: claudeRequestNotices.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1507,5 +1514,109 @@ describe('migration 00012-user-timezones', () => {
         await umzug.up();
         expect(await executed()).toContain('00012-user-timezones.js');
         expect(await repo.get('fluxer', 'u1')).toBeNull();
+    });
+});
+
+describe('migration 00013-claude-request-notices', () => {
+    it('adds claude_request_notices with its indexes, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00013-claude-request-notices.js');
+        expect(await qi.tableExists('claude_request_notices')).toBe(true);
+
+        const cols = await qi.describeTable('claude_request_notices');
+        expect(cols.id).toMatchObject({ primaryKey: true, type: 'INTEGER' });
+        expect(cols.platform).toMatchObject({ allowNull: false });
+        expect(cols.issueNumber).toMatchObject({
+            allowNull: false,
+            type: 'INTEGER',
+        });
+        expect(cols.issueUrl).toMatchObject({ allowNull: false });
+        expect(cols.title).toMatchObject({ allowNull: false });
+        expect(cols.userId).toMatchObject({ allowNull: false });
+        expect(cols.guildId).toMatchObject({ allowNull: false });
+        expect(cols.channelId).toMatchObject({ allowNull: false });
+        expect(cols.noticeMessageId).toMatchObject({ allowNull: false });
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+
+        const indexes = await showIndexes('claude_request_notices');
+        expect(
+            indexes.find(
+                (i) =>
+                    i.name ===
+                    'claude_request_notices_platform_notice_message_id'
+            )
+        ).toMatchObject({
+            unique: true,
+            fields: [
+                { attribute: 'platform' },
+                { attribute: 'noticeMessageId' },
+            ],
+        });
+        expect(
+            indexes.find((i) => i.name === 'claude_request_notices_created_at')
+        ).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'createdAt' }],
+        });
+
+        const repo = new SequelizeClaudeRequestNoticeRepository();
+        const base = {
+            issueNumber: 35,
+            issueUrl: 'https://github.com/o/r/issues/35',
+            title: 'Reply to reopen',
+            userId: 'u1',
+            guildId: 'g1',
+            channelId: 'c1',
+        };
+        const first = await repo.create({
+            ...base,
+            platform: 'discord',
+            noticeMessageId: 'n1',
+        });
+        // The same message ID on the other platform is a different notice.
+        const second = await repo.create({
+            ...base,
+            platform: 'fluxer',
+            noticeMessageId: 'n1',
+        });
+        expect(second.id).toBe(first.id + 1);
+        expect(first).toMatchObject({ ...base, platform: 'discord' });
+        expect(first.createdAt).toBeInstanceOf(Date);
+        await expect(
+            repo.create({ ...base, platform: 'discord', noticeMessageId: 'n1' })
+        ).rejects.toThrow();
+
+        expect(await repo.findByNoticeMessage('discord', 'n1')).toMatchObject({
+            id: first.id,
+            issueNumber: 35,
+            noticeMessageId: 'n1',
+        });
+        expect((await repo.findByNoticeMessage('fluxer', 'n1'))?.id).toBe(
+            second.id
+        );
+        expect(await repo.findByNoticeMessage('discord', 'n2')).toBeNull();
+
+        // deleteOlderThan removes only rows created before the cutoff.
+        await sequelize.query(
+            "UPDATE claude_request_notices SET createdAt = '2020-01-01 00:00:00.000 +00:00' WHERE id = ?",
+            { replacements: [first.id] }
+        );
+        expect(await repo.deleteOlderThan(new Date('2021-01-01'))).toBe(1);
+        expect(await repo.findByNoticeMessage('discord', 'n1')).toBeNull();
+        expect(await repo.findByNoticeMessage('fluxer', 'n1')).not.toBeNull();
+        expect(await repo.deleteOlderThan(new Date('2021-01-01'))).toBe(0);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00013-claude-request-notices.js' });
+        expect(await executed()).not.toContain(
+            '00013-claude-request-notices.js'
+        );
+        expect(await executed()).toContain('00012-user-timezones.js');
+        expect(await qi.tableExists('claude_request_notices')).toBe(false);
+        expect(await qi.tableExists('claude_requests')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00013-claude-request-notices.js');
+        expect(await repo.findByNoticeMessage('fluxer', 'n1')).toBeNull();
     });
 });

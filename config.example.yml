@@ -86,6 +86,8 @@ claudeRequests:
     label: "claude"
     # When the issue filed by `clauderequest` is closed, the bot replies to
     # the request in the channel it was made in and pings the requester.
+    # Replying to that notice (with a roles.claudeRequest role) comments the
+    # reply on the issue and reopens it.
     notifyOnClose: true
     # How often (milliseconds, at least 30000) open tracked issues are
     # checked for being closed.
