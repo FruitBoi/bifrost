@@ -110,7 +110,7 @@ run_swarm() { # issue comment_id login
     log "issue #$issue failed"
     react "$comment_id" confused
     gh issue comment "$issue" --repo "$REPO" --body \
-      "The swarm run for this issue exited with an error before finishing. Log on the dev server: \`$logfile\`" \
+      "The swarm run for this issue exited with an error before finishing. Log on the dev server: \`${logfile/#$HOME/\~}\`" \
       >/dev/null || true
   fi
 }
