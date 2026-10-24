@@ -60,6 +60,9 @@ import type { BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
 import ReminderService from './services/reminders/ReminderService';
+import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
+import TimezoneFluxerCommandHandler from './commands/fluxer/handlers/TimezoneFluxerCommandHandler';
+import { TIMEZONE_COMMAND_NAMES } from './commands/timezoneCommand';
 import FluxerReminderDeliverer from './services/reminders/FluxerReminderDeliverer';
 import RemindMeFluxerCommandHandler from './commands/fluxer/handlers/RemindMeFluxerCommandHandler';
 import ReminderFluxerCommandHandler from './commands/fluxer/handlers/ReminderFluxerCommandHandler';
@@ -104,6 +107,7 @@ const startFluxerClient = async ({
     dbStatsService,
     botConfig,
     reminderService,
+    reminderTimezoneService,
     historyService,
     claudeRequestService,
     claudeRequestNotifyService,
@@ -127,6 +131,7 @@ const startFluxerClient = async ({
     dbStatsService: DbStatsService;
     botConfig: BotConfig;
     reminderService: ReminderService;
+    reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
@@ -284,6 +289,7 @@ const startFluxerClient = async ({
         const remindMeHandler = new RemindMeFluxerCommandHandler(
             client,
             reminderService,
+            reminderTimezoneService,
             fluxerEntityResolver,
             triggerPrefixes
         );
@@ -305,6 +311,14 @@ const startFluxerClient = async ({
             'rmreminder',
         ]) {
             commandRegistry.registerCommand(name, reminderHandler);
+        }
+        const timezoneHandler = new TimezoneFluxerCommandHandler(
+            client,
+            reminderTimezoneService,
+            triggerPrefixes
+        );
+        for (const name of TIMEZONE_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, timezoneHandler);
         }
     }
     if (botConfig.clean.enabled) {

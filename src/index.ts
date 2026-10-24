@@ -10,6 +10,7 @@ import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCa
 import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import { SequelizeUserLinkRepository } from './db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeUserTimezoneRepository } from './db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
@@ -33,6 +34,7 @@ import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import ReminderService from './services/reminders/ReminderService';
+import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
 import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
@@ -177,6 +179,12 @@ const main = async () => {
     // polling for due reminders after both clients have been started.
     const reminderService = new ReminderService(
         new SequelizeReminderRepository()
+    );
+    // Date/time reminders (issue #27) need the user's time zone; reminders
+    // waiting for one are kept in this service until the user sets it.
+    const reminderTimezoneService = new ReminderTimezoneService(
+        new SequelizeUserTimezoneRepository(),
+        reminderService
     );
     if (!botConfig.reminders.enabled) {
         logger.info('Config: reminders are disabled (reminders.enabled=false)');
@@ -324,6 +332,7 @@ const main = async () => {
         dbStatsService,
         botConfig,
         reminderService,
+        reminderTimezoneService,
         historyService,
         claudeRequestService,
         claudeRequestNotifyService,
@@ -450,6 +459,7 @@ const main = async () => {
             dbStatsService,
             botConfig,
             reminderService,
+            reminderTimezoneService,
             historyService,
             claudeRequestService,
             claudeRequestNotifyService,

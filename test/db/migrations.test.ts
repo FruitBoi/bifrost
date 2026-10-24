@@ -14,6 +14,7 @@ import * as userLinks from '../../src/db/migrations/00008-user-links';
 import * as reminders from '../../src/db/migrations/00009-reminders';
 import * as historyMessages from '../../src/db/migrations/00010-history-messages';
 import * as claudeRequests from '../../src/db/migrations/00011-claude-requests';
+import * as userTimezones from '../../src/db/migrations/00012-user-timezones';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
@@ -21,6 +22,7 @@ import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/Sequ
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeUserTimezoneRepository } from '../../src/db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeVoiceLinkRepository } from '../../src/db/sequelizerepos/SequelizeVoiceLinkRepository';
 
@@ -78,6 +80,11 @@ const umzug = new Umzug({
             name: '00011-claude-requests.js',
             up: claudeRequests.up,
             down: claudeRequests.down,
+        },
+        {
+            name: '00012-user-timezones.js',
+            up: userTimezones.up,
+            down: userTimezones.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1445,5 +1452,60 @@ describe('migration 00011-claude-requests', () => {
         await umzug.up();
         expect(await executed()).toContain('00011-claude-requests.js');
         expect(await repo.count()).toBe(0);
+    });
+});
+
+describe('migration 00012-user-timezones', () => {
+    it('adds user_timezones, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00012-user-timezones.js');
+        expect(await qi.tableExists('user_timezones')).toBe(true);
+
+        const cols = await qi.describeTable('user_timezones');
+        expect(cols.platform).toMatchObject({
+            allowNull: false,
+            primaryKey: true,
+        });
+        expect(cols.userId).toMatchObject({
+            allowNull: false,
+            primaryKey: true,
+        });
+        expect(cols.timeZone).toMatchObject({ allowNull: false });
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+        expect(cols.updatedAt).toMatchObject({ allowNull: false });
+
+        const repo = new SequelizeUserTimezoneRepository();
+        expect(await repo.get('discord', 'u1')).toBeNull();
+
+        await repo.set('discord', 'u1', 'America/New_York');
+        await repo.set('fluxer', 'u1', 'UTC+05:30');
+        expect(await repo.get('discord', 'u1')).toBe('America/New_York');
+        expect(await repo.get('fluxer', 'u1')).toBe('UTC+05:30');
+        expect(await repo.get('discord', 'u2')).toBeNull();
+
+        // set replaces rather than duplicating.
+        await repo.set('discord', 'u1', 'Europe/Berlin');
+        expect(await repo.get('discord', 'u1')).toBe('Europe/Berlin');
+        expect(await repo.get('fluxer', 'u1')).toBe('UTC+05:30');
+        const rows = await select<{ userId: string }>(
+            'SELECT userId FROM user_timezones'
+        );
+        expect(rows).toHaveLength(2);
+
+        expect(await repo.delete('discord', 'u1')).toBe(true);
+        expect(await repo.delete('discord', 'u1')).toBe(false);
+        expect(await repo.get('discord', 'u1')).toBeNull();
+        expect(await repo.get('fluxer', 'u1')).toBe('UTC+05:30');
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00012-user-timezones.js' });
+        expect(await executed()).not.toContain('00012-user-timezones.js');
+        expect(await executed()).toContain('00011-claude-requests.js');
+        expect(await qi.tableExists('user_timezones')).toBe(false);
+        expect(await qi.tableExists('claude_requests')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00012-user-timezones.js');
+        expect(await repo.get('fluxer', 'u1')).toBeNull();
     });
 });

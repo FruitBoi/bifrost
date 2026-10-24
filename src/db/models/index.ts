@@ -8,6 +8,7 @@ import { UserLinkModel } from './UserLinkModel';
 import { ReminderModel } from './ReminderModel';
 import { HistoryMessageModel } from './HistoryMessageModel';
 import { ClaudeRequestModel } from './ClaudeRequestModel';
+import { UserTimezoneModel } from './UserTimezoneModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -117,4 +118,5 @@ export {
     ReminderModel,
     HistoryMessageModel,
     ClaudeRequestModel,
+    UserTimezoneModel,
 };

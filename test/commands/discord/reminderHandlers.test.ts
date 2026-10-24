@@ -6,6 +6,9 @@ import RemindMeDiscordCommandHandler, {
 import ReminderDiscordCommandHandler from '../../../src/commands/discord/handlers/ReminderDiscordCommandHandler';
 import { DiscordCommandHandlerMessage } from '../../../src/commands/discord/DiscordCommandHandler';
 import ReminderService from '../../../src/services/reminders/ReminderService';
+import ReminderTimezoneService from '../../../src/services/reminders/ReminderTimezoneService';
+import TimezoneDiscordCommandHandler from '../../../src/commands/discord/handlers/TimezoneDiscordCommandHandler';
+import { UserTimezoneRepository } from '../../../src/db/repositories/UserTimezoneRepository';
 import { Reminder } from '../../../src/db/entities/Reminder';
 
 const TRIGGERS = ['?', '!'];
@@ -35,6 +38,36 @@ function makeService() {
         delete: vi.fn().mockResolvedValue(true),
         deleteAllForUser: vi.fn().mockResolvedValue(0),
     };
+}
+
+/** In-memory time zone store keyed by `platform:userId`. */
+function makeZoneRepo(initial: Record<string, string> = {}) {
+    const zones = new Map(Object.entries(initial));
+    const repo: UserTimezoneRepository = {
+        get: vi.fn(
+            async (platform, userId) =>
+                zones.get(`${platform}:${userId}`) ?? null
+        ),
+        set: vi.fn(async (platform, userId, zone) => {
+            zones.set(`${platform}:${userId}`, zone);
+        }),
+        delete: vi.fn(async (platform, userId) =>
+            zones.delete(`${platform}:${userId}`)
+        ),
+    };
+    return { repo, zones };
+}
+
+function makeTimezoneService(
+    service: ReturnType<typeof makeService>,
+    zones: Record<string, string> = {}
+) {
+    const { repo } = makeZoneRepo(zones);
+    return new ReminderTimezoneService(
+        repo,
+        service as unknown as ReminderService,
+        { now: () => NOW.getTime() }
+    );
 }
 
 function makeMember(permissions: bigint[], username = 'someone') {
@@ -138,13 +171,16 @@ const client = {
 
 describe('RemindMeDiscordCommandHandler', () => {
     let service: ReturnType<typeof makeService>;
+    let timezones: ReminderTimezoneService;
     let handler: RemindMeDiscordCommandHandler;
 
     beforeEach(() => {
         service = makeService();
+        timezones = makeTimezoneService(service);
         handler = new RemindMeDiscordCommandHandler(
             client,
             service as unknown as ReminderService,
+            timezones,
             TRIGGERS
         );
     });
@@ -190,7 +226,91 @@ describe('RemindMeDiscordCommandHandler', () => {
             'thing'
         );
         expect(replied(reply)[0]).toBe(INVALID_DURATION_MESSAGE);
+        expect(INVALID_DURATION_MESSAGE).toContain('Monday 7pm');
         expect(titles(reply)[1]).toBe('Command Usage');
+    });
+
+    it('asks for a time zone before the first date reminder and keeps it pending', async () => {
+        const { message, reply } = makeMessage({
+            content: '?remindme Monday 7pm stand-up',
+        });
+        await handler.handleCommand(
+            message,
+            'remindme',
+            'Monday',
+            '7pm',
+            'stand-up'
+        );
+        expect(service.create).not.toHaveBeenCalled();
+        const text = replied(reply)[0];
+        expect(text).toContain('I need your time zone');
+        expect(text).toContain('`?timezone America/New_York`');
+        expect(timezones.peekPending('discord', 'author')).toMatchObject({
+            guildId: 'guild-1',
+            channelId: 'chan-1',
+            message: 'stand-up',
+        });
+    });
+
+    it('creates a date reminder in the stored time zone', async () => {
+        timezones = makeTimezoneService(service, {
+            'discord:author': 'America/New_York',
+        });
+        handler = new RemindMeDiscordCommandHandler(
+            client,
+            service as unknown as ReminderService,
+            timezones,
+            TRIGGERS
+        );
+        // Oct 26 20:15 in New York (EDT, UTC-4) is Oct 27 00:15 UTC.
+        const dueAt = new Date('2026-10-27T00:15:00Z');
+        service.create.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder({ id: 12, dueAt }),
+        });
+        const { message, reply } = makeMessage({
+            content: '?remindme Oct 26 20:15 carve the pumpkin',
+        });
+        await handler.handleCommand(
+            message,
+            'remindme',
+            'Oct',
+            '26',
+            '20:15',
+            'carve',
+            'the',
+            'pumpkin'
+        );
+        expect(service.create).toHaveBeenCalledWith({
+            platform: 'discord',
+            userId: 'author',
+            guildId: 'guild-1',
+            channelId: 'chan-1',
+            message: 'carve the pumpkin',
+            delayMs: dueAt.getTime() - NOW.getTime(),
+        });
+        const text = replied(reply)[0];
+        expect(text).toContain('Reminder **#12** set for');
+        expect(text).toContain('20:15 (America/New_York)');
+        expect(text).toContain(`<t:${dueAt.getTime() / 1000}:f>`);
+    });
+
+    it('checks the -channel permissions before keeping a date reminder pending', async () => {
+        const { message, reply } = makeMessage({
+            content: '?remindme -channel <#200> tomorrow hi',
+            member: makeMember([PermissionFlagsBits.ViewChannel]),
+            channels: { '200': makeChannel('200') },
+        });
+        await handler.handleCommand(
+            message,
+            'remindme',
+            '-channel',
+            '<#200>',
+            'tomorrow',
+            'hi'
+        );
+        expect(replied(reply)[0]).toContain('You need View Channel');
+        expect(timezones.peekPending('discord', 'author')).toBeNull();
     });
 
     it('creates a reminder in the current channel', async () => {
@@ -486,5 +606,98 @@ describe('ReminderDiscordCommandHandler', () => {
         });
         await handler.handleCommand(message, 'reminder', 'delete', '-a');
         expect(replied(reply)).toEqual(['No reminders to clear']);
+    });
+});
+
+describe('TimezoneDiscordCommandHandler', () => {
+    let service: ReturnType<typeof makeService>;
+    let timezones: ReminderTimezoneService;
+    let remindMe: RemindMeDiscordCommandHandler;
+    let handler: TimezoneDiscordCommandHandler;
+
+    beforeEach(() => {
+        service = makeService();
+        timezones = makeTimezoneService(service);
+        remindMe = new RemindMeDiscordCommandHandler(
+            client,
+            service as unknown as ReminderService,
+            timezones,
+            TRIGGERS
+        );
+        handler = new TimezoneDiscordCommandHandler(
+            client,
+            timezones,
+            TRIGGERS
+        );
+    });
+
+    it('says when no zone is set', async () => {
+        const { message, reply } = makeMessage({ content: '?timezone' });
+        await handler.handleCommand(message, 'timezone');
+        expect(replied(reply)[0]).toContain('You have not set a time zone');
+    });
+
+    it('rejects unknown zones', async () => {
+        const { message, reply } = makeMessage({
+            content: '?tz Mars/Olympus',
+        });
+        await handler.handleCommand(message, 'tz', 'Mars/Olympus');
+        expect(replied(reply)[0]).toContain(
+            '`Mars/Olympus` is not a time zone I know'
+        );
+        expect(await timezones.getTimeZone('discord', 'author')).toBeNull();
+    });
+
+    it('stores the zone, shows it and clears it', async () => {
+        const set = makeMessage({ content: '?timezone europe/london' });
+        await handler.handleCommand(set.message, 'timezone', 'europe/london');
+        expect(replied(set.reply)[0]).toContain(
+            'Time zone set to **Europe/London**'
+        );
+        expect(await timezones.getTimeZone('discord', 'author')).toBe(
+            'Europe/London'
+        );
+
+        const show = makeMessage({ content: '?timezone' });
+        await handler.handleCommand(show.message, 'timezone');
+        // 12:00 UTC on Oct 20 is 13:00 BST in London.
+        expect(replied(show.reply)[0]).toContain('13:00');
+
+        const clear = makeMessage({ content: '?timezone clear' });
+        await handler.handleCommand(clear.message, 'timezone', 'clear');
+        expect(replied(clear.reply)[0]).toContain('has been removed');
+        expect(await timezones.getTimeZone('discord', 'author')).toBeNull();
+    });
+
+    it('sets the pending reminder once the zone is given', async () => {
+        const first = makeMessage({ content: '?remindme tomorrow 7pm bins' });
+        await remindMe.handleCommand(
+            first.message,
+            'remindme',
+            'tomorrow',
+            '7pm',
+            'bins'
+        );
+        expect(service.create).not.toHaveBeenCalled();
+
+        // Tomorrow (Oct 21) 19:00 at UTC+2 is 17:00 UTC.
+        const dueAt = new Date('2026-10-21T17:00:00Z');
+        service.create.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder({ id: 3, dueAt }),
+        });
+        const { message, reply } = makeMessage({ content: '?timezone UTC+2' });
+        await handler.handleCommand(message, 'timezone', 'UTC+2');
+        expect(service.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                channelId: 'chan-1',
+                message: 'bins',
+                delayMs: dueAt.getTime() - NOW.getTime(),
+            })
+        );
+        const texts = replied(reply);
+        expect(texts[0]).toContain('Time zone set to **UTC+02:00**');
+        expect(texts[1]).toContain('Reminder **#3** set for');
+        expect(timezones.peekPending('discord', 'author')).toBeNull();
     });
 });

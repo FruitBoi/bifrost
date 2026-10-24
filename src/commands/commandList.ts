@@ -169,17 +169,32 @@ const commandList: Command[] = [
     },
     {
         name: 'remindme',
-        summary: 'Pings you with a message after the given time.',
+        summary: 'Pings you with a message after a time or at a date and time.',
         aliases: ['remind'],
         discord: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
-            usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+            usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
         },
         fluxer: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes; at most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
-            usageArgs: ['[-channel <channel>]', '<time>', '<message>'],
+                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+            usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
+        },
+    },
+    {
+        name: 'timezone',
+        summary: 'Shows or sets the time zone your date/time reminders use.',
+        aliases: ['tz'],
+        discord: {
+            description:
+                'Shows your time zone and the time there, sets it with `timezone <zone>`, or removes it with `timezone clear`. Dates and times in `remindme` (`Monday 7pm`, `Oct 26 20:15`) are read in this zone. Zones: IANA names such as `America/New_York` or `Europe/London` (any case), `UTC`, offsets such as `UTC+2` or `+05:30`, and common abbreviations such as `EST`, `PST` or `CET`. A reminder that was waiting for your time zone is set as soon as you give it. Alias `tz`; also triggered by `?timezone` / `!timezone`.',
+            usageArgs: ['[zone | clear]'],
+        },
+        fluxer: {
+            description:
+                'Shows your time zone and the time there, sets it with `timezone <zone>`, or removes it with `timezone clear`. Dates and times in `remindme` (`Monday 7pm`, `Oct 26 20:15`) are read in this zone. Zones: IANA names such as `America/New_York` or `Europe/London` (any case), `UTC`, offsets such as `UTC+2` or `+05:30`, and common abbreviations such as `EST`, `PST` or `CET`. A reminder that was waiting for your time zone is set as soon as you give it. Alias `tz`; also triggered by `?timezone` / `!timezone`.',
+            usageArgs: ['[zone | clear]'],
         },
     },
     {

@@ -47,6 +47,9 @@ import VoiceDiscordCommandHandler from './commands/discord/handlers/VoiceDiscord
 import RemindMeDiscordCommandHandler from './commands/discord/handlers/RemindMeDiscordCommandHandler';
 import ReminderDiscordCommandHandler from './commands/discord/handlers/ReminderDiscordCommandHandler';
 import ReminderService from './services/reminders/ReminderService';
+import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
+import TimezoneDiscordCommandHandler from './commands/discord/handlers/TimezoneDiscordCommandHandler';
+import { TIMEZONE_COMMAND_NAMES } from './commands/timezoneCommand';
 import DiscordReminderDeliverer from './services/reminders/DiscordReminderDeliverer';
 import { parseReminderTrigger } from './commands/reminderTrigger';
 import CleanDiscordCommandHandler from './commands/discord/handlers/CleanDiscordCommandHandler';
@@ -92,6 +95,7 @@ const startDiscordClient = async ({
     fluxerStatsService,
     dbStatsService,
     reminderService,
+    reminderTimezoneService,
     historyService,
     claudeRequestService,
     claudeRequestNotifyService,
@@ -113,6 +117,7 @@ const startDiscordClient = async ({
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
     reminderService: ReminderService;
+    reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
@@ -257,6 +262,7 @@ const startDiscordClient = async ({
         const remindMeHandler = new RemindMeDiscordCommandHandler(
             client,
             reminderService,
+            reminderTimezoneService,
             triggerPrefixes
         );
         for (const name of ['remindme', 'remind']) {
@@ -276,6 +282,14 @@ const startDiscordClient = async ({
             'rmreminder',
         ]) {
             commandRegistry.registerCommand(name, reminderHandler);
+        }
+        const timezoneHandler = new TimezoneDiscordCommandHandler(
+            client,
+            reminderTimezoneService,
+            triggerPrefixes
+        );
+        for (const name of TIMEZONE_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, timezoneHandler);
         }
     }
 

@@ -75,7 +75,7 @@ describe('parseRemindMeArgs', () => {
     it('parses time and message', () => {
         expect(parseRemindMeArgs('1h do the thing')).toEqual({
             ok: true,
-            delayMs: HOUR,
+            when: { kind: 'duration', delayMs: HOUR },
             message: 'do the thing',
             channelRef: null,
         });
@@ -84,7 +84,7 @@ describe('parseRemindMeArgs', () => {
     it('takes the time as a single token and keeps the rest as the message', () => {
         expect(parseRemindMeArgs('1h 30m text')).toEqual({
             ok: true,
-            delayMs: HOUR,
+            when: { kind: 'duration', delayMs: HOUR },
             message: '30m text',
             channelRef: null,
         });
@@ -95,7 +95,7 @@ describe('parseRemindMeArgs', () => {
             parseRemindMeArgs('  10m  first line\n  second   line \n')
         ).toEqual({
             ok: true,
-            delayMs: 10 * MINUTE,
+            when: { kind: 'duration', delayMs: 10 * MINUTE },
             message: 'first line\n  second   line',
             channelRef: null,
         });
@@ -104,13 +104,13 @@ describe('parseRemindMeArgs', () => {
     it('accepts a leading -channel switch', () => {
         expect(parseRemindMeArgs('-channel <#123> 2d buy milk')).toEqual({
             ok: true,
-            delayMs: 2 * DAY,
+            when: { kind: 'duration', delayMs: 2 * DAY },
             message: 'buy milk',
             channelRef: '<#123>',
         });
         expect(parseRemindMeArgs('-CHANNEL general 2d buy milk')).toEqual({
             ok: true,
-            delayMs: 2 * DAY,
+            when: { kind: 'duration', delayMs: 2 * DAY },
             message: 'buy milk',
             channelRef: 'general',
         });
@@ -119,13 +119,13 @@ describe('parseRemindMeArgs', () => {
     it('accepts a trailing -channel switch', () => {
         expect(parseRemindMeArgs('2d buy milk -channel 456')).toEqual({
             ok: true,
-            delayMs: 2 * DAY,
+            when: { kind: 'duration', delayMs: 2 * DAY },
             message: 'buy milk',
             channelRef: '456',
         });
         expect(parseRemindMeArgs('2d buy\nmilk   -Channel <#456>  ')).toEqual({
             ok: true,
-            delayMs: 2 * DAY,
+            when: { kind: 'duration', delayMs: 2 * DAY },
             message: 'buy\nmilk',
             channelRef: '<#456>',
         });
@@ -134,13 +134,13 @@ describe('parseRemindMeArgs', () => {
     it('does not treat -channel in the middle of the message as a switch', () => {
         expect(parseRemindMeArgs('1h set the -channel topic later')).toEqual({
             ok: true,
-            delayMs: HOUR,
+            when: { kind: 'duration', delayMs: HOUR },
             message: 'set the -channel topic later',
             channelRef: null,
         });
         expect(parseRemindMeArgs('1h -channel foo bar baz')).toEqual({
             ok: true,
-            delayMs: HOUR,
+            when: { kind: 'duration', delayMs: HOUR },
             message: '-channel foo bar baz',
             channelRef: null,
         });
@@ -209,10 +209,127 @@ describe('parseRemindMeArgs', () => {
     it('accepts a zero duration (the service rejects it later)', () => {
         expect(parseRemindMeArgs('0 text')).toEqual({
             ok: true,
-            delayMs: 0,
+            when: { kind: 'duration', delayMs: 0 },
             message: 'text',
             channelRef: null,
         });
+    });
+});
+
+describe('parseRemindMeArgs with dates (issue #27)', () => {
+    it('parses a month-day with a time', () => {
+        expect(parseRemindMeArgs('Oct 26 20:15 dinner')).toEqual({
+            ok: true,
+            when: {
+                kind: 'date',
+                spec: {
+                    kind: 'date',
+                    month: 10,
+                    day: 26,
+                    hour: 20,
+                    minute: 15,
+                    hasTime: true,
+                },
+            },
+            message: 'dinner',
+            channelRef: null,
+        });
+    });
+
+    it('parses a weekday with a time', () => {
+        expect(parseRemindMeArgs('Monday 7pm call mom')).toEqual({
+            ok: true,
+            when: {
+                kind: 'date',
+                spec: {
+                    kind: 'weekday',
+                    weekday: 1,
+                    hour: 19,
+                    minute: 0,
+                    hasTime: true,
+                },
+            },
+            message: 'call mom',
+            channelRef: null,
+        });
+    });
+
+    it('parses tomorrow without a time', () => {
+        expect(parseRemindMeArgs('tomorrow take out trash')).toEqual({
+            ok: true,
+            when: {
+                kind: 'date',
+                spec: {
+                    kind: 'relativeDay',
+                    dayOffset: 1,
+                    hour: 9,
+                    minute: 0,
+                    hasTime: false,
+                },
+            },
+            message: 'take out trash',
+            channelRef: null,
+        });
+    });
+
+    it('keeps the message whitespace after a multi-token date', () => {
+        const parsed = parseRemindMeArgs(
+            'next friday at 5:30 pm  line one\n  line two '
+        );
+        expect(parsed.ok && parsed.message).toBe('line one\n  line two');
+    });
+
+    it('combines dates with -channel', () => {
+        const leading = parseRemindMeArgs('-channel <#9> tomorrow 8am standup');
+        expect(leading.ok && leading.channelRef).toBe('<#9>');
+        expect(leading.ok && leading.message).toBe('standup');
+        const trailing = parseRemindMeArgs('Oct 26 party -channel general');
+        expect(trailing.ok && trailing.channelRef).toBe('general');
+        expect(trailing.ok && trailing.message).toBe('party');
+    });
+
+    it('reads a bare number with a meridiem or month as a date', () => {
+        const pm = parseRemindMeArgs('7 pm call');
+        expect(pm.ok && pm.when).toEqual({
+            kind: 'date',
+            spec: { kind: 'time', hour: 19, minute: 0, hasTime: true },
+        });
+        const dayMonth = parseRemindMeArgs('26 Oct party');
+        expect(dayMonth.ok && dayMonth.when.kind).toBe('date');
+        expect(dayMonth.ok && dayMonth.message).toBe('party');
+        expect(parseRemindMeArgs('20 minutes left')).toEqual({
+            ok: true,
+            when: { kind: 'duration', delayMs: 20 * MINUTE },
+            message: 'minutes left',
+            channelRef: null,
+        });
+    });
+
+    it('reports a date without a message', () => {
+        expect(parseRemindMeArgs('tomorrow')).toEqual({
+            ok: false,
+            reason: 'missing_message',
+        });
+        expect(parseRemindMeArgs('Oct 26 20:15 -channel <#1>')).toEqual({
+            ok: false,
+            reason: 'missing_message',
+        });
+    });
+
+    it('reports invalid dates and times', () => {
+        for (const raw of [
+            'Feb 30 text',
+            'Oct 32 text',
+            'Oct 26 25:00 text',
+            '13pm text',
+            'may I ask',
+            'next week text',
+        ]) {
+            expect(parseRemindMeArgs(raw)).toEqual({
+                ok: false,
+                reason: 'invalid_time',
+            });
+        }
     });
 });
 

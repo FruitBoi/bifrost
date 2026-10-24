@@ -2,8 +2,11 @@
  * Argument parsing for the reminder commands (issue #9). The duration syntax
  * is a faithful port of YAGPDB's `common.ParseDuration`; the command-line
  * shapes (`remindme [-channel <ref>] <time> <message>`, `reminder delete
- * [id] [-a]`) mirror YAGPDB's `remindme` and `reminder delete`.
+ * [id] [-a]`) mirror YAGPDB's `remindme` and `reminder delete`. Since
+ * issue #27 the time may also be a date and/or time of day (`Oct 26 20:15`,
+ * `Monday 7pm`, `tomorrow`), parsed by {@link parseReminderDate}.
  */
+import { parseReminderDate, ReminderDateSpec } from './reminderDate';
 
 const SECOND_MS = 1000;
 const MINUTE_MS = 60 * SECOND_MS;
@@ -83,10 +86,18 @@ export function parseDuration(input: string): number | null {
     return total;
 }
 
+/**
+ * When a reminder fires: a delay from now (`1h30m`), or a wall-clock date
+ * and/or time that still needs the user's time zone to become an instant.
+ */
+export type ReminderWhen =
+    | { kind: 'duration'; delayMs: number }
+    | { kind: 'date'; spec: ReminderDateSpec };
+
 export type RemindMeArgs =
     | {
           ok: true;
-          delayMs: number;
+          when: ReminderWhen;
           message: string;
           channelRef: string | null;
       }
@@ -106,10 +117,16 @@ const TRAILING_CHANNEL_RE = /(?:^|\s)-channel(?:\s+(\S+))?\s*$/i;
 
 /**
  * Parses everything after `remindme`: an optional `-channel <ref>` switch as
- * the first or the last two tokens, then the time as a single token, then
- * the message, which is the rest of the text with its inner whitespace and
- * newlines kept. `channelRef` is returned verbatim (`<#123>`, `123` or a
- * channel name); see {@link extractChannelId}.
+ * the first or the last two tokens, then the time, then the message, which
+ * is the rest of the text with its inner whitespace and newlines kept.
+ * `channelRef` is returned verbatim (`<#123>`, `123` or a channel name); see
+ * {@link extractChannelId}.
+ *
+ * The time is a single duration token (`1h30m`, `90`) when the first token
+ * is one; otherwise a date/time of one or more tokens (`Oct 26 20:15`,
+ * `next Monday at 7pm`, `tomorrow`; see {@link parseReminderDate}). One
+ * exception: a bare number followed by a meridiem or a month (`7 pm`,
+ * `26 Oct`) is read as a date/time rather than as minutes.
  */
 export function parseRemindMeArgs(raw: string): RemindMeArgs {
     let text = raw.trim();
@@ -133,15 +150,38 @@ export function parseRemindMeArgs(raw: string): RemindMeArgs {
         }
     }
 
-    const time = /^\S+/.exec(text);
-    if (!time) return { ok: false, reason: 'missing_time' };
-    const delayMs = parseDuration(time[0]);
-    if (delayMs === null) return { ok: false, reason: 'invalid_time' };
+    const tokens: { text: string; end: number }[] = [];
+    for (const match of text.matchAll(/\S+/g)) {
+        tokens.push({
+            text: match[0],
+            end: (match.index ?? 0) + match[0].length,
+        });
+    }
+    if (tokens.length === 0) return { ok: false, reason: 'missing_time' };
 
-    const message = text.slice(time[0].length).trim();
+    let when: ReminderWhen | null = null;
+    let consumed = 1;
+    const words = tokens.map((t) => t.text);
+    const date = parseReminderDate(words);
+    const numberFirst = /^\d+$/.test(words[0]);
+    if (date !== null && numberFirst && date.consumed >= 2) {
+        when = { kind: 'date', spec: date.spec };
+        consumed = date.consumed;
+    } else {
+        const delayMs = parseDuration(words[0]);
+        if (delayMs !== null) {
+            when = { kind: 'duration', delayMs };
+        } else if (date !== null) {
+            when = { kind: 'date', spec: date.spec };
+            consumed = date.consumed;
+        }
+    }
+    if (when === null) return { ok: false, reason: 'invalid_time' };
+
+    const message = text.slice(tokens[consumed - 1].end).trim();
     if (message === '') return { ok: false, reason: 'missing_message' };
 
-    return { ok: true, delayMs, message, channelRef };
+    return { ok: true, when, message, channelRef };
 }
 
 /** `<#123>` or a bare `123` → `'123'`; a name or anything else → null. */

@@ -69,6 +69,17 @@ describe('parseReminderTrigger', () => {
         });
     });
 
+    it('recognises the timezone command and its alias (issue #27)', () => {
+        expect(
+            parseReminderTrigger('? Timezone Europe/London', prefixes)
+        ).toEqual({ command: 'timezone', rawArgs: 'Europe/London' });
+        expect(parseReminderTrigger('?tz', prefixes)).toEqual({
+            command: 'tz',
+            rawArgs: '',
+        });
+        expect(parseReminderTrigger('?tzz', prefixes)).toBeNull();
+    });
+
     it('requires the command word to end at whitespace or the end', () => {
         expect(parseReminderTrigger('?remindmeow', prefixes)).toBeNull();
         expect(parseReminderTrigger('?remindme1h x', prefixes)).toBeNull();

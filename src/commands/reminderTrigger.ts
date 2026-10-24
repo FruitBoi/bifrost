@@ -17,6 +17,9 @@ export const REMINDER_COMMAND_NAMES = [
     'channelreminders',
     'delreminder',
     'rmreminder',
+    // The time zone that date/time reminders are read in (issue #27).
+    'timezone',
+    'tz',
 ] as const;
 
 export type ReminderCommandName = (typeof REMINDER_COMMAND_NAMES)[number];

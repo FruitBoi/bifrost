@@ -20,7 +20,7 @@
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role (see [Identity mapping](#identity-mapping))
-- Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
+- Reminders: `?remindme 1h30min take the pizza out` or `?remindme Monday 7pm call mum` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
 - File a GitHub issue for Claude straight from chat: `!b clauderequest make the bot meow louder` (see [Claude requests](#claude-requests))
@@ -234,7 +234,7 @@ Fluxer's defaults apply (a self-hosted instance may configure them differently):
 
 ## Reminders
 
-Bifröst has a reminder command modelled on [YAGPDB's `remindme`](https://help.yagpdb.xyz/docs/core/all-commands/#remindme): tell it how long to wait and what to say, and when the time is up it pings you in the channel you set it in. It works the same on Discord and on Fluxer.
+Bifröst has a reminder command modelled on [YAGPDB's `remindme`](https://help.yagpdb.xyz/docs/core/all-commands/#remindme): tell it how long to wait (or the date and time) and what to say, and when the time is up it pings you in the channel you set it in. It works the same on Discord and on Fluxer.
 
 There are three ways to run the commands:
 
@@ -246,11 +246,12 @@ The short `?` and `!` forms work for every reminder command and alias below (`?r
 
 ### Commands
 
-- `remindme <time> <message>` (alias `remind`) — schedules a reminder in the current channel. Add `-channel <channel>` (a channel mention or ID, before the time or at the very end) to have it delivered in another text channel or thread of the same server instead; you need permission to view and send messages there. Example: `?remindme -channel #general 2d book the venue`.
+- `remindme <time | date> <message>` (alias `remind`) — schedules a reminder in the current channel, after a duration (`?remindme 2h ...`) or at a date and time (`?remindme Oct 26 20:15 ...`, see [Dates and times](#dates-and-times)). Add `-channel <channel>` (a channel mention or ID, before the time or at the very end) to have it delivered in another text channel or thread of the same server instead; you need permission to view and send messages there. Example: `?remindme -channel #general 2d book the venue`.
 - `reminder list` (alias `reminders`) — lists your reminders in this server with their IDs, a preview of the message and when they are due.
 - `reminder channel` (aliases `creminders`, `channelreminders`) — lists every reminder set for the current channel, by anyone. Requires **Manage Channels**.
 - `reminder delete <id>` (aliases `delreminder`, `rmreminder`) — deletes a reminder. You can always delete your own; deleting someone else's requires **Manage Channels** in the reminder's channel (or in the server, if that channel no longer exists).
 - `reminder delete -a` — deletes all of your reminders.
+- `timezone [zone | clear]` (alias `tz`) — shows your time zone and the current time there, sets it (`?timezone Europe/London`) or removes it (`?timezone clear`). Dates and times in `remindme` are read in this zone.
 
 ### Duration syntax
 
@@ -267,7 +268,23 @@ The time is parsed like YAGPDB does it: a sequence of `<number><unit>` parts wri
 | `y`, `years` | years (365 days) |
 | *(none)* | minutes, so `90` means 90 minutes |
 
-The time must start with a number and is a **single word**: in `?remindme 1h 30m stretch` the reminder fires after one hour and its message is `30m stretch`. Write `1h30m` instead.
+A duration must start with a number and is a **single word**: in `?remindme 1h 30m stretch` the reminder fires after one hour and its message is `30m stretch`. Write `1h30m` instead.
+
+### Dates and times
+
+Instead of a duration, the time can be a date, a day of the week and/or a time of day, read in your time zone:
+
+| Example | Meaning |
+| --- | --- |
+| `?remindme Oct 26 20:15 pumpkins` | 26 October at 20:15 (`26 Oct`, `October 26th`, `2026-10-26 9am` work too) |
+| `?remindme Monday 7pm stand-up` | the next Monday at 19:00 (`next fri`, `wed 8:30` work too) |
+| `?remindme tomorrow bins` | tomorrow at 09:00 (`tomorrow at 7pm`, `tomorrow 9am` for another time) |
+| `?remindme today 5pm leave` / `?remindme tonight ...` | later today |
+| `?remindme 7pm dinner` / `?remindme 20:15 ...` | the next time the clock shows that time (today, or tomorrow if it has passed) |
+
+A date without a time means 09:00, and a date without a year is the next time it comes round. A date that does not exist (`Feb 30`) is refused.
+
+Bifröst needs your time zone to know when `7pm` is. The first time you use a date or time it asks for one, and keeps the reminder for ten minutes until you answer with `?timezone <zone>`, e.g. `?timezone America/New_York`, `?timezone Europe/London`, `?timezone UTC+2` or `?timezone EST`; the reminder is set as soon as you do. Zones can be IANA names (any case), `UTC`/`GMT`, fixed offsets (`UTC+2`, `GMT-5`, `+05:30`) or common abbreviations (`EST`, `PST`, `CET`, …, which follow daylight saving time). The zone is remembered per user and platform; change it with `?timezone <zone>` or remove it with `?timezone clear`. The confirmation shows the reminder's time in your zone, so a wrong zone is easy to spot.
 
 ### Limits
 
@@ -284,7 +301,7 @@ If the bot was offline when a reminder came due, it is delivered shortly after t
 
 ### Database migration
 
-Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted). It runs automatically on startup.
+Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted), and `00012-user-timezones`, which adds the `user_timezones` table for the zones set with `timezone`. Both run automatically on startup.
 
 ## Moderation
 
@@ -446,7 +463,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `history.maxCount` | `1000` | Largest count accepted as a number (`!b history 1000`); anything bigger needs `!b history all` plus `confirm`. |
 | `history.delayMs` | `1000` | Pause between two posts on the destination, in milliseconds; 1000 posts take about `1000 × delayMs`. Keep it at or above the default: both platforms rate-limit webhooks and Fluxer IP-bans bots that exceed its limits. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
-| `reminders.enabled` | `true` | Enable the `remindme` / `reminder` commands on both platforms. See [Reminders](#reminders). |
+| `reminders.enabled` | `true` | Enable the `remindme` / `reminder` / `timezone` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
 | `typing.enabled` | `true` | Show the bot typing on the other platform while someone types in a bridged channel or thread. Needs **Send Messages** only; on Discord it requests the *Guild Message Typing* intent while on. See [Typing indicators](#typing-indicators). |

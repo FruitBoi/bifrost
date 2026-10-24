@@ -9,11 +9,14 @@ import DiscordCommandHandler, {
 } from '../DiscordCommandHandler';
 import { getDiscordCommandUsage } from '../../commandList';
 import { stripReminderInvocation } from '../../reminderTrigger';
-import ReminderService, {
-    CreateReminderFailure,
-    MAX_REMINDER_MESSAGE_LENGTH,
-    MAX_REMINDERS_PER_USER,
-} from '../../../services/reminders/ReminderService';
+import ReminderService from '../../../services/reminders/ReminderService';
+import ReminderTimezoneService from '../../../services/reminders/ReminderTimezoneService';
+import {
+    dateReminderConfirmation,
+    INVALID_TIME_MESSAGE,
+    reminderFailureMessage,
+    timezonePromptMessage,
+} from '../../timezoneCommand';
 import {
     extractChannelId,
     parseRemindMeArgs,
@@ -22,23 +25,28 @@ import {
     formatReminderDuration,
     formatReminderTime,
 } from '../../../services/reminders/reminderFormat';
+import { ReminderDateSpec } from '../../../services/reminders/reminderDate';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
 
-export const INVALID_DURATION_MESSAGE =
-    "I couldn't understand that duration. Use something like `1h30min`, `2d`, `1w` or `30` (minutes).";
+/** Kept under its old name; it now mentions date/time forms (issue #27). */
+export const INVALID_DURATION_MESSAGE = INVALID_TIME_MESSAGE;
 
 /**
  * `remindme <time> <message>` (alias `remind`), optionally with
  * `-channel <#channel>`: schedules a reminder that is posted back into the
  * channel (YAGPDB-style, issue #9). Reachable with the bot prefix and with
- * the short trigger prefixes (`?remindme ...`).
+ * the short trigger prefixes (`?remindme ...`). The time may also be a date
+ * or time of day (`Oct 26 20:15`, `Monday 7pm`, `tomorrow`; issue #27),
+ * read in the user's time zone; without one the reminder waits while the
+ * user is asked to set it with `timezone`.
  */
 export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler {
     constructor(
         client: Client,
         private readonly reminderService: ReminderService,
+        private readonly timezoneService: ReminderTimezoneService,
         private readonly triggerPrefixes: readonly string[]
     ) {
         super(client);
@@ -94,19 +102,10 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
         });
     }
 
-    private failureMessage(reason: CreateReminderFailure): string | null {
-        switch (reason) {
-            case 'too_many':
-                return `You can have at most ${MAX_REMINDERS_PER_USER} reminders at a time. Delete some with \`${this.hintPrefix}reminder delete <id>\`.`;
-            case 'too_long':
-                return 'Reminders can be at most 10 years from now.';
-            case 'too_short':
-                return "That's too soon; the reminder must be at least a second away.";
-            case 'message_too_long':
-                return `Reminder messages can be at most ${MAX_REMINDER_MESSAGE_LENGTH} characters.`;
-            case 'empty_message':
-                return null;
-        }
+    private failureMessage(
+        reason: Parameters<typeof reminderFailureMessage>[0]
+    ): string | null {
+        return reminderFailureMessage(reason, this.hintPrefix);
     }
 
     public async handleCommand(
@@ -206,6 +205,21 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
             channelId = channel.id;
         }
 
+        const where =
+            channelId === message.channelId ? '' : ` in <#${channelId}>`;
+        if (parsed.when.kind === 'date') {
+            await this.createDateReminder(
+                message,
+                message.guildId,
+                channelId,
+                parsed.when.spec,
+                parsed.message,
+                where
+            );
+            return;
+        }
+
+        const { delayMs } = parsed.when;
         try {
             const result = await this.reminderService.create({
                 platform: 'discord',
@@ -213,7 +227,7 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
                 guildId: message.guildId,
                 channelId,
                 message: parsed.message,
-                delayMs: parsed.delayMs,
+                delayMs,
             });
             if (!result.ok) {
                 const text = this.failureMessage(result.reason);
@@ -223,11 +237,9 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
             }
 
             const { reminder } = result;
-            const where =
-                channelId === message.channelId ? '' : ` in <#${channelId}>`;
             await this.replyEmbed(
                 message,
-                `Set reminder **#${reminder.id}** in ${formatReminderDuration(parsed.delayMs)} from now (${formatReminderTime(reminder.dueAt, 'discord')})${where}\n` +
+                `Set reminder **#${reminder.id}** in ${formatReminderDuration(delayMs)} from now (${formatReminderTime(reminder.dueAt, 'discord')})${where}\n` +
                     `View your reminders with \`${this.hintPrefix}reminders\``,
                 EmbedColors.Success
             );
@@ -237,6 +249,79 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
                 `Failed to create the reminder: ${(err as Error).message}`
             );
             logger.error('❌ Creating a Discord reminder failed:', err);
+        }
+    }
+
+    /**
+     * A date/time reminder (issue #27): resolved in the user's stored zone,
+     * or parked in the timezone service while the user is asked for one.
+     */
+    private async createDateReminder(
+        message: DiscordCommandHandlerMessage,
+        guildId: string,
+        channelId: string,
+        spec: ReminderDateSpec,
+        text: string,
+        where: string
+    ): Promise<void> {
+        const userId = message.author.id;
+        try {
+            const zone = await this.timezoneService.getTimeZone(
+                'discord',
+                userId
+            );
+            if (zone === null) {
+                this.timezoneService.setPending('discord', userId, {
+                    guildId,
+                    channelId,
+                    originChannelId: message.channelId,
+                    spec,
+                    message: text,
+                });
+                logger.info(
+                    `🕰️ Discord date reminder by ${userId} waits for their time zone`
+                );
+                await this.replyEmbed(
+                    message,
+                    timezonePromptMessage(this.hintPrefix),
+                    EmbedColors.Info
+                );
+                return;
+            }
+
+            const result = await this.timezoneService.createDateReminder(
+                'discord',
+                userId,
+                { guildId, channelId, spec, message: text },
+                zone
+            );
+            if (!result.ok) {
+                const error = this.failureMessage(result.reason);
+                if (result.reason === 'invalid_date' || error === null) {
+                    await this.replyUsage(message, error ?? undefined);
+                } else {
+                    await this.replyError(message, error);
+                }
+                return;
+            }
+            await this.replyEmbed(
+                message,
+                dateReminderConfirmation(
+                    'discord',
+                    result.reminder,
+                    result.delayMs,
+                    zone,
+                    where,
+                    this.hintPrefix
+                ),
+                EmbedColors.Success
+            );
+        } catch (err: unknown) {
+            await this.replyError(
+                message,
+                `Failed to create the reminder: ${(err as Error).message}`
+            );
+            logger.error('❌ Creating a Discord date reminder failed:', err);
         }
     }
 }

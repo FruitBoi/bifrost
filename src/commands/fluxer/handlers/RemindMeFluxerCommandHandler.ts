@@ -11,11 +11,15 @@ import {
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { getFluxerCommandUsage } from '../../commandList';
 import { stripReminderInvocation } from '../../reminderTrigger';
-import ReminderService, {
-    CreateReminderFailure,
-    MAX_REMINDER_MESSAGE_LENGTH,
-    MAX_REMINDERS_PER_USER,
-} from '../../../services/reminders/ReminderService';
+import ReminderService from '../../../services/reminders/ReminderService';
+import ReminderTimezoneService from '../../../services/reminders/ReminderTimezoneService';
+import { ReminderDateSpec } from '../../../services/reminders/reminderDate';
+import {
+    dateReminderConfirmation,
+    INVALID_TIME_MESSAGE,
+    reminderFailureMessage,
+    timezonePromptMessage,
+} from '../../timezoneCommand';
 import {
     extractChannelId,
     parseRemindMeArgs,
@@ -69,12 +73,16 @@ export function memberPermissionsIn(
  * `-channel <#channel>`: schedules a reminder that pings the author in the
  * channel when the time is up (issue #9, modelled on YAGPDB). Besides
  * `!b remindme ...` the command is triggered by the configured short
- * prefixes (`?remindme ...`, `!remindme ...`).
+ * prefixes (`?remindme ...`, `!remindme ...`). The time may also be a date
+ * or time of day (`Oct 26 20:15`, `Monday 7pm`, `tomorrow`; issue #27),
+ * read in the user's time zone; without one the reminder waits while the
+ * user is asked to set it with `timezone`.
  */
 export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
         client: Client,
         private readonly reminderService: ReminderService,
+        private readonly timezoneService: ReminderTimezoneService,
         private readonly fluxerEntityResolver: FluxerEntityResolver,
         private readonly triggerPrefixes: readonly string[]
     ) {
@@ -113,20 +121,13 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
         await message.reply({ ...usage, embeds });
     }
 
-    private failureMessage(reason: CreateReminderFailure): string | null {
-        const p = reminderHintPrefix(this.triggerPrefixes);
-        switch (reason) {
-            case 'too_many':
-                return `You can have at most ${MAX_REMINDERS_PER_USER} reminders at a time. Delete some with \`${p}reminder delete <id>\`.`;
-            case 'too_long':
-                return 'Reminders can be at most 10 years from now.';
-            case 'too_short':
-                return "That's too soon; the reminder must be at least a second away.";
-            case 'message_too_long':
-                return `Reminder messages can be at most ${MAX_REMINDER_MESSAGE_LENGTH} characters.`;
-            case 'empty_message':
-                return null;
-        }
+    private failureMessage(
+        reason: Parameters<typeof reminderFailureMessage>[0]
+    ): string | null {
+        return reminderFailureMessage(
+            reason,
+            reminderHintPrefix(this.triggerPrefixes)
+        );
     }
 
     public async handleCommand(
@@ -162,10 +163,7 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
         if (!parsed.ok) {
             switch (parsed.reason) {
                 case 'invalid_time':
-                    await this.replyUsage(
-                        message,
-                        "I couldn't understand that duration. Use something like `1h30min`, `2d`, `1w` or `30` (minutes)."
-                    );
+                    await this.replyUsage(message, INVALID_TIME_MESSAGE);
                     return;
                 case 'missing_channel':
                     await this.replyUsage(
@@ -244,6 +242,21 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
             channelId = channel.id;
         }
 
+        const where =
+            channelId === message.channelId ? '' : ` in <#${channelId}>`;
+        if (parsed.when.kind === 'date') {
+            await this.createDateReminder(
+                message,
+                message.guildId,
+                channelId,
+                parsed.when.spec,
+                parsed.message,
+                where
+            );
+            return;
+        }
+
+        const { delayMs } = parsed.when;
         let result;
         try {
             result = await this.reminderService.create({
@@ -252,7 +265,7 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
                 guildId: message.guildId,
                 channelId,
                 message: parsed.message,
-                delayMs: parsed.delayMs,
+                delayMs,
             });
         } catch (err) {
             logger.error(
@@ -279,15 +292,94 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
 
         const { reminder } = result;
         const p = reminderHintPrefix(this.triggerPrefixes);
-        const where =
-            channelId === message.channelId ? '' : ` in <#${channelId}>`;
         logger.info(
             `⏰ Fluxer reminder #${reminder.id} set by ${message.author.id} in channel ${channelId} for ${reminder.dueAt.toISOString()}`
         );
         await this.reply(
             message,
-            `Reminder **#${reminder.id}** set for ${formatReminderDuration(parsed.delayMs)} from now (${formatReminderTime(reminder.dueAt, 'fluxer')})${where}\nView your reminders with \`${p}reminders\``,
+            `Reminder **#${reminder.id}** set for ${formatReminderDuration(delayMs)} from now (${formatReminderTime(reminder.dueAt, 'fluxer')})${where}\nView your reminders with \`${p}reminders\``,
             EmbedColors.Success
         );
+    }
+
+    /**
+     * A date/time reminder (issue #27): resolved in the user's stored zone,
+     * or parked in the timezone service while the user is asked for one.
+     */
+    private async createDateReminder(
+        message: Message,
+        guildId: string,
+        channelId: string,
+        spec: ReminderDateSpec,
+        text: string,
+        where: string
+    ): Promise<void> {
+        const userId = message.author.id;
+        const p = reminderHintPrefix(this.triggerPrefixes);
+        try {
+            const zone = await this.timezoneService.getTimeZone(
+                'fluxer',
+                userId
+            );
+            if (zone === null) {
+                this.timezoneService.setPending('fluxer', userId, {
+                    guildId,
+                    channelId,
+                    originChannelId: message.channelId,
+                    spec,
+                    message: text,
+                });
+                logger.info(
+                    `🕰️ Fluxer date reminder by ${userId} waits for their time zone`
+                );
+                await this.reply(
+                    message,
+                    timezonePromptMessage(p),
+                    EmbedColors.Info
+                );
+                return;
+            }
+
+            const result = await this.timezoneService.createDateReminder(
+                'fluxer',
+                userId,
+                { guildId, channelId, spec, message: text },
+                zone
+            );
+            if (!result.ok) {
+                const error = this.failureMessage(result.reason);
+                if (result.reason === 'invalid_date' || error === null) {
+                    await this.replyUsage(message, error ?? undefined);
+                } else {
+                    await this.reply(message, error, EmbedColors.Error);
+                }
+                return;
+            }
+            logger.info(
+                `⏰ Fluxer reminder #${result.reminder.id} set by ${userId} in channel ${channelId} for ${result.reminder.dueAt.toISOString()} (${zone})`
+            );
+            await this.reply(
+                message,
+                dateReminderConfirmation(
+                    'fluxer',
+                    result.reminder,
+                    result.delayMs,
+                    zone,
+                    where,
+                    p
+                ),
+                EmbedColors.Success
+            );
+        } catch (err) {
+            logger.error(
+                `❌ Could not create Fluxer date reminder for user ${userId}:`,
+                err
+            );
+            await this.reply(
+                message,
+                `Could not create the reminder: ${(err as Error).message}`,
+                EmbedColors.Error
+            );
+        }
     }
 }
