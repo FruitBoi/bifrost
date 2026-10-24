@@ -10,6 +10,8 @@ import { HistoryMessageModel } from './HistoryMessageModel';
 import { ClaudeRequestModel } from './ClaudeRequestModel';
 import { ClaudeRequestNoticeModel } from './ClaudeRequestNoticeModel';
 import { UserTimezoneModel } from './UserTimezoneModel';
+import { ThreadDirectoryModel } from './ThreadDirectoryModel';
+import { ThreadDirectoryEntryModel } from './ThreadDirectoryEntryModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -121,4 +123,6 @@ export {
     ClaudeRequestModel,
     ClaudeRequestNoticeModel,
     UserTimezoneModel,
+    ThreadDirectoryModel,
+    ThreadDirectoryEntryModel,
 };

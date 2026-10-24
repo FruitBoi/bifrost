@@ -107,6 +107,26 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'directory',
+        summary:
+            'Posts and maintains a message listing the threads of a channel, with descriptions.',
+        aliases: ['catalog', 'threaddir'],
+        discord: {
+            description:
+                "Posts a threads directory in the current channel (or the parent channel when run in a thread): an embed listing the channel's threads, oldest first, with optional descriptions. It is edited in place when descriptions or the title change or a thread is created or deleted. Needs Manage Channels. `post [title]` posts it (replacing the old one), `refresh` re-renders it, `describe [thread] <text>` sets a thread's description (omit the text to clear it; the thread is optional inside a thread), `hide`/`show [thread]` leaves a thread out of or back in the list, `title <title>` renames it, `remove` deletes the message (descriptions are kept). With no argument the directory and every thread's description are shown. `thread` is a channel mention or an ID.",
+            usageArgs: [
+                '[post [title] | refresh | describe [thread] [description] | hide [thread] | show [thread] | title <title> | remove]',
+            ],
+        },
+        fluxer: {
+            description:
+                "Posts a threads directory in the current channel (or the parent channel when run in a thread): an embed listing the channel's threads, oldest first, with optional descriptions. It is edited in place when descriptions or the title change or a thread is created or deleted. Needs Manage Channels. `post [title]` posts it (replacing the old one), `refresh` re-renders it, `describe [thread] <text>` sets a thread's description (omit the text to clear it; the thread is optional inside a thread), `hide`/`show [thread]` leaves a thread out of or back in the list, `title <title>` renames it, `remove` deletes the message (descriptions are kept). With no argument the directory and every thread's description are shown. `thread` is a channel mention or an ID.",
+            usageArgs: [
+                '[post [title] | refresh | describe [thread] [description] | hide [thread] | show [thread] | title <title> | remove]',
+            ],
+        },
+    },
+    {
         name: 'pins',
         summary:
             'Syncs the pinned messages of a linked channel or thread between Discord and Fluxer.',

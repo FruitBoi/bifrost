@@ -31,6 +31,8 @@ import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
 import { LinkService } from './services/LinkService';
 import { WebhookService } from './services/WebhookService';
+import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
+import { SequelizeThreadDirectoryRepository } from './db/sequelizerepos/SequelizeThreadDirectoryRepository';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
@@ -171,6 +173,9 @@ const main = async () => {
         fluxerEntityResolver,
     });
     threadSyncService.setBotConfig(botConfig);
+    const threadDirectoryService = new ThreadDirectoryService(
+        new SequelizeThreadDirectoryRepository()
+    );
     categorySyncService.setBotConfig(botConfig);
     const discordStatsService = new DiscordStatsService();
     const fluxerStatsService = new FluxerStatsService();
@@ -348,6 +353,7 @@ const main = async () => {
         discordEntityResolver,
         fluxerEntityResolver,
         threadSyncService,
+        threadDirectoryService,
         categorySyncService,
         threadMemberSyncService,
         expressionTransferService,
@@ -478,6 +484,7 @@ const main = async () => {
             discordEntityResolver,
             fluxerEntityResolver,
             threadSyncService,
+            threadDirectoryService,
             categorySyncService,
             expressionTransferService,
             metricsService,

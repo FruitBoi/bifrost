@@ -32,6 +32,7 @@ import { discordLocationId } from './db/entities/ChannelLink';
 import LinkFluxerCommandHandler from './commands/fluxer/handlers/LinkFluxerCommandHandler';
 import UnlinkFluxerCommandHandler from './commands/fluxer/handlers/UnlinkFluxerCommandHandler';
 import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerCommandHandler';
+import DirectoryFluxerCommandHandler from './commands/fluxer/handlers/DirectoryFluxerCommandHandler';
 import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxerCommandHandler';
 import PinsFluxerCommandHandler from './commands/fluxer/handlers/PinsFluxerCommandHandler';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
@@ -56,6 +57,8 @@ import StatsFluxerCommandHandler from './commands/fluxer/handlers/StatsFluxerCom
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
+import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
+import FluxerThreadDirectoryAdapter from './services/threadDirectory/FluxerThreadDirectoryAdapter';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
@@ -104,6 +107,7 @@ const startFluxerClient = async ({
     discordEntityResolver,
     fluxerEntityResolver,
     threadSyncService,
+    threadDirectoryService,
     categorySyncService,
     threadMemberSyncService,
     expressionTransferService,
@@ -130,6 +134,7 @@ const startFluxerClient = async ({
     discordEntityResolver: DiscordEntityResolver;
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
+    threadDirectoryService: ThreadDirectoryService;
     categorySyncService: CategorySyncService;
     threadMemberSyncService: ThreadMemberSyncService;
     expressionTransferService: ExpressionTransferService;
@@ -187,6 +192,9 @@ const startFluxerClient = async ({
     healthCheckService.setFluxerClient(client);
     fluxerEntityResolver.setFluxerClient(client);
     threadSyncService.setFluxerClient(client);
+    threadDirectoryService.registerAdapter(
+        new FluxerThreadDirectoryAdapter(client)
+    );
     categorySyncService.setFluxerClient(client);
     fluxerStatsService.setClient(client);
 
@@ -258,6 +266,13 @@ const startFluxerClient = async ({
         'threads',
         new ThreadsFluxerCommandHandler(client, linkService)
     );
+    const directoryHandler = new DirectoryFluxerCommandHandler(
+        client,
+        threadDirectoryService
+    );
+    for (const name of ['directory', 'catalog', 'threaddir']) {
+        commandRegistry.registerCommand(name, directoryHandler);
+    }
     commandRegistry.registerCommand(
         'pins',
         new PinsFluxerCommandHandler(client, linkService, pinBridgeService)
@@ -444,6 +459,7 @@ const startFluxerClient = async ({
     });
 
     client.on(Events.ThreadCreate, async (thread) => {
+        threadDirectoryService.handleThreadCreated('fluxer', thread.parentId);
         try {
             await threadSyncService.resolveFluxerThread(thread, 'auto');
         } catch (error) {
@@ -463,6 +479,11 @@ const startFluxerClient = async ({
     });
 
     client.on(Events.ThreadDelete, async (thread) => {
+        threadDirectoryService.handleThreadDeleted(
+            'fluxer',
+            (thread as { parentId?: string | null }).parentId,
+            thread.id
+        );
         try {
             await threadSyncService.handleFluxerThreadDelete(thread.id);
         } catch (error) {

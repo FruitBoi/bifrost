@@ -16,6 +16,7 @@ import * as historyMessages from '../../src/db/migrations/00010-history-messages
 import * as claudeRequests from '../../src/db/migrations/00011-claude-requests';
 import * as userTimezones from '../../src/db/migrations/00012-user-timezones';
 import * as claudeRequestNotices from '../../src/db/migrations/00013-claude-request-notices';
+import * as threadDirectories from '../../src/db/migrations/00014-thread-directories';
 import { MessageLinkModel } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
@@ -24,6 +25,7 @@ import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/Sequ
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeThreadDirectoryRepository } from '../../src/db/sequelizerepos/SequelizeThreadDirectoryRepository';
 import { SequelizeUserTimezoneRepository } from '../../src/db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeVoiceLinkRepository } from '../../src/db/sequelizerepos/SequelizeVoiceLinkRepository';
@@ -92,6 +94,11 @@ const umzug = new Umzug({
             name: '00013-claude-request-notices.js',
             up: claudeRequestNotices.up,
             down: claudeRequestNotices.down,
+        },
+        {
+            name: '00014-thread-directories.js',
+            up: threadDirectories.up,
+            down: threadDirectories.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1618,5 +1625,133 @@ describe('migration 00013-claude-request-notices', () => {
         await umzug.up();
         expect(await executed()).toContain('00013-claude-request-notices.js');
         expect(await repo.findByNoticeMessage('fluxer', 'n1')).toBeNull();
+    });
+});
+
+describe('migration 00014-thread-directories', () => {
+    it('adds both tables with their indexes, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00014-thread-directories.js');
+        expect(await qi.tableExists('thread_directories')).toBe(true);
+        expect(await qi.tableExists('thread_directory_entries')).toBe(true);
+
+        const dirCols = await qi.describeTable('thread_directories');
+        expect(dirCols.id).toMatchObject({ primaryKey: true, type: 'INTEGER' });
+        for (const c of [
+            'platform',
+            'guildId',
+            'channelId',
+            'messageId',
+            'title',
+        ]) {
+            expect(dirCols[c]).toMatchObject({ allowNull: false });
+        }
+        const entryCols = await qi.describeTable('thread_directory_entries');
+        expect(entryCols.description).toMatchObject({ allowNull: true });
+        expect(entryCols.hidden).toMatchObject({ allowNull: false });
+
+        const dirIndexes = await showIndexes('thread_directories');
+        expect(
+            dirIndexes.find(
+                (i) => i.name === 'thread_directories_platform_channel_id'
+            )
+        ).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'platform' }, { attribute: 'channelId' }],
+        });
+        const entryIndexes = await showIndexes('thread_directory_entries');
+        expect(
+            entryIndexes.find(
+                (i) => i.name === 'thread_directory_entries_platform_thread_id'
+            )
+        ).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'platform' }, { attribute: 'threadId' }],
+        });
+        expect(
+            entryIndexes.find(
+                (i) => i.name === 'thread_directory_entries_platform_channel_id'
+            )
+        ).toMatchObject({ unique: false });
+
+        const repo = new SequelizeThreadDirectoryRepository();
+        expect(await repo.findDirectory('discord', 'c1')).toBeNull();
+        const dir = await repo.saveDirectory({
+            platform: 'discord',
+            guildId: 'g1',
+            channelId: 'c1',
+            messageId: 'm1',
+            title: 'Threads',
+        });
+        expect(dir).toMatchObject({ messageId: 'm1', title: 'Threads' });
+        expect(dir.createdAt).toBeInstanceOf(Date);
+        const replaced = await repo.saveDirectory({
+            platform: 'discord',
+            guildId: 'g1',
+            channelId: 'c1',
+            messageId: 'm2',
+            title: 'Index',
+        });
+        expect(replaced.id).toBe(dir.id);
+        expect((await repo.findDirectory('discord', 'c1'))?.messageId).toBe(
+            'm2'
+        );
+        expect(await repo.findDirectory('fluxer', 'c1')).toBeNull();
+
+        const fresh = await repo.saveEntry({
+            platform: 'discord',
+            channelId: 'c1',
+            threadId: 't1',
+        });
+        expect(fresh).toMatchObject({ description: null, hidden: false });
+        await repo.saveEntry({
+            platform: 'discord',
+            channelId: 'c1',
+            threadId: 't1',
+            description: 'About cats',
+        });
+        const hiddenOnly = await repo.saveEntry({
+            platform: 'discord',
+            channelId: 'c1',
+            threadId: 't1',
+            hidden: true,
+        });
+        expect(hiddenOnly).toMatchObject({
+            description: 'About cats',
+            hidden: true,
+        });
+        const cleared = await repo.saveEntry({
+            platform: 'discord',
+            channelId: 'c1',
+            threadId: 't1',
+            description: null,
+        });
+        expect(cleared).toMatchObject({ description: null, hidden: true });
+        await repo.saveEntry({
+            platform: 'discord',
+            channelId: 'c1',
+            threadId: 't2',
+        });
+        const listed = await repo.listEntries('discord', 'c1');
+        expect(listed.map((e) => e.threadId)).toEqual(['t1', 't2']);
+        expect(listed[0].hidden).toBe(true);
+        expect(listed[1].hidden).toBe(false);
+
+        // Entries outlive the directory.
+        expect(await repo.deleteDirectory('discord', 'c1')).toBe(true);
+        expect(await repo.deleteDirectory('discord', 'c1')).toBe(false);
+        expect(await repo.listEntries('discord', 'c1')).toHaveLength(2);
+        await repo.deleteEntry('discord', 't1');
+        expect(await repo.listEntries('discord', 'c1')).toHaveLength(1);
+
+        await umzug.down({ to: '00014-thread-directories.js' });
+        expect(await executed()).not.toContain('00014-thread-directories.js');
+        expect(await executed()).toContain('00013-claude-request-notices.js');
+        expect(await qi.tableExists('thread_directories')).toBe(false);
+        expect(await qi.tableExists('thread_directory_entries')).toBe(false);
+
+        await umzug.up();
+        expect(await executed()).toContain('00014-thread-directories.js');
+        expect(await repo.findDirectory('discord', 'c1')).toBeNull();
     });
 });

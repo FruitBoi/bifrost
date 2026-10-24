@@ -104,6 +104,20 @@ To opt in, set `permissions.manageThreads: true` in the [configuration file](#co
 
 Thread bridging ships as three migrations. `00003-add-thread-links` adds `channel_links.autoSyncThreads` and a `thread_links` table (the first iteration of the feature). `00004-location-links` adds the nullable `channel_links.discordThreadId` / `fluxerThreadId` columns, replaces the unique indexes on the channel ID columns with partial ones (a channel can be linked once as a channel and still own any number of thread links), converts any existing `thread_links` rows into links of their own (inheriting the parent link's webhooks and keeping their message links), and drops `thread_links`. `00005-category-links` adds the `category_links` table (one row per linked Discord category) and the nullable `channel_links.categoryLinkId` column that tags the links a category link creates. Migrations run automatically on startup, so existing databases need no manual steps; existing channel links are unchanged and simply start with the toggle off.
 
+## Threads directory
+
+For channels that are mostly a mass of threads, the bot can keep a **threads directory**: one embed in the channel that lists its threads, oldest first, one `<#thread> — description` line each. The message is edited in place whenever a description or the title changes, and a moment after a thread of the channel is created or deleted. Directories work on Discord and Fluxer independently: a directory posted on Fluxer lists the Fluxer threads, one posted on Discord lists the Discord threads. Bot messages are not bridged, so each side posts its own.
+
+All of it needs **Manage Channels** and is run in the channel (or inside one of its threads). `thread` is a channel mention or an ID and may be left out inside the thread itself.
+
+- `!b directory` — shows where the directory is and every thread with its description (hidden threads are marked 🙈).
+- `!b directory post [title]` — posts the directory, replacing the previous one. Aliases of `directory`: `catalog`, `threaddir`.
+- `!b directory refresh` (or `update`) — re-renders the existing message.
+- `!b directory describe [thread] <description>` — sets a thread's description; without a description it is cleared. Line breaks are kept.
+- `!b directory hide [thread]` / `!b directory show [thread]` — leaves a thread out of, or back in, the list.
+- `!b directory title <title>` — renames the directory.
+- `!b directory remove` — deletes the directory message; descriptions are kept for the next `post`.
+
 ## Reactions
 
 When someone reacts to a bridged message, the bot adds the same reaction to the counterpart message on the other platform. This works in both directions, on the original message as well as on its webhook copy, and in channels and threads alike (any message the bridge has linked).
