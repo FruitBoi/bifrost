@@ -8,6 +8,7 @@ import DiscordCommandHandler, {
 } from '../DiscordCommandHandler';
 import { getDiscordCommandUsage } from '../../../commands/commandList';
 import { COMMAND_PREFIX, ENABLE_VOICE_BRIDGE } from '../../../utils/env';
+import { parseChannelRef } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
@@ -163,16 +164,30 @@ export default class VoiceDiscordCommandHandler extends DiscordCommandHandler {
         }
 
         if (sub === 'unlink') {
-            await this.handleUnlink(message, guildLink, args[1]);
+            await this.handleUnlink(
+                message,
+                guildLink,
+                parseChannelRef(args[1]) ?? args[1]
+            );
             return;
         }
 
         if (sub === 'on' || sub === 'off') {
-            await this.handleToggle(message, guildLink, args[1], sub === 'on');
+            await this.handleToggle(
+                message,
+                guildLink,
+                parseChannelRef(args[1]) ?? args[1],
+                sub === 'on'
+            );
             return;
         }
 
-        await this.handleCreate(message, guildLink, args[0], args[1]);
+        await this.handleCreate(
+            message,
+            guildLink,
+            parseChannelRef(args[0]) ?? args[0],
+            parseChannelRef(args[1]) ?? args[1]
+        );
     }
 
     private async handleList(

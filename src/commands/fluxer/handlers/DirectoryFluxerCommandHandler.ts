@@ -15,8 +15,9 @@ import { COMMAND_PREFIX } from '../../../utils/env';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
 /**
- * `directory ...`: posts and maintains the threads directory message of the
+ * `directory ...`: posts and maintains the threads directory messages of the
  * current channel (or of the parent channel when run inside a thread).
+ * `directory role` also needs Manage Roles.
  */
 export default class DirectoryFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -76,13 +77,23 @@ export default class DirectoryFluxerCommandHandler extends FluxerCommandHandler 
             await message.reply(getFluxerCommandUsage('directory'));
             return;
         }
+        if (
+            action.kind === 'role' &&
+            !(await this.requirePermission(
+                message,
+                PermissionsBitField.Flags.ManageRoles,
+                'Manage Roles'
+            ))
+        )
+            return;
 
         const result = await runDirectoryAction(
             this.threadDirectoryService,
             'fluxer',
             message.guildId,
             channelId,
-            action
+            action,
+            message.channelId
         );
         if (!('status' in result)) {
             await message.reply({

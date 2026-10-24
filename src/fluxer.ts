@@ -33,6 +33,7 @@ import LinkFluxerCommandHandler from './commands/fluxer/handlers/LinkFluxerComma
 import UnlinkFluxerCommandHandler from './commands/fluxer/handlers/UnlinkFluxerCommandHandler';
 import ListFluxerCommandHandler from './commands/fluxer/handlers/ListFluxerCommandHandler';
 import DirectoryFluxerCommandHandler from './commands/fluxer/handlers/DirectoryFluxerCommandHandler';
+import LfgFluxerCommandHandler from './commands/fluxer/handlers/LfgFluxerCommandHandler';
 import ThreadsFluxerCommandHandler from './commands/fluxer/handlers/ThreadsFluxerCommandHandler';
 import PinsFluxerCommandHandler from './commands/fluxer/handlers/PinsFluxerCommandHandler';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
@@ -275,6 +276,13 @@ const startFluxerClient = async ({
     for (const name of ['directory', 'catalog', 'threaddir']) {
         commandRegistry.registerCommand(name, directoryHandler);
     }
+    const lfgHandler = new LfgFluxerCommandHandler(
+        client,
+        threadDirectoryService
+    );
+    for (const name of ['lfg', 'lfgrole', 'lfgroles']) {
+        commandRegistry.registerCommand(name, lfgHandler);
+    }
     commandRegistry.registerCommand(
         'pins',
         new PinsFluxerCommandHandler(client, linkService, pinBridgeService)
@@ -453,6 +461,8 @@ const startFluxerClient = async ({
 
     client.on(Events.ChannelDelete, async (channel) => {
         if (channel.isThread()) return; // handled by ThreadDelete
+        // Drops the channel from directories it was added to with `directory add`.
+        threadDirectoryService.handleThreadDeleted('fluxer', null, channel.id);
         try {
             await categorySyncService.handleFluxerChannelDelete(channel.id);
         } catch (error) {

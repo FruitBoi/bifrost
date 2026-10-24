@@ -334,13 +334,16 @@ describe('parseRemindMeArgs with dates (issue #27)', () => {
 });
 
 describe('extractChannelId', () => {
+    const id = '123456789012345678';
     it.each<[string, string | null]>([
-        ['<#123>', '123'],
-        ['123', '123'],
-        [' <#123> ', '123'],
+        [`<#${id}>`, id],
+        [id, id],
+        [` <#${id}> `, id],
+        [`https://discord.com/channels/111111111111111111/${id}`, id],
+        [`https://fluxer.app/channels/111111111111111111/${id}`, id],
         ['general', null],
         ['#general', null],
-        ['<@123>', null],
+        [`<@${id}>`, null],
         ['<#>', null],
         ['<#12a>', null],
         ['', null],

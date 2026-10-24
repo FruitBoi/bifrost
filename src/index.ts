@@ -484,7 +484,6 @@ const main = async () => {
             discordEntityResolver,
             fluxerEntityResolver,
             threadSyncService,
-            threadDirectoryService,
             categorySyncService,
             expressionTransferService,
             metricsService,

@@ -18,7 +18,6 @@ export const DISCORD_ALLOWED_COMMANDS: readonly string[] = [
     'unlink',
     'list',
     'threads',
-    'directory',
     'pins',
     'category',
     'voice',

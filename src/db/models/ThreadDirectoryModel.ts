@@ -8,6 +8,8 @@ export class ThreadDirectoryModel extends Model {
     declare guildId: string;
     declare channelId: string;
     declare messageId: string;
+    /** JSON array of the 2nd..nth message IDs. */
+    declare extraMessageIds: string;
     declare title: string;
     declare createdAt: Date;
     declare updatedAt: Date;
@@ -25,6 +27,11 @@ ThreadDirectoryModel.init(
         guildId: { type: DataTypes.STRING, allowNull: false },
         channelId: { type: DataTypes.STRING, allowNull: false },
         messageId: { type: DataTypes.STRING, allowNull: false },
+        extraMessageIds: {
+            type: DataTypes.TEXT,
+            allowNull: false,
+            defaultValue: '[]',
+        },
         title: { type: DataTypes.STRING, allowNull: false },
     },
     {

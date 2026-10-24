@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import {
     ThreadDirectory,
     ThreadDirectoryEntry,
@@ -18,10 +19,27 @@ function toDate(value: unknown): Date {
     return value instanceof Date ? value : new Date(value as string);
 }
 
+/** The stored JSON array of extra message IDs; anything malformed reads as none. */
+function parseExtraMessageIds(value: unknown): string[] {
+    if (typeof value !== 'string') return [];
+    try {
+        const parsed: unknown = JSON.parse(value);
+        return Array.isArray(parsed)
+            ? parsed.filter((id): id is string => typeof id === 'string')
+            : [];
+    } catch {
+        return [];
+    }
+}
+
 function toThreadDirectory(model: ThreadDirectoryModel): ThreadDirectory {
-    const row = model.toJSON() as ThreadDirectory;
+    const { extraMessageIds, ...row } = model.toJSON() as Omit<
+        ThreadDirectory,
+        'messageIds'
+    > & { extraMessageIds?: string };
     return {
         ...row,
+        messageIds: [row.messageId, ...parseExtraMessageIds(extraMessageIds)],
         createdAt: toDate(row.createdAt),
         updatedAt: toDate(row.updatedAt),
     };
@@ -33,11 +51,25 @@ function toThreadDirectoryEntry(
     const row = model.toJSON() as ThreadDirectoryEntry;
     return {
         ...row,
+        guildId: row.guildId ?? null,
         description: row.description ?? null,
+        roleId: row.roleId ?? null,
         // SQLite stores booleans as 0/1.
         hidden: Boolean(row.hidden),
+        added: Boolean(row.added),
         createdAt: toDate(row.createdAt),
         updatedAt: toDate(row.updatedAt),
+    };
+}
+
+/** Column values of a directory's message list. */
+function messageColumns(messageIds: string[]) {
+    if (messageIds.length === 0) {
+        throw new Error('A threads directory needs at least one message.');
+    }
+    return {
+        messageId: messageIds[0],
+        extraMessageIds: JSON.stringify(messageIds.slice(1)),
     };
 }
 
@@ -60,12 +92,18 @@ export class SequelizeThreadDirectoryRepository implements ThreadDirectoryReposi
         if (existing) {
             await existing.update({
                 guildId: data.guildId,
-                messageId: data.messageId,
+                ...messageColumns(data.messageIds),
                 title: data.title,
             });
             return toThreadDirectory(existing);
         }
-        const model = await ThreadDirectoryModel.create({ ...data });
+        const model = await ThreadDirectoryModel.create({
+            platform: data.platform,
+            guildId: data.guildId,
+            channelId: data.channelId,
+            ...messageColumns(data.messageIds),
+            title: data.title,
+        });
         return toThreadDirectory(model);
     }
 
@@ -90,42 +128,77 @@ export class SequelizeThreadDirectoryRepository implements ThreadDirectoryReposi
         return models.map(toThreadDirectoryEntry);
     }
 
+    async listRoleEntries(
+        platform: ThreadDirectoryPlatform,
+        guildId: string
+    ): Promise<ThreadDirectoryEntry[]> {
+        const models = await ThreadDirectoryEntryModel.findAll({
+            where: { platform, guildId, roleId: { [Op.ne]: null } },
+            order: [['id', 'ASC']],
+        });
+        return models.map(toThreadDirectoryEntry);
+    }
+
     async saveEntry(
         data: SaveThreadDirectoryEntryData
     ): Promise<ThreadDirectoryEntry> {
-        const where = { platform: data.platform, threadId: data.threadId };
+        const where = {
+            platform: data.platform,
+            channelId: data.channelId,
+            threadId: data.threadId,
+        };
         const existing = await ThreadDirectoryEntryModel.findOne({ where });
         if (existing) {
-            const changes: {
-                channelId: string;
-                description?: string | null;
-                hidden?: boolean;
-            } = {
-                channelId: data.channelId,
-            };
+            const changes: Partial<
+                Pick<
+                    ThreadDirectoryEntry,
+                    'guildId' | 'description' | 'hidden' | 'roleId' | 'added'
+                >
+            > = {};
+            if (data.guildId !== undefined) changes.guildId = data.guildId;
             if (data.description !== undefined) {
                 changes.description = data.description;
             }
             if (data.hidden !== undefined) changes.hidden = data.hidden;
+            if (data.roleId !== undefined) changes.roleId = data.roleId;
+            if (data.added !== undefined) changes.added = data.added;
             await existing.update(changes);
             return toThreadDirectoryEntry(existing);
         }
         const model = await ThreadDirectoryEntryModel.create({
-            platform: data.platform,
-            channelId: data.channelId,
-            threadId: data.threadId,
+            ...where,
+            guildId: data.guildId ?? null,
             description: data.description ?? null,
             hidden: data.hidden ?? false,
+            roleId: data.roleId ?? null,
+            added: data.added ?? false,
         });
         return toThreadDirectoryEntry(model);
     }
 
     async deleteEntry(
         platform: ThreadDirectoryPlatform,
+        channelId: string,
         threadId: string
-    ): Promise<void> {
+    ): Promise<boolean> {
+        const destroyed = await ThreadDirectoryEntryModel.destroy({
+            where: { platform, channelId, threadId },
+        });
+        return destroyed > 0;
+    }
+
+    async deleteEntriesForThread(
+        platform: ThreadDirectoryPlatform,
+        threadId: string
+    ): Promise<string[]> {
+        const models = await ThreadDirectoryEntryModel.findAll({
+            where: { platform, threadId },
+            attributes: ['channelId'],
+        });
+        if (models.length === 0) return [];
         await ThreadDirectoryEntryModel.destroy({
             where: { platform, threadId },
         });
+        return [...new Set(models.map((m) => m.channelId))];
     }
 }

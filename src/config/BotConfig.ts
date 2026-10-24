@@ -113,7 +113,7 @@ export interface BotConfig {
         /**
          * Keep commands to Fluxer (issue #39): Discord only runs the
          * moderator bridging commands (`link`, `unlink`, `autolink`, `list`,
-         * `threads`, `directory`, `pins`, `category`, `voice`,
+         * `threads`, `pins`, `category`, `voice`,
          * `expressions`, `history`) and the YAGPDB ones (`remindme`,
          * `reminder`, `timezone`, `clean`), aliases included. Any other
          * command on Discord gets a teasing "use Fluxer" reply, and only the

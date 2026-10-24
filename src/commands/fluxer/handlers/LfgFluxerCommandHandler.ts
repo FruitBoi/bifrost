@@ -1,21 +1,15 @@
-import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
-import DiscordCommandHandler, {
-    DiscordCommandHandlerMessage,
-} from '../DiscordCommandHandler';
-import { getDiscordCommandUsage } from '../../commandList';
-import {
-    parseDirectoryCommand,
-    runDirectoryAction,
-} from '../../directoryCommand';
+import { Client, EmbedBuilder, Message } from '@fluxerjs/core';
+import FluxerCommandHandler from '../FluxerCommandHandler';
+import { parseLfgCommand, runLfgAction } from '../../lfgCommand';
 import ThreadDirectoryService from '../../../services/threadDirectory/ThreadDirectoryService';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
 /**
- * `directory ...`: posts and maintains the threads directory message of the
- * current channel (or of the parent channel when run inside a thread).
+ * `lfg [role]`: lists the LFG roles linked to threads directory entries, or
+ * gives (or removes) one of them to the author. Open to everyone.
  */
-export default class DirectoryDiscordCommandHandler extends DiscordCommandHandler {
+export default class LfgFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
         client: Client,
         private readonly threadDirectoryService: ThreadDirectoryService
@@ -24,7 +18,7 @@ export default class DirectoryDiscordCommandHandler extends DiscordCommandHandle
     }
 
     public async handleCommand(
-        message: DiscordCommandHandlerMessage,
+        message: Message,
         _command: string,
         ...args: string[]
     ): Promise<void> {
@@ -36,7 +30,7 @@ export default class DirectoryDiscordCommandHandler extends DiscordCommandHandle
                 .setFooter(footer)
                 .setTimestamp();
 
-        if (!message.inGuild()) {
+        if (!message.guildId) {
             await message.reply({
                 embeds: [
                     embed(
@@ -47,38 +41,28 @@ export default class DirectoryDiscordCommandHandler extends DiscordCommandHandle
             });
             return;
         }
-
-        if (
-            !(await this.requirePermission(
-                message,
-                PermissionFlagsBits.ManageChannels,
-                'Manage Channels'
-            ))
-        )
-            return;
-
-        const inThread = message.channel.isThread();
-        const channelId =
-            (inThread ? message.channel.parentId : null) ?? message.channelId;
-        const action = parseDirectoryCommand({
-            content: message.content,
-            prefix: COMMAND_PREFIX,
-            args,
-            currentThreadId: inThread ? message.channelId : null,
-        });
-        if (action.kind === 'usage') {
-            await message.reply(getDiscordCommandUsage('directory'));
+        if (message.author.bot) {
+            await message.reply({
+                embeds: [
+                    embed('Bots cannot use this command.', EmbedColors.Error),
+                ],
+            });
             return;
         }
 
-        const result = await runDirectoryAction(
+        const action = parseLfgCommand({
+            content: message.content,
+            prefix: COMMAND_PREFIX,
+            args,
+        });
+        const result = await runLfgAction(
             this.threadDirectoryService,
-            'discord',
+            'fluxer',
             message.guildId,
-            channelId,
+            message.author.id,
             action
         );
-        if (!('status' in result)) {
+        if (!('list' in result)) {
             await message.reply({
                 embeds: [embed(result.description, result.color)],
             });
@@ -86,9 +70,6 @@ export default class DirectoryDiscordCommandHandler extends DiscordCommandHandle
         }
 
         const embeds = [embed(result.header, EmbedColors.Info)];
-        if (result.lines.length === 0) {
-            embeds[0].setDescription(`${result.header}\n\nNo threads yet.`);
-        }
         for (const chunk of chunkDescriptionLines(result.lines, '\n')) {
             embeds.push(embed(chunk.join('\n'), EmbedColors.Info));
         }

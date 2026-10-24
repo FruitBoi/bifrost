@@ -10,6 +10,7 @@ import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
 import FluxerEntityResolver from '../../../services/entityResolver/FluxerEntityResolver';
+import { parseLink } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 import { DISCORD_OWNER_ID } from '../../../utils/env';
@@ -265,8 +266,11 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
             return;
         }
 
-        if (args[0] && /^\d{17,20}$/.test(args[0])) {
-            const serverId = args[0];
+        const guildLink = parseLink(args[0]);
+        const serverRef =
+            guildLink && !guildLink.channelId ? guildLink.guildId : args[0];
+        if (serverRef && /^\d{17,20}$/.test(serverRef)) {
+            const serverId = serverRef;
             if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
                 logger.warn(
                     `[list] ⚠️ Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`

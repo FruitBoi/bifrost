@@ -64,12 +64,12 @@ const commandList: Command[] = [
             'Links this server, channel or thread to its counterpart on the other platform.',
         discord: {
             description:
-                'Links this server to a Fluxer guild (by guild ID), or links the channel or thread you run it in to a Fluxer channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately.',
+                'Links this server to a Fluxer guild (by guild ID), or links the channel or thread you run it in to a Fluxer channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.',
             usageArgs: ['<fluxerGuildId | fluxerChannelId | fluxerThreadId>'],
         },
         fluxer: {
             description:
-                'Links this server to a Discord guild (by guild ID), or links the channel or thread you run it in to a Discord channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately.',
+                'Links this server to a Discord guild (by guild ID), or links the channel or thread you run it in to a Discord channel or thread (by its ID). Channel↔channel, thread↔thread and channel↔thread links are all allowed. The link is created immediately. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.',
             usageArgs: [
                 '<discordGuildId | discordChannelId | discordThreadId>',
             ],
@@ -80,12 +80,12 @@ const commandList: Command[] = [
         summary: 'Removes a guild, channel or thread link.',
         discord: {
             description:
-                'Unlinks this Discord guild from its linked Fluxer guild, or removes a channel or thread link by the Fluxer channel or thread ID.',
+                'Unlinks this Discord guild from its linked Fluxer guild, or removes a channel or thread link by the Fluxer channel or thread ID. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.',
             usageArgs: ['<fluxerGuildId | fluxerChannelId | fluxerThreadId>'],
         },
         fluxer: {
             description:
-                'Unlinks this Fluxer guild from its linked Discord guild, or removes a channel or thread link by the Discord channel or thread ID.',
+                'Unlinks this Fluxer guild from its linked Discord guild, or removes a channel or thread link by the Discord channel or thread ID. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.',
             usageArgs: [
                 '<discordGuildId | discordChannelId | discordThreadId>',
             ],
@@ -109,21 +109,25 @@ const commandList: Command[] = [
     {
         name: 'directory',
         summary:
-            'Posts and maintains a message listing the threads of a channel, with descriptions.',
+            'Posts and maintains a message listing the threads of a channel, with descriptions and LFG roles.',
         aliases: ['catalog', 'threaddir'],
-        discord: {
-            description:
-                "Posts a threads directory in the current channel (or the parent channel when run in a thread): an embed listing the channel's threads, oldest first, with optional descriptions. It is edited in place when descriptions or the title change or a thread is created or deleted. Needs Manage Channels. `post [title]` posts it (replacing the old one), `refresh` re-renders it, `describe [thread] <text>` sets a thread's description (omit the text to clear it; the thread is optional inside a thread), `hide`/`show [thread]` leaves a thread out of or back in the list, `title <title>` renames it, `remove` deletes the message (descriptions are kept). With no argument the directory and every thread's description are shown. `thread` is a channel mention or an ID.",
-            usageArgs: [
-                '[post [title] | refresh | describe [thread] [description] | hide [thread] | show [thread] | title <title> | remove]',
-            ],
-        },
         fluxer: {
             description:
-                "Posts a threads directory in the current channel (or the parent channel when run in a thread): an embed listing the channel's threads, oldest first, with optional descriptions. It is edited in place when descriptions or the title change or a thread is created or deleted. Needs Manage Channels. `post [title]` posts it (replacing the old one), `refresh` re-renders it, `describe [thread] <text>` sets a thread's description (omit the text to clear it; the thread is optional inside a thread), `hide`/`show [thread]` leaves a thread out of or back in the list, `title <title>` renames it, `remove` deletes the message (descriptions are kept). With no argument the directory and every thread's description are shown. `thread` is a channel mention or an ID.",
+                "Posts a threads directory in the current channel (or the parent channel when run in a thread): one line per thread, oldest first, as `description: #thread - @role` (the description and role parts are optional), split over several messages when it does not fit in one. It is edited in place when entries or the title change or a thread is created or deleted. Needs Manage Channels. `post [title]` posts it (replacing the old one), `refresh` re-renders it, `describe [thread] <text>` sets an entry's description (omit the text to clear it), `hide`/`show [thread]` leaves a thread out of or back in the list, `add <channel> [description]` lists a channel or thread that lives outside this channel, `unlist <channel>` (alias `drop`) removes an added entry, `role [thread] <role | none>` links a pingable LFG role to an entry that members can give themselves with `lfg` (also needs Manage Roles; `none` clears it), `import <message link | message ID | pasted text>` bulk-imports a hand-made directory (one `[name](thread link) - description` line per thread), `title <title>` renames it, `remove` deletes the messages (entries are kept). The thread is optional inside a thread. With no argument the directory and every entry are shown. A thread or channel is a mention, an ID or a link; a role is a mention, an ID or its name.",
             usageArgs: [
-                '[post [title] | refresh | describe [thread] [description] | hide [thread] | show [thread] | title <title> | remove]',
+                '[post [title] | refresh | describe [thread] [description] | hide [thread] | show [thread] | add <channel> [description] | unlist <channel> | role [thread] <role | none> | import <message link | message ID | text> | title <title> | remove]',
             ],
+        },
+    },
+    {
+        name: 'lfg',
+        summary:
+            'Gives you (or removes) the LFG role linked to a thread of a threads directory.',
+        aliases: ['lfgrole', 'lfgroles'],
+        fluxer: {
+            description:
+                'Lists the LFG roles linked to threads directory entries with `directory role`, with a ✅ next to the ones you have. `lfg <role>` gives you that role, or removes it when you already have it. The role is a mention, an ID, its name, or the thread it is linked to (mention, ID or link). Open to everyone.',
+            usageArgs: ['[list | <role | thread>]'],
         },
     },
     {
@@ -147,12 +151,12 @@ const commandList: Command[] = [
             'Bridges every text channel of a Discord category to threads in a Fluxer channel.',
         discord: {
             description:
-                "Bridges every text channel of the current channel's category to threads in the given Fluxer channel, immediately (run inside a channel of the category). `unlink` removes the category link and its channel links after `confirm`.",
+                "Bridges every text channel of the current channel's category to threads in the given Fluxer channel, immediately (run inside a channel of the category). `unlink` removes the category link and its channel links after `confirm`. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.",
             usageArgs: ['<fluxerChannelId> | unlink | confirm'],
         },
         fluxer: {
             description:
-                'Bridges every text channel of the given Discord category to threads in the current Fluxer channel, immediately. `unlink <id>` removes the category link and its channel links after `confirm`.',
+                'Bridges every text channel of the given Discord category to threads in the current Fluxer channel, immediately. `unlink <id>` removes the category link and its channel links after `confirm`. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.',
             usageArgs: [
                 '<discordCategoryId> | unlink <discordCategoryId> | confirm',
             ],
@@ -163,14 +167,14 @@ const commandList: Command[] = [
         summary: 'Bridges a Discord voice channel with a Fluxer voice channel.',
         discord: {
             description:
-                "Bridges a Discord voice channel with a Fluxer voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
+                "Bridges a Discord voice channel with a Fluxer voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.",
             usageArgs: [
                 '<discordVoiceChannelId> <fluxerVoiceChannelId> | unlink <discordVoiceChannelId> | on <discordVoiceChannelId> | off <discordVoiceChannelId> | confirm',
             ],
         },
         fluxer: {
             description:
-                "Bridges a Fluxer voice channel with a Discord voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed.",
+                "Bridges a Fluxer voice channel with a Discord voice channel (both by ID), immediately; link once and the bot joins automatically whenever people are in both channels. `unlink <id>` removes a voice link after `confirm`, `on <id>` / `off <id>` enable or disable it, and with no arguments the server's voice links are listed. Any ID can also be given as a link (`https://discord.com/channels/...` or `https://fluxer.app/channels/...`) or a channel mention.",
             usageArgs: [
                 '<fluxerVoiceChannelId> <discordVoiceChannelId> | unlink <fluxerVoiceChannelId> | on <fluxerVoiceChannelId> | off <fluxerVoiceChannelId> | confirm',
             ],
@@ -223,12 +227,12 @@ const commandList: Command[] = [
         aliases: ['remind'],
         discord: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
             usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
         },
         fluxer: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
             usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
         },
     },

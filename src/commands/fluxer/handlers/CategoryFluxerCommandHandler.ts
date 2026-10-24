@@ -11,6 +11,7 @@ import CategorySyncService, {
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { getFluxerCommandUsage } from '../../commandList';
 import { COMMAND_PREFIX } from '../../../utils/env';
+import { parseChannelRef } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
@@ -217,7 +218,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
         // unlink <discordCategoryId>
         // ------------------------------------------------------------------
         if (sub === 'unlink') {
-            const discordCategoryId = args[1];
+            const discordCategoryId = parseChannelRef(args[1]) ?? args[1];
             if (!discordCategoryId) {
                 await message.reply(getFluxerCommandUsage('category'));
                 return;
@@ -259,7 +260,7 @@ export default class CategoryFluxerCommandHandler extends FluxerCommandHandler {
         // ------------------------------------------------------------------
         // <discordCategoryId>: bridge the category immediately
         // ------------------------------------------------------------------
-        const discordCategoryId = args[0];
+        const discordCategoryId = parseChannelRef(args[0]) ?? args[0];
         try {
             const { result } =
                 await this.categorySyncService.createCategoryLink(

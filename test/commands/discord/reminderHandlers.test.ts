@@ -297,15 +297,17 @@ describe('RemindMeDiscordCommandHandler', () => {
 
     it('checks the -channel permissions before keeping a date reminder pending', async () => {
         const { message, reply } = makeMessage({
-            content: '?remindme -channel <#200> tomorrow hi',
+            content: '?remindme -channel <#200000000000000000> tomorrow hi',
             member: makeMember([PermissionFlagsBits.ViewChannel]),
-            channels: { '200': makeChannel('200') },
+            channels: {
+                '200000000000000000': makeChannel('200000000000000000'),
+            },
         });
         await handler.handleCommand(
             message,
             'remindme',
             '-channel',
-            '<#200>',
+            '<#200000000000000000>',
             'tomorrow',
             'hi'
         );
@@ -355,27 +357,29 @@ describe('RemindMeDiscordCommandHandler', () => {
 
     it('requires View Channel and Send Messages in the target channel', async () => {
         const { message, reply } = makeMessage({
-            content: '?remindme -channel <#200> 10m hi',
+            content: '?remindme -channel <#200000000000000000> 10m hi',
             member: makeMember([PermissionFlagsBits.ViewChannel]),
-            channels: { '200': makeChannel('200') },
+            channels: {
+                '200000000000000000': makeChannel('200000000000000000'),
+            },
         });
         await handler.handleCommand(
             message,
             'remindme',
             '-channel',
-            '<#200>',
+            '<#200000000000000000>',
             '10m',
             'hi'
         );
         expect(replied(reply)).toEqual([
-            'You need View Channel and Send Messages in <#200> to set a reminder there.',
+            'You need View Channel and Send Messages in <#200000000000000000> to set a reminder there.',
         ]);
         expect(service.create).not.toHaveBeenCalled();
     });
 
     it('rejects unknown target channels', async () => {
         const { message, reply } = makeMessage({
-            content: '?remindme 10m hi -channel 999',
+            content: '?remindme 10m hi -channel 999999999999999999',
         });
         await handler.handleCommand(
             message,
@@ -383,21 +387,26 @@ describe('RemindMeDiscordCommandHandler', () => {
             '10m',
             'hi',
             '-channel',
-            '999'
+            '999999999999999999'
         );
         expect(replied(reply)).toEqual(['Channel not found in this server.']);
     });
 
     it('creates a reminder in another channel', async () => {
-        const reminder = makeReminder({ id: 8, channelId: '200' });
+        const reminder = makeReminder({
+            id: 8,
+            channelId: '200000000000000000',
+        });
         service.create.mockResolvedValue({ ok: true, reminder });
         const { message, reply } = makeMessage({
-            content: '?remindme 10m hi -channel <#200>',
+            content: '?remindme 10m hi -channel <#200000000000000000>',
             member: makeMember([
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.SendMessages,
             ]),
-            channels: { '200': makeChannel('200') },
+            channels: {
+                '200000000000000000': makeChannel('200000000000000000'),
+            },
         });
         await handler.handleCommand(
             message,
@@ -405,12 +414,15 @@ describe('RemindMeDiscordCommandHandler', () => {
             '10m',
             'hi',
             '-channel',
-            '<#200>'
+            '<#200000000000000000>'
         );
         expect(service.create).toHaveBeenCalledWith(
-            expect.objectContaining({ channelId: '200', message: 'hi' })
+            expect.objectContaining({
+                channelId: '200000000000000000',
+                message: 'hi',
+            })
         );
-        expect(replied(reply)[0]).toContain(' in <#200>');
+        expect(replied(reply)[0]).toContain(' in <#200000000000000000>');
     });
 });
 

@@ -47,7 +47,7 @@ On Discord every command is also available as a slash command `/<command>` (unde
 
 ### Fluxer-only commands
 
-By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `directory`, `pins`, `category`, `voice`, `expressions`, `history`) and the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`), with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
+By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) and the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`), with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
 
 ### Automatic thread bridging
 
@@ -111,17 +111,29 @@ Thread bridging ships as three migrations. `00003-add-thread-links` adds `channe
 
 ## Threads directory
 
-For channels that are mostly a mass of threads, the bot can keep a **threads directory**: one embed in the channel that lists its threads, oldest first, one `<#thread> — description` line each. The message is edited in place whenever a description or the title changes, and a moment after a thread of the channel is created or deleted. Directories work on Discord and Fluxer independently: a directory posted on Fluxer lists the Fluxer threads, one posted on Discord lists the Discord threads. Bot messages are not bridged, so each side posts its own.
+For channels that are mostly a mass of threads, the bot can keep a **threads directory** on Fluxer: a message in the channel that lists its threads, oldest first, one `description: #thread - @role` line each (the description and the role are optional). When the list no longer fits in one message (embed character limits), it is split cleanly at line boundaries over several consecutive messages. The directory is edited in place whenever an entry or the title changes, and a moment after a thread of the channel is created or deleted. Role mentions in the directory never ping anyone. The feature is Fluxer-only; on Discord the command gets the usual "come to Fluxer" reply.
 
-All of it needs **Manage Channels** and is run in the channel (or inside one of its threads). `thread` is a channel mention or an ID and may be left out inside the thread itself.
+All of it needs **Manage Channels** and is run in the channel (or inside one of its threads). A `thread` or `channel` is a mention, an ID or a link, and the thread may be left out inside the thread itself.
 
-- `!b directory` — shows where the directory is and every thread with its description (hidden threads are marked 🙈).
+- `!b directory` — shows where the directory is and every entry (hidden ones are marked 🙈, added ones ➕).
 - `!b directory post [title]` — posts the directory, replacing the previous one. Aliases of `directory`: `catalog`, `threaddir`.
-- `!b directory refresh` (or `update`) — re-renders the existing message.
-- `!b directory describe [thread] <description>` — sets a thread's description; without a description it is cleared. Line breaks are kept.
-- `!b directory hide [thread]` / `!b directory show [thread]` — leaves a thread out of, or back in, the list.
+- `!b directory refresh` (or `update`) — re-renders the existing messages.
+- `!b directory describe [thread] <description>` — sets an entry's description; without a description it is cleared.
+- `!b directory hide [thread]` / `!b directory show [thread]` — leaves an entry out of, or back in, the list.
+- `!b directory add <channel> [description]` — lists a channel or thread that lives outside the directory channel. `!b directory unlist <channel>` (alias `drop`) removes it again.
+- `!b directory role [thread] <role | none>` — links a pingable LFG role (mention, ID or name) to an entry, or clears it with `none`. Also needs **Manage Roles**. Roles with moderator or admin permissions, managed roles and @everyone are refused.
+- `!b directory import <message link | message ID | pasted text>` — bulk-imports a directory that was kept by hand, from a message or from text pasted after the command. Each line with a thread link or mention (e.g. `***[The Data Mine](thread link)*** - Computer Tech`, or the bot's own format) sets that thread's description and role; links to channels outside the directory channel are added, and lines without a link are matched to a thread of the channel by name. Lines that match nothing are reported.
 - `!b directory title <title>` — renames the directory.
-- `!b directory remove` — deletes the directory message; descriptions are kept for the next `post`.
+- `!b directory remove` — deletes the directory messages; entries are kept for the next `post`.
+
+### LFG roles
+
+Anyone can give themselves the roles linked with `directory role`:
+
+- `!b lfg` (or `lfg list`) — lists the server's LFG roles and their threads, with a ✅ next to the ones you have. Aliases: `lfgrole`, `lfgroles`.
+- `!b lfg <role | thread>` — gives you the role, or removes it if you already have it. The role can be a mention, an ID or its name, or the thread it is linked to (mention, ID or link).
+
+The bot needs **Manage Roles** on Fluxer, with its own role above the LFG roles.
 
 ## Reactions
 
@@ -511,7 +523,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `claudeRequests.notifyPollMs` | `120000` | How often (ms, at least 30000) tracked issues are checked for being closed. |
 | `commands.triggerPrefixes` | `["!", "/"]` | Prefixes that run any command without the bot prefix (`!help`, `/link 123`); `/` gives Fluxer typed slash commands. Only registered command names match. `!b help` always works; an empty list disables the shortcuts. |
 | `commands.slashCommands` | `true` | Register every command as a Discord slash command (`/link args:123`) on startup. Needs the `applications.commands` invite scope; Fluxer has no bot slash commands (use the `/` trigger prefix there). |
-| `commands.fluxerOnly` | `true` | Keep commands to Fluxer. Discord only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `directory`, `pins`, `category`, `voice`, `expressions`, `history`) and the YAGPDB ones (`remindme`, `reminder`, `timezone`, `clean`), aliases included; any other command there gets a teasing "come to Fluxer" reply. See [Fluxer-only commands](#fluxer-only-commands). |
+| `commands.fluxerOnly` | `true` | Keep commands to Fluxer. Discord only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) and the YAGPDB ones (`remindme`, `reminder`, `timezone`, `clean`), aliases included; any other command there gets a teasing "come to Fluxer" reply. See [Fluxer-only commands](#fluxer-only-commands). |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |

@@ -17,7 +17,11 @@ import * as claudeRequests from '../../src/db/migrations/00011-claude-requests';
 import * as userTimezones from '../../src/db/migrations/00012-user-timezones';
 import * as claudeRequestNotices from '../../src/db/migrations/00013-claude-request-notices';
 import * as threadDirectories from '../../src/db/migrations/00014-thread-directories';
-import { MessageLinkModel } from '../../src/db/models';
+import * as threadDirectoryRoles from '../../src/db/migrations/00015-thread-directory-roles';
+import {
+    MessageLinkModel,
+    ThreadDirectoryEntryModel,
+} from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeClaudeRequestNoticeRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
@@ -99,6 +103,11 @@ const umzug = new Umzug({
             name: '00014-thread-directories.js',
             up: threadDirectories.up,
             down: threadDirectories.down,
+        },
+        {
+            name: '00015-thread-directory-roles.js',
+            up: threadDirectoryRoles.up,
+            down: threadDirectoryRoles.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -1629,9 +1638,14 @@ describe('migration 00013-claude-request-notices', () => {
 });
 
 describe('migration 00014-thread-directories', () => {
-    it('adds both tables with their indexes, works with the repository, and rolls back cleanly', async () => {
+    it('adds both tables with their indexes and rolls back cleanly', async () => {
         await umzug.up();
+        // Inspect the 00014 schema itself; 00015 changes the entry indexes.
+        await umzug.down({ to: '00015-thread-directory-roles.js' });
         expect(await executed()).toContain('00014-thread-directories.js');
+        expect(await executed()).not.toContain(
+            '00015-thread-directory-roles.js'
+        );
         expect(await qi.tableExists('thread_directories')).toBe(true);
         expect(await qi.tableExists('thread_directory_entries')).toBe(true);
 
@@ -1674,84 +1688,340 @@ describe('migration 00014-thread-directories', () => {
             )
         ).toMatchObject({ unique: false });
 
-        const repo = new SequelizeThreadDirectoryRepository();
-        expect(await repo.findDirectory('discord', 'c1')).toBeNull();
-        const dir = await repo.saveDirectory({
-            platform: 'discord',
-            guildId: 'g1',
-            channelId: 'c1',
-            messageId: 'm1',
-            title: 'Threads',
-        });
-        expect(dir).toMatchObject({ messageId: 'm1', title: 'Threads' });
-        expect(dir.createdAt).toBeInstanceOf(Date);
-        const replaced = await repo.saveDirectory({
-            platform: 'discord',
-            guildId: 'g1',
-            channelId: 'c1',
-            messageId: 'm2',
-            title: 'Index',
-        });
-        expect(replaced.id).toBe(dir.id);
-        expect((await repo.findDirectory('discord', 'c1'))?.messageId).toBe(
-            'm2'
-        );
-        expect(await repo.findDirectory('fluxer', 'c1')).toBeNull();
-
-        const fresh = await repo.saveEntry({
-            platform: 'discord',
-            channelId: 'c1',
-            threadId: 't1',
-        });
-        expect(fresh).toMatchObject({ description: null, hidden: false });
-        await repo.saveEntry({
-            platform: 'discord',
-            channelId: 'c1',
-            threadId: 't1',
-            description: 'About cats',
-        });
-        const hiddenOnly = await repo.saveEntry({
-            platform: 'discord',
-            channelId: 'c1',
-            threadId: 't1',
-            hidden: true,
-        });
-        expect(hiddenOnly).toMatchObject({
-            description: 'About cats',
-            hidden: true,
-        });
-        const cleared = await repo.saveEntry({
-            platform: 'discord',
-            channelId: 'c1',
-            threadId: 't1',
-            description: null,
-        });
-        expect(cleared).toMatchObject({ description: null, hidden: true });
-        await repo.saveEntry({
-            platform: 'discord',
-            channelId: 'c1',
-            threadId: 't2',
-        });
-        const listed = await repo.listEntries('discord', 'c1');
-        expect(listed.map((e) => e.threadId)).toEqual(['t1', 't2']);
-        expect(listed[0].hidden).toBe(true);
-        expect(listed[1].hidden).toBe(false);
-
-        // Entries outlive the directory.
-        expect(await repo.deleteDirectory('discord', 'c1')).toBe(true);
-        expect(await repo.deleteDirectory('discord', 'c1')).toBe(false);
-        expect(await repo.listEntries('discord', 'c1')).toHaveLength(2);
-        await repo.deleteEntry('discord', 't1');
-        expect(await repo.listEntries('discord', 'c1')).toHaveLength(1);
-
         await umzug.down({ to: '00014-thread-directories.js' });
         expect(await executed()).not.toContain('00014-thread-directories.js');
         expect(await executed()).toContain('00013-claude-request-notices.js');
         expect(await qi.tableExists('thread_directories')).toBe(false);
         expect(await qi.tableExists('thread_directory_entries')).toBe(false);
 
-        await umzug.up();
+        await umzug.up({ to: '00014-thread-directories.js' });
         expect(await executed()).toContain('00014-thread-directories.js');
-        expect(await repo.findDirectory('discord', 'c1')).toBeNull();
+        expect(await qi.tableExists('thread_directories')).toBe(true);
+    });
+});
+
+describe('migration 00015-thread-directory-roles', () => {
+    it('adds message lists, roles and added entries, backfills guilds, moves the unique index, and rolls back cleanly', async () => {
+        await umzug.up();
+        await umzug.down({ to: '00015-thread-directory-roles.js' });
+        expect(await executed()).not.toContain(
+            '00015-thread-directory-roles.js'
+        );
+
+        // 00014-era rows: one directory, entries with and without one.
+        await qi.bulkInsert('thread_directories', [
+            {
+                platform: 'fluxer',
+                guildId: 'g1',
+                channelId: 'c1',
+                messageId: 'm1',
+                title: 'Threads',
+                createdAt: now,
+                updatedAt: now,
+            },
+        ]);
+        await qi.bulkInsert('thread_directory_entries', [
+            {
+                platform: 'fluxer',
+                channelId: 'c1',
+                threadId: 't1',
+                description: 'Cats',
+                hidden: false,
+                createdAt: now,
+                updatedAt: now,
+            },
+            {
+                platform: 'fluxer',
+                channelId: 'c9',
+                threadId: 't9',
+                description: null,
+                hidden: true,
+                createdAt: now,
+                updatedAt: now,
+            },
+            {
+                platform: 'discord',
+                channelId: 'c1',
+                threadId: 't2',
+                description: null,
+                hidden: false,
+                createdAt: now,
+                updatedAt: now,
+            },
+        ]);
+
+        await umzug.up();
+        expect(await executed()).toContain('00015-thread-directory-roles.js');
+
+        const dirCols = await qi.describeTable('thread_directories');
+        expect(dirCols.extraMessageIds).toMatchObject({ allowNull: false });
+        const entryCols = await qi.describeTable('thread_directory_entries');
+        expect(entryCols.guildId).toMatchObject({ allowNull: true });
+        expect(entryCols.roleId).toMatchObject({ allowNull: true });
+        expect(entryCols.added).toMatchObject({ allowNull: false });
+
+        const entryIndexes = await showIndexes('thread_directory_entries');
+        expect(
+            entryIndexes.find(
+                (i) => i.name === 'thread_directory_entries_platform_thread_id'
+            )
+        ).toBeUndefined();
+        expect(
+            entryIndexes.find(
+                (i) =>
+                    i.name ===
+                    'thread_directory_entries_platform_channel_thread'
+            )
+        ).toMatchObject({
+            unique: true,
+            fields: [
+                { attribute: 'platform' },
+                { attribute: 'channelId' },
+                { attribute: 'threadId' },
+            ],
+        });
+        expect(
+            entryIndexes.find(
+                (i) => i.name === 'thread_directory_entries_platform_guild_id'
+            )
+        ).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'platform' }, { attribute: 'guildId' }],
+        });
+
+        // Backfill: only entries whose directory exists get its guild.
+        const repo = new SequelizeThreadDirectoryRepository();
+        expect(await repo.listEntries('fluxer', 'c1')).toMatchObject([
+            {
+                threadId: 't1',
+                guildId: 'g1',
+                description: 'Cats',
+                roleId: null,
+                added: false,
+            },
+        ]);
+        expect((await repo.listEntries('fluxer', 'c9'))[0]).toMatchObject({
+            guildId: null,
+            hidden: true,
+            added: false,
+        });
+        expect((await repo.listEntries('discord', 'c1'))[0].guildId).toBeNull();
+
+        // Directories: existing rows read as one message; lists round-trip.
+        expect(await repo.findDirectory('fluxer', 'c1')).toMatchObject({
+            messageId: 'm1',
+            messageIds: ['m1'],
+        });
+        const multi = await repo.saveDirectory({
+            platform: 'fluxer',
+            guildId: 'g1',
+            channelId: 'c1',
+            messageIds: ['m2', 'm3', 'm4'],
+            title: 'Threads',
+        });
+        expect(multi).toMatchObject({
+            messageId: 'm2',
+            messageIds: ['m2', 'm3', 'm4'],
+        });
+        expect(multi).not.toHaveProperty('extraMessageIds');
+        expect((await repo.findDirectory('fluxer', 'c1'))?.messageIds).toEqual([
+            'm2',
+            'm3',
+            'm4',
+        ]);
+        const created = await repo.saveDirectory({
+            platform: 'fluxer',
+            guildId: 'g1',
+            channelId: 'c2',
+            messageIds: ['n1'],
+            title: 'Other',
+        });
+        expect(created.messageIds).toEqual(['n1']);
+        await expect(
+            repo.saveDirectory({
+                platform: 'fluxer',
+                guildId: 'g1',
+                channelId: 'c3',
+                messageIds: [],
+                title: 'Empty',
+            })
+        ).rejects.toThrow();
+
+        // Entries: one thread may be listed by several directories.
+        const added = await repo.saveEntry({
+            platform: 'fluxer',
+            guildId: 'g1',
+            channelId: 'c1',
+            threadId: 't5',
+            added: true,
+            roleId: 'r1',
+        });
+        expect(added).toMatchObject({
+            guildId: 'g1',
+            description: null,
+            hidden: false,
+            roleId: 'r1',
+            added: true,
+        });
+        await repo.saveEntry({
+            platform: 'fluxer',
+            guildId: 'g1',
+            channelId: 'c2',
+            threadId: 't5',
+            added: true,
+        });
+        await expect(
+            ThreadDirectoryEntryModel.create({
+                platform: 'fluxer',
+                channelId: 'c1',
+                threadId: 't5',
+            })
+        ).rejects.toThrow();
+
+        // Omitted fields keep their value; null clears.
+        const described = await repo.saveEntry({
+            platform: 'fluxer',
+            channelId: 'c1',
+            threadId: 't5',
+            description: 'Shared',
+        });
+        expect(described).toMatchObject({
+            guildId: 'g1',
+            roleId: 'r1',
+            added: true,
+            description: 'Shared',
+        });
+        await repo.saveEntry({
+            platform: 'fluxer',
+            guildId: 'g1',
+            channelId: 'c1',
+            threadId: 't1',
+            roleId: 'r2',
+        });
+        expect(
+            (await repo.listRoleEntries('fluxer', 'g1')).map((e) => [
+                e.threadId,
+                e.roleId,
+            ])
+        ).toEqual([
+            ['t1', 'r2'],
+            ['t5', 'r1'],
+        ]);
+        expect(await repo.listRoleEntries('fluxer', 'g2')).toEqual([]);
+        const cleared = await repo.saveEntry({
+            platform: 'fluxer',
+            channelId: 'c1',
+            threadId: 't5',
+            roleId: null,
+        });
+        expect(cleared.roleId).toBeNull();
+
+        expect(
+            (await repo.deleteEntriesForThread('fluxer', 't5')).sort()
+        ).toEqual(['c1', 'c2']);
+        expect(await repo.deleteEntriesForThread('fluxer', 't5')).toEqual([]);
+        expect(await repo.deleteEntry('fluxer', 'c9', 't9')).toBe(true);
+        expect(await repo.deleteEntry('fluxer', 'c9', 't9')).toBe(false);
+
+        // Rows the old schema cannot hold: an added entry, and one thread
+        // in two directories (the older row is kept).
+        await repo.saveEntry({
+            platform: 'fluxer',
+            channelId: 'c2',
+            threadId: 't7',
+            added: true,
+        });
+        const kept = await repo.saveEntry({
+            platform: 'fluxer',
+            channelId: 'c1',
+            threadId: 't6',
+            description: 'first',
+        });
+        await repo.saveEntry({
+            platform: 'fluxer',
+            channelId: 'c2',
+            threadId: 't6',
+            description: 'second',
+        });
+
+        await umzug.down({ to: '00015-thread-directory-roles.js' });
+        expect(await executed()).not.toContain(
+            '00015-thread-directory-roles.js'
+        );
+        expect(await executed()).toContain('00014-thread-directories.js');
+
+        expect(await qi.describeTable('thread_directories')).not.toHaveProperty(
+            'extraMessageIds'
+        );
+        const oldCols = await qi.describeTable('thread_directory_entries');
+        for (const c of ['guildId', 'roleId', 'added']) {
+            expect(oldCols).not.toHaveProperty(c);
+        }
+        const rows = await select<{
+            id: number;
+            platform: string;
+            threadId: string;
+            description: string | null;
+        }>(
+            'SELECT id, platform, "threadId", description FROM thread_directory_entries ORDER BY id'
+        );
+        expect(rows.map((r) => [r.platform, r.threadId])).toEqual([
+            ['fluxer', 't1'],
+            ['discord', 't2'],
+            ['fluxer', 't6'],
+        ]);
+        expect(rows[2]).toMatchObject({ id: kept.id, description: 'first' });
+        const dirs = await select<{ channelId: string; messageId: string }>(
+            'SELECT "channelId", "messageId" FROM thread_directories ORDER BY id'
+        );
+        expect(dirs).toEqual([
+            { channelId: 'c1', messageId: 'm2' },
+            { channelId: 'c2', messageId: 'n1' },
+        ]);
+
+        const oldDirIndexes = await showIndexes('thread_directories');
+        expect(
+            oldDirIndexes.find(
+                (i) => i.name === 'thread_directories_platform_channel_id'
+            )
+        ).toMatchObject({ unique: true });
+        const oldEntryIndexes = await showIndexes('thread_directory_entries');
+        // The SQLite table rebuild must not leave single-column UNIQUE
+        // constraints behind (e.g. on platform or channelId alone).
+        for (const index of [...oldDirIndexes, ...oldEntryIndexes]) {
+            if (index.unique) expect(index.fields.length).toBe(2);
+        }
+        expect(oldEntryIndexes.map((i) => i.name).sort()).toEqual(
+            expect.arrayContaining([
+                'thread_directory_entries_platform_channel_id',
+                'thread_directory_entries_platform_thread_id',
+            ])
+        );
+        expect(
+            oldEntryIndexes.find(
+                (i) => i.name === 'thread_directory_entries_platform_thread_id'
+            )
+        ).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'platform' }, { attribute: 'threadId' }],
+        });
+        expect(
+            oldEntryIndexes.some((i) =>
+                [
+                    'thread_directory_entries_platform_channel_thread',
+                    'thread_directory_entries_platform_guild_id',
+                ].includes(i.name)
+            )
+        ).toBe(false);
+
+        await umzug.up();
+        expect(await executed()).toContain('00015-thread-directory-roles.js');
+        expect(await repo.findDirectory('fluxer', 'c1')).toMatchObject({
+            messageIds: ['m2'],
+        });
+        expect((await repo.listEntries('fluxer', 'c1'))[0]).toMatchObject({
+            threadId: 't1',
+            guildId: 'g1',
+        });
     });
 });

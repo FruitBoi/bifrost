@@ -8,6 +8,7 @@ import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
 import { COMMAND_PREFIX } from '../../../utils/env';
+import { parseGuildOrChannelRef } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { EmbedColors } from '../../../utils/embeds';
 
@@ -68,7 +69,7 @@ export default class LinkDiscordCommandHandler extends DiscordCommandHandler {
             return;
         }
 
-        const id = args[0];
+        const id = parseGuildOrChannelRef(args[0]) ?? args[0];
         if (!id) {
             await this.replyError(
                 message,

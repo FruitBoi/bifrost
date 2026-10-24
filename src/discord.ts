@@ -21,7 +21,6 @@ import { fluxerLocationId } from './db/entities/ChannelLink';
 import LinkDiscordCommandHandler from './commands/discord/handlers/LinkDiscordCommandHandler';
 import UnlinkDiscordCommandHandler from './commands/discord/handlers/UnlinkDiscordCommandHandler';
 import ListDiscordCommandHandler from './commands/discord/handlers/ListDiscordCommandHandler';
-import DirectoryDiscordCommandHandler from './commands/discord/handlers/DirectoryDiscordCommandHandler';
 import ThreadsDiscordCommandHandler from './commands/discord/handlers/ThreadsDiscordCommandHandler';
 import PinsDiscordCommandHandler from './commands/discord/handlers/PinsDiscordCommandHandler';
 import PinBridgeService from './services/pinBridge/PinBridgeService';
@@ -47,8 +46,6 @@ import FluxerStatsService from './services/statsService/FluxerStatsService';
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscordCommandHandler';
 import { DbStatsService } from './services/DbStatsService';
-import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
-import DiscordThreadDirectoryAdapter from './services/threadDirectory/DiscordThreadDirectoryAdapter';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
@@ -102,7 +99,6 @@ const startDiscordClient = async ({
     discordEntityResolver,
     fluxerEntityResolver,
     threadSyncService,
-    threadDirectoryService,
     categorySyncService,
     expressionTransferService,
     metricsService,
@@ -127,7 +123,6 @@ const startDiscordClient = async ({
     discordEntityResolver: DiscordEntityResolver;
     fluxerEntityResolver: FluxerEntityResolver;
     threadSyncService: ThreadSyncService;
-    threadDirectoryService: ThreadDirectoryService;
     categorySyncService: CategorySyncService;
     expressionTransferService: ExpressionTransferService;
     metricsService?: MetricsService;
@@ -180,9 +175,6 @@ const startDiscordClient = async ({
     healthCheckService.setDiscordClient(client);
     discordEntityResolver.setDiscordClient(client);
     threadSyncService.setDiscordClient(client);
-    threadDirectoryService.registerAdapter(
-        new DiscordThreadDirectoryAdapter(client)
-    );
     categorySyncService.setDiscordClient(client);
     discordStatsService.setClient(client);
 
@@ -252,13 +244,6 @@ const startDiscordClient = async ({
         'threads',
         new ThreadsDiscordCommandHandler(client, linkService)
     );
-    const directoryHandler = new DirectoryDiscordCommandHandler(
-        client,
-        threadDirectoryService
-    );
-    for (const name of ['directory', 'catalog', 'threaddir']) {
-        commandRegistry.registerCommand(name, directoryHandler);
-    }
     commandRegistry.registerCommand(
         'pins',
         new PinsDiscordCommandHandler(client, linkService, pinBridgeService)
@@ -487,7 +472,6 @@ const startDiscordClient = async ({
         // `newlyCreated` is false when the bot merely gained access to an
         // existing thread; those are handled lazily on their first message.
         if (!newlyCreated) return;
-        threadDirectoryService.handleThreadCreated('discord', thread.parentId);
         if (isFluxerApiBlocked()) return;
         try {
             await threadSyncService.resolveDiscordThread(thread, 'auto');
@@ -509,11 +493,6 @@ const startDiscordClient = async ({
     });
 
     client.on(Events.ThreadDelete, async (thread) => {
-        threadDirectoryService.handleThreadDeleted(
-            'discord',
-            thread.parentId,
-            thread.id
-        );
         try {
             await threadSyncService.handleDiscordThreadDelete(thread.id);
         } catch (error) {

@@ -6,6 +6,7 @@
  * issue #27 the time may also be a date and/or time of day (`Oct 26 20:15`,
  * `Monday 7pm`, `tomorrow`), parsed by {@link parseReminderDate}.
  */
+import { parseChannelRef } from '../../utils/channelRef';
 import { parseReminderDate, ReminderDateSpec } from './reminderDate';
 
 const SECOND_MS = 1000;
@@ -184,10 +185,9 @@ export function parseRemindMeArgs(raw: string): RemindMeArgs {
     return { ok: true, when, message, channelRef };
 }
 
-/** `<#123>` or a bare `123` → `'123'`; a name or anything else → null. */
+/** `<#123>`, a bare `123` or a channel link → `'123'`; a name or anything else → null. */
 export function extractChannelId(ref: string): string | null {
-    const match = /^(?:<#(\d+)>|(\d+))$/.exec(ref.trim());
-    return match ? (match[1] ?? match[2]) : null;
+    return parseChannelRef(ref);
 }
 
 export interface ReminderDeleteArgs {

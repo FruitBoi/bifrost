@@ -11,6 +11,7 @@ import LinkProvisioner, {
 import DiscordEntityResolver from '../../../services/entityResolver/DiscordEntityResolver';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { COMMAND_PREFIX } from '../../../utils/env';
+import { parseGuildOrChannelRef } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { EmbedColors } from '../../../utils/embeds';
 
@@ -71,7 +72,7 @@ export default class LinkFluxerCommandHandler extends FluxerCommandHandler {
             return;
         }
 
-        const id = args[0];
+        const id = parseGuildOrChannelRef(args[0]) ?? args[0];
         if (!id) {
             await this.replyError(
                 message,

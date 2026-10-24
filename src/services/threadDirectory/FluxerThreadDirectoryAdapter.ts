@@ -9,7 +9,9 @@ import {
 import { EmbedColors } from '../../utils/embeds';
 import logger from '../../utils/logging/logger';
 import {
-    DirectoryRender,
+    DirectoryChannel,
+    DirectoryPage,
+    DirectoryRole,
     DirectoryThread,
     ThreadDirectoryError,
     ThreadDirectoryPlatformAdapter,
@@ -40,18 +42,57 @@ function isGoneError(err: unknown): boolean {
     );
 }
 
-/** Embeds of a directory: title on the first, timestamp on the last. */
+/** The bot may not do that (missing permission or role hierarchy). */
+function isForbiddenError(err: unknown): boolean {
+    if (typeof err !== 'object' || err === null) return false;
+    const { code, statusCode, status } = err as {
+        code?: unknown;
+        statusCode?: unknown;
+        status?: unknown;
+    };
+    return (
+        statusCode === 403 ||
+        status === 403 ||
+        code === 'MISSING_PERMISSIONS' ||
+        code === 'MISSING_ACCESS' ||
+        code === 'FORBIDDEN' ||
+        code === 'ACCESS_DENIED' ||
+        code === 50013 ||
+        code === 50001
+    );
+}
+
+/** Embeds of one directory message: its title on the first, its timestamp on the last. */
 export function buildFluxerDirectoryEmbeds(
-    render: DirectoryRender
+    page: DirectoryPage
 ): EmbedBuilder[] {
-    return render.descriptions.map((description, i) => {
+    return page.descriptions.map((description, i) => {
         const embed = new EmbedBuilder()
             .setColor(EmbedColors.Info)
             .setDescription(description);
-        if (i === 0) embed.setTitle(render.title);
-        if (i === render.descriptions.length - 1) embed.setTimestamp();
+        if (i === 0 && page.title) embed.setTitle(page.title);
+        if (i === page.descriptions.length - 1 && page.timestamp) {
+            embed.setTimestamp();
+        }
         return embed;
     });
+}
+
+/** Content plus embed titles and descriptions of a message, newline-joined. */
+export function fluxerMessageText(message: {
+    content?: string | null;
+    embeds?: ReadonlyArray<{
+        title?: string | null;
+        description?: string | null;
+    }> | null;
+}): string {
+    const parts: string[] = [];
+    if (message.content) parts.push(message.content);
+    for (const embed of message.embeds ?? []) {
+        if (embed.title) parts.push(embed.title);
+        if (embed.description) parts.push(embed.description);
+    }
+    return parts.join('\n');
 }
 
 /** Fluxer side of the threads directory. */
@@ -104,22 +145,22 @@ export default class FluxerThreadDirectoryAdapter implements ThreadDirectoryPlat
         return [...threads.values()];
     }
 
-    async sendDirectory(
+    async sendDirectoryMessage(
         channelId: string,
-        render: DirectoryRender
+        page: DirectoryPage
     ): Promise<string> {
         const channel = await this.fetchDirectoryChannel(channelId);
         const message = await channel.send({
-            embeds: buildFluxerDirectoryEmbeds(render),
+            embeds: buildFluxerDirectoryEmbeds(page),
             allowedMentions: { parse: [] },
         });
         return message.id;
     }
 
-    async editDirectory(
+    async editDirectoryMessage(
         channelId: string,
         messageId: string,
-        render: DirectoryRender
+        page: DirectoryPage
     ): Promise<boolean> {
         try {
             const message = await this.client.channels.fetchMessage(
@@ -127,7 +168,7 @@ export default class FluxerThreadDirectoryAdapter implements ThreadDirectoryPlat
                 messageId
             );
             await message.edit({
-                embeds: buildFluxerDirectoryEmbeds(render),
+                embeds: buildFluxerDirectoryEmbeds(page),
                 allowedMentions: { parse: [] },
             });
             return true;
@@ -137,7 +178,10 @@ export default class FluxerThreadDirectoryAdapter implements ThreadDirectoryPlat
         }
     }
 
-    async deleteDirectory(channelId: string, messageId: string): Promise<void> {
+    async deleteDirectoryMessage(
+        channelId: string,
+        messageId: string
+    ): Promise<void> {
         try {
             const message = await this.client.channels.fetchMessage(
                 channelId,
@@ -152,6 +196,97 @@ export default class FluxerThreadDirectoryAdapter implements ThreadDirectoryPlat
 
     messageUrl(guildId: string, channelId: string, messageId: string): string {
         return `https://fluxer.app/channels/${guildId}/${channelId}/${messageId}`;
+    }
+
+    async resolveChannel(
+        guildId: string,
+        id: string
+    ): Promise<DirectoryChannel | null> {
+        try {
+            const channel = await this.client.channels.fetch(id);
+            if (!channel || !channel.isGuild() || channel.guildId !== guildId)
+                return null;
+            return {
+                id: channel.id,
+                name: channel.name ?? channel.id,
+                parentId: channel.parentId ?? null,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    async listRoles(guildId: string): Promise<DirectoryRole[]> {
+        const guild = await this.client.guilds.fetch(guildId);
+        const roles = await guild.fetchRoles();
+        // Fluxer has no integration-managed roles.
+        return roles.map((role) => ({
+            id: role.id,
+            name: role.name,
+            managed: false,
+            permissions: role.permissions.bitfield,
+        }));
+    }
+
+    async memberRoleIds(guildId: string, userId: string): Promise<string[]> {
+        const member = await this.fetchMember(guildId, userId);
+        return [...member.roles.roleIds];
+    }
+
+    async addMemberRole(
+        guildId: string,
+        userId: string,
+        roleId: string
+    ): Promise<void> {
+        const member = await this.fetchMember(guildId, userId);
+        try {
+            await member.roles.add(roleId);
+        } catch (err) {
+            throw this.roleError(err);
+        }
+    }
+
+    async removeMemberRole(
+        guildId: string,
+        userId: string,
+        roleId: string
+    ): Promise<void> {
+        const member = await this.fetchMember(guildId, userId);
+        try {
+            await member.roles.remove(roleId);
+        } catch (err) {
+            throw this.roleError(err);
+        }
+    }
+
+    async fetchMessageText(
+        channelId: string,
+        messageId: string
+    ): Promise<string | null> {
+        try {
+            const message = await this.client.channels.fetchMessage(
+                channelId,
+                messageId
+            );
+            return fluxerMessageText(message);
+        } catch (err) {
+            if (isGoneError(err) || isForbiddenError(err)) return null;
+            throw err;
+        }
+    }
+
+    private async fetchMember(guildId: string, userId: string) {
+        const guild = await this.client.guilds.fetch(guildId);
+        return guild.fetchMember(userId);
+    }
+
+    /** 'role_forbidden' for permission errors; anything else unchanged. */
+    private roleError(err: unknown): unknown {
+        if (!isForbiddenError(err)) return err;
+        return new ThreadDirectoryError(
+            'role_forbidden',
+            'I am not allowed to manage that role (missing Manage Roles, or the role is above mine).'
+        );
     }
 
     /** The channel as a text or announcement channel, else 'unsupported_channel'. */

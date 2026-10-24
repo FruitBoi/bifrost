@@ -13,6 +13,7 @@ import DiscordCommandHandler, {
 } from '../DiscordCommandHandler';
 import { getDiscordCommandUsage } from '../../../commands/commandList';
 import { COMMAND_PREFIX } from '../../../utils/env';
+import { parseChannelRef } from '../../../utils/channelRef';
 import logger from '../../../utils/logging/logger';
 import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
@@ -153,7 +154,11 @@ export default class CategoryDiscordCommandHandler extends DiscordCommandHandler
             return;
         }
 
-        await this.handleCreate(message, categoryId, args[0]);
+        await this.handleCreate(
+            message,
+            categoryId,
+            parseChannelRef(args[0]) ?? args[0]
+        );
     }
 
     private async handleShow(

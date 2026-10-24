@@ -8,7 +8,8 @@ export interface SaveThreadDirectoryData {
     platform: ThreadDirectoryPlatform;
     guildId: string;
     channelId: string;
-    messageId: string;
+    /** Every directory message, in order; must not be empty. */
+    messageIds: string[];
     title: string;
 }
 
@@ -17,9 +18,15 @@ export interface SaveThreadDirectoryEntryData {
     channelId: string;
     threadId: string;
     /** Omitted: keep the stored value (null for a new row). */
+    guildId?: string | null;
+    /** Omitted: keep the stored value (null for a new row). */
     description?: string | null;
     /** Omitted: keep the stored value (false for a new row). */
     hidden?: boolean;
+    /** Omitted: keep the stored value (null for a new row). */
+    roleId?: string | null;
+    /** Omitted: keep the stored value (false for a new row). */
+    added?: boolean;
 }
 
 export interface ThreadDirectoryRepository {
@@ -38,20 +45,36 @@ export interface ThreadDirectoryRepository {
         channelId: string
     ): Promise<boolean>;
 
-    /** Every entry stored for threads of `channelId` on `platform`. */
+    /** Every entry of the directory channel `channelId` on `platform`. */
     listEntries(
         platform: ThreadDirectoryPlatform,
         channelId: string
     ): Promise<ThreadDirectoryEntry[]>;
 
-    /** Creates or updates the entry of (platform, threadId). */
+    /** Every entry of the guild that has a role linked, in insertion order. */
+    listRoleEntries(
+        platform: ThreadDirectoryPlatform,
+        guildId: string
+    ): Promise<ThreadDirectoryEntry[]>;
+
+    /** Creates or updates the entry of (platform, channelId, threadId). */
     saveEntry(
         data: SaveThreadDirectoryEntryData
     ): Promise<ThreadDirectoryEntry>;
 
-    /** Removes the entry of (platform, threadId), e.g. when the thread is deleted. */
+    /** Removes the entry of (platform, channelId, threadId). True when one existed. */
     deleteEntry(
         platform: ThreadDirectoryPlatform,
+        channelId: string,
         threadId: string
-    ): Promise<void>;
+    ): Promise<boolean>;
+
+    /**
+     * Removes every entry of `threadId` (in any directory), e.g. when the
+     * thread is deleted. Returns the directory channels that had one.
+     */
+    deleteEntriesForThread(
+        platform: ThreadDirectoryPlatform,
+        threadId: string
+    ): Promise<string[]>;
 }

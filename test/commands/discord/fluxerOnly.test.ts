@@ -63,6 +63,12 @@ describe('discordAllowedCommandNames', () => {
         expect(discordAllowedCommandNames(registry).size).toBe(0);
     });
 
+    it('leaves the threads directory to Fluxer', () => {
+        expect(DISCORD_ALLOWED_COMMANDS).not.toContain('directory');
+        expect(getDiscordCommandInfo('directory')).toBeUndefined();
+        expect(getDiscordCommandInfo('lfg')).toBeUndefined();
+    });
+
     it('only names documented Discord commands', () => {
         for (const name of DISCORD_ALLOWED_COMMANDS) {
             expect(getDiscordCommandInfo(name), name).toBeDefined();
