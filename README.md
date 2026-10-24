@@ -21,6 +21,7 @@
 - Reminders: `?remindme 1h30min take the pizza out` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
+- File a GitHub issue for Claude straight from chat: `!b clauderequest make the bot meow louder` (see [Claude requests](#claude-requests))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
@@ -338,6 +339,15 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 
 `history.enabled: false` switches the command off. The transfer state ships as migration `00010-history-messages`, which adds the `history_messages` table (one row per transferred message, so re-runs can skip them); it runs automatically on startup.
 
+## Claude requests
+
+`!b clauderequest <request>` turns a chat message into a GitHub issue for Claude, without opening GitHub: everything after the command (newlines kept, up to 4000 characters) becomes an issue in the bot's repository (`claudeRequests.repo`, `FruitBoi/bifrost` by default) with the `claude` label (`claudeRequests.label`), the same label the **Claude request** issue template sets. The first line becomes the issue title (cut to 80 characters), the full text the body, followed by who sent it and from which server and channel. The bot replies with a link to the new issue. `@name` mentions in the text are defused so filing a request never pings anyone on GitHub.
+
+- **Who may run it.** Members with one of the roles in `roles.claudeRequest` (by default the same Fluxer roles as `roles.identity`; add a Discord role ID to allow it on Discord). One request per minute per user.
+- **Setup.** Set `BF_GITHUB_TOKEN` (or `BF_GITHUB_TOKEN_FILE`) to a GitHub token that may create issues and apply labels in the repository, for example a fine-grained token limited to that repository with **Issues: Read and write**. Without it the command replies that it is not configured. `claudeRequests.enabled: false` switches the command off.
+
+Filing an issue does not start any work by itself; see [CLAUDE.md](CLAUDE.md) for how Claude requests are picked up.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -383,6 +393,10 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`, `history`); see [Clean](#clean) and [History transfer](#history-transfer). IDs are matched on the platform the command is run on, so add a Discord role ID to allow them on Discord. Quote the IDs, unquoted numbers lose precision. |
 | `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity commands `!b role` and `!b map`; see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
 | `roles.bridgeMentions` | `true` | Relay role mentions as real pings of the role with the same name in the linked server on the other platform, if the author could ping the role on their own side. Without a same-named role the mention stays plaintext `@RoleName`; `@everyone`/`@here` are never bridged and edits never re-ping. `false` relays every role mention as plaintext. See [Pings](#pings). |
+| `roles.claudeRequest` | `["1561105750388908139", "1561105750388908112"]` | Role IDs whose members may run `!b clauderequest`; see [Claude requests](#claude-requests). Quote the IDs, unquoted numbers lose precision. |
+| `claudeRequests.enabled` | `true` | Enable the `clauderequest` command on both platforms. It also needs `BF_GITHUB_TOKEN`. |
+| `claudeRequests.repo` | `"FruitBoi/bifrost"` | Repository (`owner/name`) the issues are opened in. |
+| `claudeRequests.label` | `"claude"` | Label put on every issue. |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |

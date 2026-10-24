@@ -23,6 +23,7 @@ resolveFileSecret('BF_DISCORD_TOKEN');
 resolveFileSecret('BF_DB_PASS');
 resolveFileSecret('BF_DISCORD_HEALTH_TOKEN');
 resolveFileSecret('BF_FLUXER_HEALTH_TOKEN');
+resolveFileSecret('BF_GITHUB_TOKEN');
 
 if (process.env.BF_DISCORD_HEALTH_TOKEN && process.env.BF_DISCORD_HEALTH_URL)
     process.env.BF_DISCORD_HEALTH_URL = `${process.env.BF_DISCORD_HEALTH_URL.replace(/\/$/, '')}/${process.env.BF_DISCORD_HEALTH_TOKEN}`;
@@ -92,6 +93,9 @@ export const DELETE_INVOCATION = parseBool(process.env.BF_DELETE_INVOCATION);
 export const DISABLE_MESSAGE_QUEUE = parseBool(
     process.env.BF_DISABLE_MESSAGE_QUEUE
 );
+
+/** Token used by `clauderequest` to open GitHub issues; empty disables it. */
+export const GITHUB_TOKEN = process.env.BF_GITHUB_TOKEN || '';
 
 export const DISCORD_OWNER_ID = process.env.BF_DISCORD_OWNER_ID || null;
 export const FLUXER_OWNER_ID = process.env.BF_FLUXER_OWNER_ID || null;

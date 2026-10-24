@@ -132,6 +132,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            claudeRequests: DEFAULT_BOT_CONFIG.claudeRequests,
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
@@ -160,6 +161,7 @@ describe('loadBotConfig parsing', () => {
                 unlinkWhenChannelLeaves: false,
             },
             roles: DEFAULT_BOT_CONFIG.roles,
+            claudeRequests: DEFAULT_BOT_CONFIG.claudeRequests,
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
@@ -380,6 +382,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'threads',
             'categories',
             'roles',
+            'claudeRequests',
             'clean',
             'history',
             'meow',
@@ -395,6 +398,7 @@ describe('roles', () => {
             moderator: ['1561105750388908139'],
             identity: ['1561105750388908139', '1561105750388908112'],
             bridgeMentions: true,
+            claudeRequest: ['1561105750388908139', '1561105750388908112'],
         });
     });
 
@@ -407,6 +411,7 @@ describe('roles', () => {
             moderator: ['1', '2'],
             identity: ['3'],
             bridgeMentions: true,
+            claudeRequest: DEFAULT_BOT_CONFIG.roles.claudeRequest,
         });
         expect(unknownKeys).toEqual([]);
         expect(deprecatedKeys).toEqual([]);
@@ -419,6 +424,7 @@ describe('roles', () => {
             moderator: ['1'],
             identity: DEFAULT_BOT_CONFIG.roles.identity,
             bridgeMentions: true,
+            claudeRequest: DEFAULT_BOT_CONFIG.roles.claudeRequest,
         });
     });
 
@@ -451,6 +457,7 @@ describe('roles', () => {
             moderator: ['42'],
             identity: ['43', '44'],
             bridgeMentions: true,
+            claudeRequest: DEFAULT_BOT_CONFIG.roles.claudeRequest,
         });
         expect(unknownKeys).toEqual([]);
         expect(deprecatedKeys).toEqual([]);
@@ -471,6 +478,7 @@ describe('roles.bridgeMentions', () => {
             moderator: DEFAULT_BOT_CONFIG.roles.moderator,
             identity: DEFAULT_BOT_CONFIG.roles.identity,
             bridgeMentions: false,
+            claudeRequest: DEFAULT_BOT_CONFIG.roles.claudeRequest,
         });
         expect(unknownKeys).toEqual([]);
         expect(deprecatedKeys).toEqual([]);
@@ -550,6 +558,7 @@ describe('roles.copyAllowedRoleIds (deprecated alias of roles.identity)', () => 
             moderator: ['9'],
             identity: ['42'],
             bridgeMentions: true,
+            claudeRequest: DEFAULT_BOT_CONFIG.roles.claudeRequest,
         });
     });
 
@@ -822,5 +831,48 @@ describe('reactions', () => {
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('reactions.enabled');
         expect(attempt).toThrow('boolean');
+    });
+});
+
+describe('claudeRequests', () => {
+    it('defaults to issues labelled claude in FruitBoi/bifrost', () => {
+        expect(DEFAULT_BOT_CONFIG.claudeRequests).toEqual({
+            enabled: true,
+            repo: 'FruitBoi/bifrost',
+            label: 'claude',
+        });
+    });
+
+    it('merges a custom repository and label', () => {
+        const { config, unknownKeys } = mergeBotConfig({
+            claudeRequests: { repo: 'someone/fork', label: 'ai' },
+            roles: { claudeRequest: ['123'] },
+        });
+
+        expect(unknownKeys).toEqual([]);
+        expect(config.claudeRequests).toEqual({
+            enabled: true,
+            repo: 'someone/fork',
+            label: 'ai',
+        });
+        expect(config.roles.claudeRequest).toEqual(['123']);
+    });
+
+    it.each(['bifrost', 'a/b/c', 'https://github.com/a/b', ''])(
+        'rejects the repository %j',
+        (repo) => {
+            const attempt = () => mergeBotConfig({ claudeRequests: { repo } });
+
+            expect(attempt).toThrow(BotConfigError);
+            expect(attempt).toThrow('claudeRequests.repo');
+        }
+    );
+
+    it('rejects an empty label', () => {
+        const attempt = () =>
+            mergeBotConfig({ claudeRequests: { label: '  ' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('claudeRequests.label');
     });
 });

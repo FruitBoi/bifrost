@@ -12,6 +12,7 @@ import { SequelizeUserLinkRepository } from './db/sequelizerepos/SequelizeUserLi
 import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeReminderRepository';
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
+import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -43,6 +44,7 @@ import {
     QUEUE_TTL_MS,
     REPO_URL,
     WEB_PORT,
+    GITHUB_TOKEN,
 } from './utils/env';
 import { createWebApp } from './web/app';
 import {
@@ -189,6 +191,23 @@ const main = async () => {
         );
     }
 
+    // Claude requests (issue #18): one service (and one per-user cooldown)
+    // for both platforms.
+    const claudeRequestService = new ClaudeRequestService({
+        token: GITHUB_TOKEN,
+        repo: botConfig.claudeRequests.repo,
+        label: botConfig.claudeRequests.label,
+    });
+    if (!botConfig.claudeRequests.enabled) {
+        logger.info(
+            'Config: Claude requests are disabled (claudeRequests.enabled=false)'
+        );
+    } else if (!claudeRequestService.isConfigured()) {
+        logger.warn(
+            'Config: Claude requests are enabled but BF_GITHUB_TOKEN is not set; the clauderequest command will refuse requests'
+        );
+    }
+
     const FLUXER_DOWN_THRESHOLD = 5; // 5 × 30s = 2.5 min before restart
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
     const FLUXER_BACKOFF_MS = 20 * 60_000; // 20 min wait after exhausting restarts
@@ -271,6 +290,7 @@ const main = async () => {
         botConfig,
         reminderService,
         historyService,
+        claudeRequestService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
@@ -394,6 +414,7 @@ const main = async () => {
             botConfig,
             reminderService,
             historyService,
+            claudeRequestService,
         }),
         connectFluxer(),
     ]);

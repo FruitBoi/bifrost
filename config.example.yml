@@ -66,6 +66,25 @@ roles:
     # never bridged, and editing a bridged message never pings again. Set to
     # false to relay every role mention as plaintext.
     bridgeMentions: true
+    # Who may run `!b clauderequest <request>` (see claudeRequests below).
+    claudeRequest:
+        - "1561105750388908139"
+        - "1561105750388908112"
+
+claudeRequests:
+    # `!b clauderequest <request>` files the rest of the message (newlines
+    # kept, up to 4000 characters) as a GitHub issue in `repo` with `label`,
+    # the label the "Claude request" issue template uses, and replies with
+    # the link. One request per minute per user; restricted to
+    # roles.claudeRequest. Needs the BF_GITHUB_TOKEN environment variable: a
+    # token that may create issues and apply labels in the repository (a
+    # fine-grained token with "Issues: Read and write"). Without it the
+    # command replies that it is not configured.
+    enabled: true
+    # Repository the issues are opened in, as "owner/name".
+    repo: "FruitBoi/bifrost"
+    # Label put on every issue.
+    label: "claude"
 
 clean:
     # YAGPDB-style bulk delete: `clean <num> [user]` deletes the last `num`

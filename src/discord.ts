@@ -56,6 +56,10 @@ import ExpressionTransferService from './services/expressionTransfer/ExpressionT
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
 import HistoryDiscordCommandHandler from './commands/discord/handlers/HistoryDiscordCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
+import ClaudeRequestDiscordCommandHandler from './commands/discord/handlers/ClaudeRequestDiscordCommandHandler';
+import ClaudeRequestService, {
+    CLAUDE_REQUEST_COMMAND_NAMES,
+} from './services/claudeRequest/ClaudeRequestService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 import { BotConfig } from './config/BotConfig';
 
@@ -76,6 +80,7 @@ const startDiscordClient = async ({
     dbStatsService,
     reminderService,
     historyService,
+    claudeRequestService,
     botConfig,
 }: {
     linkService: LinkService;
@@ -94,6 +99,7 @@ const startDiscordClient = async ({
     dbStatsService: DbStatsService;
     reminderService: ReminderService;
     historyService: HistoryTransferService;
+    claudeRequestService: ClaudeRequestService;
     botConfig: BotConfig;
 }): Promise<Client> => {
     const client = new Client({
@@ -274,6 +280,17 @@ const startDiscordClient = async ({
         });
         for (const name of HISTORY_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, historyHandler);
+        }
+    }
+
+    if (botConfig.claudeRequests.enabled) {
+        const claudeRequestHandler = new ClaudeRequestDiscordCommandHandler(
+            client,
+            claudeRequestService,
+            botConfig.roles.claudeRequest
+        );
+        for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, claudeRequestHandler);
         }
     }
 

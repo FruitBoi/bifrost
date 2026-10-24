@@ -71,6 +71,10 @@ import ExpressionTransferService from './services/expressionTransfer/ExpressionT
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
 import HistoryFluxerCommandHandler from './commands/fluxer/handlers/HistoryFluxerCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
+import ClaudeRequestFluxerCommandHandler from './commands/fluxer/handlers/ClaudeRequestFluxerCommandHandler';
+import ClaudeRequestService, {
+    CLAUDE_REQUEST_COMMAND_NAMES,
+} from './services/claudeRequest/ClaudeRequestService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 
 const startFluxerClient = async ({
@@ -92,6 +96,7 @@ const startFluxerClient = async ({
     botConfig,
     reminderService,
     historyService,
+    claudeRequestService,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -112,6 +117,7 @@ const startFluxerClient = async ({
     botConfig: BotConfig;
     reminderService: ReminderService;
     historyService: HistoryTransferService;
+    claudeRequestService: ClaudeRequestService;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -308,6 +314,17 @@ const startFluxerClient = async ({
         });
         for (const name of HISTORY_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, historyHandler);
+        }
+    }
+
+    if (botConfig.claudeRequests.enabled) {
+        const claudeRequestHandler = new ClaudeRequestFluxerCommandHandler(
+            client,
+            claudeRequestService,
+            botConfig.roles.claudeRequest
+        );
+        for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
+            commandRegistry.registerCommand(name, claudeRequestHandler);
         }
     }
 

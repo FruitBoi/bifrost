@@ -63,6 +63,25 @@ export interface BotConfig {
          * @here are never bridged. See `services/mentionBridge/`.
          */
         bridgeMentions: boolean;
+        /**
+         * `clauderequest`: files the given text as a GitHub issue labelled
+         * for Claude (issue #18). See `claudeRequests`.
+         */
+        claudeRequest: string[];
+    };
+    claudeRequests: {
+        /**
+         * Enable the `clauderequest` command, which opens an issue in
+         * `repo` with `label` from a chat message. Needs `BF_GITHUB_TOKEN`
+         * (a token allowed to create issues in the repository); without it
+         * the command replies that it is not configured. See
+         * `services/claudeRequest/`.
+         */
+        enabled: boolean;
+        /** Repository the issues are opened in, as `owner/name`. */
+        repo: string;
+        /** Label put on every issue (the one the Claude request template uses). */
+        label: string;
     };
     clean: {
         /**
@@ -140,6 +159,12 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         moderator: ['1561105750388908139'],
         identity: ['1561105750388908139', '1561105750388908112'],
         bridgeMentions: true,
+        claudeRequest: ['1561105750388908139', '1561105750388908112'],
+    },
+    claudeRequests: {
+        enabled: true,
+        repo: 'FruitBoi/bifrost',
+        label: 'claude',
     },
     clean: { enabled: true, triggerPrefixes: ['?', '!'] },
     history: {
@@ -307,6 +332,7 @@ export function mergeBotConfig(
         ''
     ) as unknown as BotConfig;
     validateHistoryConfig(config.history);
+    validateClaudeRequestsConfig(config.claudeRequests);
 
     return {
         config,
@@ -332,6 +358,22 @@ function validateHistoryConfig(history: BotConfig['history']): void {
     if (history.defaultCount > history.maxCount) {
         throw new BotConfigError(
             `Config "history.defaultCount" (${history.defaultCount}) must not exceed "history.maxCount" (${history.maxCount})`
+        );
+    }
+}
+
+/** `claudeRequests.repo` must look like `owner/name`; the label must not be empty. */
+function validateClaudeRequestsConfig(
+    claudeRequests: BotConfig['claudeRequests']
+): void {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(claudeRequests.repo)) {
+        throw new BotConfigError(
+            `Config "claudeRequests.repo" must be "owner/name", got "${claudeRequests.repo}"`
+        );
+    }
+    if (!claudeRequests.label.trim()) {
+        throw new BotConfigError(
+            'Config "claudeRequests.label" must not be empty'
         );
     }
 }
