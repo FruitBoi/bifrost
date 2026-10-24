@@ -21,7 +21,12 @@ Comments from anyone else, on pull requests, or on closed issues are ignored.
   clone's Claude project memory is symlinked to the main checkout's.
 - Dependencies are installed in the clone with podman when `pnpm-lock.yaml` changes.
 - Claude runs headless on Opus (`--model opus`) with `--permission-mode auto` and `BIFROST_SWARM_UNATTENDED=1`.
-- State and logs live in `~/.local/state/bifrost-swarm/`. The first run only records the current
+- Each run logs to `~/.local/state/bifrost-swarm/logs/issue-<n>-<time>.log` (setup output and Claude's
+  final report) and streams Claude's progress live to the matching `.log.jsonl`
+  (`tail -f ... .jsonl | jq -c 'select(.type == "assistant") | .message.content[]'`).
+- `claude -p` can stay alive after its final result; the watcher kills it 2 minutes after the result
+  (`SWARM_RESULT_GRACE`) so the next `/swarm` isn't blocked. The run's success is read from the result.
+- State lives in `~/.local/state/bifrost-swarm/`. The first run only records the current
   time, so older comments never trigger a swarm.
 
 Settings can be overridden in `~/.config/bifrost-swarm.env` (`SWARM_REPO`, `SWARM_BRANCH`,

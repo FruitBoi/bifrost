@@ -12,6 +12,7 @@ MAIN_CHECKOUT="${SWARM_MAIN_CHECKOUT:-$HOME/Documents/dev/bifrost}"
 STATE_DIR="${SWARM_STATE_DIR:-$HOME/.local/state/bifrost-swarm}"
 PERMISSION_MODE="${SWARM_PERMISSION_MODE:-auto}"
 MODEL="${SWARM_MODEL:-opus}"
+RESULT_GRACE="${SWARM_RESULT_GRACE:-2m}"
 NODE_IMAGE="${SWARM_NODE_IMAGE:-docker.io/library/node:20}"
 
 export GH_PAGER=cat
@@ -72,15 +73,38 @@ prepare_workdir() {
   fi
 }
 
+# Streams Claude's progress to <logfile>.jsonl and appends the final report to <logfile>.
+# `claude -p` sometimes stays alive after its final result, which would block the watcher, so once the
+# result is out it gets a grace period and is then killed. Success comes from the result, not the exit code.
+claude_swarm() { # issue logfile
+  local issue="$1" logfile="$2" stream="$2.jsonl" pid
+  (cd "$WORKDIR" && BIFROST_SWARM_UNATTENDED=1 exec claude -p "/swarm-issue $issue" \
+    --model "$MODEL" --permission-mode "$PERMISSION_MODE" --output-format stream-json --verbose \
+    </dev/null >"$stream" 2>>"$logfile") &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if grep -q '^{"type":"result"' "$stream"; then
+      timeout "$RESULT_GRACE" tail --pid="$pid" -f /dev/null || {
+        log "claude still running ${RESULT_GRACE} after its result; killing it" >>"$logfile"
+        kill "$pid" 2>/dev/null
+      }
+      break
+    fi
+    sleep 10
+  done
+  wait "$pid" || true
+
+  grep '^{"type":"result"' "$stream" | tail -1 | jq -r '.result // empty' >>"$logfile"
+  grep '^{"type":"result"' "$stream" | tail -1 | jq -e '.is_error == false' >/dev/null
+}
+
 run_swarm() { # issue comment_id login
   local issue="$1" comment_id="$2" login="$3" logfile
   logfile="$STATE_DIR/logs/issue-$issue-$(date -u +%Y%m%dT%H%M%SZ).log"
   log "swarming issue #$issue for @$login (log: $logfile)"
   react "$comment_id" eyes
 
-  if prepare_workdir >>"$logfile" 2>&1 &&
-    (cd "$WORKDIR" && BIFROST_SWARM_UNATTENDED=1 claude -p "/swarm-issue $issue" \
-      --model "$MODEL" --permission-mode "$PERMISSION_MODE" </dev/null >>"$logfile" 2>&1); then
+  if prepare_workdir >>"$logfile" 2>&1 && claude_swarm "$issue" "$logfile"; then
     log "issue #$issue finished"
   else
     log "issue #$issue failed"
