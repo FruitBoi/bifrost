@@ -127,17 +127,22 @@ describe('buildSlashCommandDefinitions', () => {
         }
         const unlisted = defs.find((d) => d.name === 'unlisted');
         expect(unlisted?.description).toBe('Runs the unlisted command.');
+        const history = defs.find((d) => d.name === 'history');
+        expect(history?.description).toBe(
+            "Copies a linked channel's message history to its counterpart."
+        );
     });
 
     it('adds an optional string args option unless the command takes none', () => {
         const defs = buildSlashCommandDefinitions([
+            'stats',
             'help',
             'clean',
             'unlisted',
         ]);
         const byName = Object.fromEntries(defs.map((d) => [d.name, d]));
-        expect(byName.help.options ?? []).toEqual([]);
-        for (const name of ['clean', 'unlisted']) {
+        expect(byName.stats.options ?? []).toEqual([]);
+        for (const name of ['help', 'clean', 'unlisted']) {
             expect(byName[name].options).toHaveLength(1);
             expect(byName[name].options?.[0]).toMatchObject({
                 name: 'args',

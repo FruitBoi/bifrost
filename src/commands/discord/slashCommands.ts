@@ -22,7 +22,7 @@ import {
     SlashCommandBuilder,
 } from 'discord.js';
 import CommandRegistry from '../CommandRegistry';
-import { getDiscordCommandInfo } from '../commandList';
+import { getCommandSummary, getDiscordCommandInfo } from '../commandList';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from './DiscordCommandHandler';
@@ -97,7 +97,11 @@ export function buildSlashCommandDefinitions(
         const builder = new SlashCommandBuilder()
             .setName(name)
             .setDescription(
-                fitDescription(info?.description ?? `Runs the ${name} command.`)
+                fitDescription(
+                    (info && getCommandSummary(name)) ??
+                        info?.description ??
+                        `Runs the ${name} command.`
+                )
             )
             // Handlers are written for guild messages (most refuse DMs).
             .setContexts(InteractionContextType.Guild)

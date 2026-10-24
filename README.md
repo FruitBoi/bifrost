@@ -34,6 +34,8 @@ Threads can be bridged like channels. A link always pairs two *locations*, and e
 
 Commands below use the default prefix `!b `. The prefix is configurable with `BF_COMMAND_PREFIX`.
 
+`!b help` lists every command with a one-sentence summary; `!b help <command>` (for example `!b help clean`, aliases work too) shows that command's usage, full description and aliases. On Discord's slash menu each command is described by the same summary.
+
 Every command also works as `!<command>` or `/<command>` without the `b` (`!help`, `/link 123`, `!list`). Only registered command names match, so other messages starting with `!` or `/` (such as Fluxer's own `/shrug`) are bridged as normal chat, and `!b ...` always stays the bot prefix. The short prefixes are set by `commands.triggerPrefixes` in the [configuration file](#configuration-file); an empty list leaves only the bot-prefix form. Like other commands, these messages are not bridged and are deleted when `BF_DELETE_INVOCATION` is on.
 
 ### Slash commands
