@@ -42,12 +42,18 @@ react() { # comment_id content
 
 prepare_workdir() {
   if [[ ! -d "$WORKDIR/.git" ]]; then
-    git clone "git@github.com:$REPO.git" "$WORKDIR"
+    git clone "git@github.com:$REPO.git" "$WORKDIR" || return 1
   fi
-  git -C "$WORKDIR" fetch origin
-  git -C "$WORKDIR" checkout -B "$BRANCH" "origin/$BRANCH"
-  git -C "$WORKDIR" reset --hard "origin/$BRANCH"
-  git -C "$WORKDIR" clean -fd
+  # set -e is off inside `if prepare_workdir`, so stop explicitly rather than swarm on a stale base.
+  local attempt
+  for attempt in 1 2 3; do
+    git -C "$WORKDIR" fetch origin && break
+    ((attempt < 3)) || return 1
+    sleep 15
+  done
+  git -C "$WORKDIR" checkout -B "$BRANCH" "origin/$BRANCH" &&
+    git -C "$WORKDIR" reset --hard "origin/$BRANCH" &&
+    git -C "$WORKDIR" clean -fd || return 1
 
   # .claude/ is gitignored, so borrow the skills from the main checkout.
   mkdir -p "$WORKDIR/.claude"
@@ -68,9 +74,14 @@ prepare_workdir() {
   if [[ "$(cat "$WORKDIR/node_modules/.swarm-lock-sha" 2>/dev/null)" != "$lock_sha" ]]; then
     log "installing dependencies"
     podman run --rm -v "$WORKDIR:/app:z" -w /app -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$NODE_IMAGE" \
-      sh -c 'corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store'
+      sh -c 'corepack enable && pnpm install --frozen-lockfile --store-dir /tmp/pnpm-store' || return 1
     echo "$lock_sha" >"$WORKDIR/node_modules/.swarm-lock-sha"
   fi
+}
+
+# Prints the last stream-json result event (key order varies, so match on the parsed type).
+result_event() { # stream
+  jq -cR 'fromjson? | select(.type == "result")' "$1" 2>/dev/null | tail -1
 }
 
 # Streams Claude's progress to <logfile>.jsonl and appends the final report to <logfile>.
@@ -83,7 +94,7 @@ claude_swarm() { # issue logfile
     </dev/null >"$stream" 2>>"$logfile") &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    if grep -q '^{"type":"result"' "$stream"; then
+    if [[ -n "$(result_event "$stream")" ]]; then
       timeout "$RESULT_GRACE" tail --pid="$pid" -f /dev/null || {
         log "claude still running ${RESULT_GRACE} after its result; killing it" >>"$logfile"
         kill "$pid" 2>/dev/null
@@ -94,8 +105,10 @@ claude_swarm() { # issue logfile
   done
   wait "$pid" || true
 
-  grep '^{"type":"result"' "$stream" | tail -1 | jq -r '.result // empty' >>"$logfile"
-  grep '^{"type":"result"' "$stream" | tail -1 | jq -e '.is_error == false' >/dev/null
+  local result
+  result="$(result_event "$stream")"
+  jq -r '.result // empty' <<<"$result" >>"$logfile"
+  jq -e '.is_error == false' <<<"$result" >/dev/null
 }
 
 run_swarm() { # issue comment_id login
@@ -107,11 +120,22 @@ run_swarm() { # issue comment_id login
   if prepare_workdir >>"$logfile" 2>&1 && claude_swarm "$issue" "$logfile"; then
     log "issue #$issue finished"
   else
-    log "issue #$issue failed"
-    react "$comment_id" confused
-    gh issue comment "$issue" --repo "$REPO" --body \
-      "The swarm run for this issue exited with an error before finishing. Log on the dev server: \`${logfile/#$HOME/\~}\`" \
-      >/dev/null || true
+    # The swarm closes the issue as its last step, so a closed issue means the work landed even if
+    # the session ended badly afterwards; say so rather than suggest the work is unfinished.
+    local state shown_log="${logfile/#$HOME/\~}"
+    state="$(gh api "repos/$REPO/issues/$issue" --jq .state 2>/dev/null || true)"
+    if [[ "$state" == closed ]]; then
+      log "issue #$issue closed, but the run ended uncleanly"
+      gh issue comment "$issue" --repo "$REPO" --body \
+        "The swarm finished this issue and closed it as planned; nothing is missing. Its Claude session didn't shut down cleanly afterwards, which needs no action here. Log on the dev server: \`$shown_log\`" \
+        >/dev/null || true
+    else
+      log "issue #$issue failed"
+      react "$comment_id" confused
+      gh issue comment "$issue" --repo "$REPO" --body \
+        "The swarm run stopped before finishing this issue, so it's still open. Comment \`/swarm\` again to retry. Log on the dev server: \`$shown_log\`" \
+        >/dev/null || true
+    fi
   fi
 }
 
