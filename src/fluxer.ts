@@ -50,6 +50,7 @@ import HealthCheckService from './services/HealthCheckService';
 import FluxerEntityResolver from './services/entityResolver/FluxerEntityResolver';
 import DiscordEntityResolver from './services/entityResolver/DiscordEntityResolver';
 import FluxerMessageTransformer from './services/messageTransformer/FluxerMessageTransformer';
+import ReplyLinkResolver from './services/replyQuote/ReplyLinkResolver';
 import MentionBridgeService from './services/mentionBridge/MentionBridgeService';
 import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
@@ -205,7 +206,8 @@ const startFluxerClient = async ({
                 fetchFluxerRoles: (id) => fluxerEntityResolver.fetchRoles(id),
             },
             bridgeRoleMentions: botConfig.roles.bridgeMentions,
-        })
+        }),
+        new ReplyLinkResolver(linkService)
     );
     const meowService = new MeowService();
     const messageRelay = new FluxerToDiscordMessageRelay({

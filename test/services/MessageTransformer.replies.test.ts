@@ -6,7 +6,8 @@ import WebhookEmbed from '../../src/services/WebhookEmbed';
 
 // Replies to messages without text (e.g. a lone image) used to build a quote
 // embed with an empty description, which Discord rejects, so the reply was
-// never bridged.
+// never bridged. The quote is now a line above the content (see
+// replyQuote.test.ts); textless messages are still described.
 
 function fakeUser(id: string, username: string) {
     return { id, username, avatarURL: () => `https://avatars/${id}` };
@@ -61,7 +62,7 @@ const image = {
 };
 
 describe('FluxerMessageTransformer replies to textless messages', () => {
-    it('quotes a replied-to image with a placeholder instead of an empty description', async () => {
+    it('quotes a replied-to image with a placeholder instead of empty text', async () => {
         const referenced = fakeFluxerMessage({
             id: 'fmsg-image',
             content: '',
@@ -75,13 +76,10 @@ describe('FluxerMessageTransformer replies to textless messages', () => {
             }) as never
         );
 
-        expect(result.content).toBe('nice pic');
-        expect(result.embeds).toHaveLength(1);
-        const quote = result.embeds![0].toPlainObject();
-        expect(quote.description).toBe('*📎 attachment*');
-        expect(quote.author?.name).toBe('olive ↩️');
-        // Building the Discord payload must not throw (it did for '').
-        expect(() => result.embeds![0].toDiscordEmbed()).not.toThrow();
+        expect(result.content).toBe(
+            '-# ↩️ **olive** *📎 attachment*\nnice pic'
+        );
+        expect(result.embeds).toEqual([]);
     });
 
     it('counts attachments, stickers and embeds of the replied-to message', async () => {
@@ -98,8 +96,8 @@ describe('FluxerMessageTransformer replies to textless messages', () => {
             fakeFluxerMessage({ referencedMessage: referenced }) as never
         );
 
-        expect(result.embeds![0].toPlainObject().description).toBe(
-            '*📎 2 attachments · 🏷️ sticker · 🔗 embed*'
+        expect(result.content.split('\n')[0]).toBe(
+            '-# ↩️ **fran** *📎 2 attachments · 🏷️ sticker · 🔗 embed*'
         );
     });
 
@@ -117,19 +115,18 @@ describe('FluxerMessageTransformer replies to textless messages', () => {
         );
 
         expect(result.attachments).toHaveLength(1);
-        expect(result.embeds).toHaveLength(1);
-        expect(() =>
-            result.embeds!.map((e) => e.toDiscordEmbed().toJSON())
-        ).not.toThrow();
+        // The quote line alone is the content: never an empty payload.
+        expect(result.content).toBe('-# ↩️ **fran** *📎 attachment*');
+        expect(result.embeds).toEqual([]);
     });
 
-    it('keeps quoting replied-to text as before', async () => {
+    it('quotes replied-to text above the content', async () => {
         const referenced = fakeFluxerMessage({ content: 'original' });
         const result = await new FluxerMessageTransformer().transformMessage(
             fakeFluxerMessage({ referencedMessage: referenced }) as never
         );
 
-        expect(result.embeds![0].toPlainObject().description).toBe('original');
+        expect(result.content).toBe('-# ↩️ **fran** original\nhello');
     });
 });
 
@@ -148,10 +145,10 @@ describe('DiscordMessageTransformer replies to textless messages', () => {
             }) as never
         );
 
-        expect(result.embeds).toHaveLength(1);
-        const quote = result.embeds![0].toPlainObject();
-        expect(quote.description).toBe('*📎 attachment*');
-        expect(quote.author?.name).toBe('olive ↩️');
+        expect(result.content).toBe(
+            '-# ↩️ **olive** *📎 attachment*\nnice pic'
+        );
+        expect(result.embeds).toEqual([]);
     });
 
     it('does not label a reply with attachments as a forwarded message', async () => {
@@ -169,10 +166,9 @@ describe('DiscordMessageTransformer replies to textless messages', () => {
         );
 
         expect(result.attachments).toHaveLength(1);
-        expect(result.embeds).toHaveLength(1);
-        const quote = result.embeds![0].toPlainObject();
-        expect(quote.description).not.toContain('Forwarded');
-        expect(quote.author?.name).toBe('dave ↩️');
+        expect(result.embeds).toEqual([]);
+        expect(result.content).toBe('-# ↩️ **dave** *📎 attachment*');
+        expect(result.content).not.toContain('Forwarded');
     });
 });
 

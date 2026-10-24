@@ -15,6 +15,11 @@ import MentionBridgeService, {
     ResolvedRoleMention,
     ResolvedUserMention,
 } from '../mentionBridge/MentionBridgeService';
+import {
+    applyReplyQuote,
+    createReplyQuote,
+    ReplyQuote,
+} from '../replyQuote/replyQuote';
 
 export default class FluxerMessageTransformer extends MessageTransformer<
     Message,
@@ -172,6 +177,41 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         return { text: 'From another server' };
     }
 
+    /**
+     * The quote of the message being replied to: a linked subtext line, or an
+     * embed when the line does not fit in the content.
+     */
+    private async buildReplyQuote(
+        message: Message,
+        referenced: Message
+    ): Promise<ReplyQuote> {
+        // sanitizeContent breaks every mention, so the quote never pings.
+        const sanitized = this.sanitizeContent(referenced);
+        const url = await this.resolveReplyUrl('fluxer', {
+            messageId: referenced.id ?? message.messageReference?.messageId,
+            guildId:
+                referenced.guildId ??
+                message.guildId ??
+                message.messageReference?.guildId,
+            channelId:
+                referenced.channelId ??
+                message.messageReference?.channelId ??
+                message.channelId,
+        });
+        return createReplyQuote({
+            authorName: referenced.author.username,
+            authorIconURL: referenced.author.avatarURL() || undefined,
+            url,
+            text: sanitized.trim() !== '' ? sanitized : null,
+            textlessDescription: this.describeTextlessMessage({
+                attachments: referenced.attachments.size,
+                stickers: referenced.stickers.length,
+                embeds: referenced.embeds.length,
+            }),
+            color: 0x252529,
+        });
+    }
+
     public async transformMessage(
         message: Message,
         discordEmojis: GeneralEmoji[] = [],
@@ -262,30 +302,13 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         }
 
         const allMentionUserIds = directMentions.map((m) => m.counterpartId);
+        let replyQuote: ReplyQuote | null = null;
         const referenced = message.referencedMessage;
         if (referenced) {
             allMentionUserIds.push(
                 ...(await this.resolveReplyMention(message, referenced))
             );
-            const content = this.sanitizeContent(referenced);
-            embeds.unshift(
-                new WebhookEmbed({
-                    description:
-                        content.trim() !== ''
-                            ? content
-                            : this.describeTextlessMessage({
-                                  attachments: referenced.attachments.size,
-                                  stickers: referenced.stickers.length,
-                                  embeds: referenced.embeds.length,
-                              }),
-                    color: 0x252529,
-                    author: {
-                        name: referenced.author.username + ' ↩️',
-                        iconURL: referenced.author.avatarURL() || undefined,
-                    },
-                    timestamp: null,
-                })
-            );
+            replyQuote = await this.buildReplyQuote(message, referenced);
         }
 
         // Applied after breakMentions/sanitizeMentions/replaceEmojis so the
@@ -296,18 +319,18 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         const mentionRoleIds = [
             ...new Set(roleMentions.map((m) => m.counterpartId)),
         ];
-        const content =
+        const restored =
             MentionBridgeService.restoreMentionPlaceholders(
                 emojiReplacedContent
             );
+        let content =
+            mentionUserIds.length > 0
+                ? MentionBridgeService.applyMentions(restored, mentionUserIds)
+                : restored;
+        // Last, so the quote sits above reply pings and the text.
+        if (replyQuote) content = applyReplyQuote(content, replyQuote, embeds);
         return {
-            content:
-                mentionUserIds.length > 0
-                    ? MentionBridgeService.applyMentions(
-                          content,
-                          mentionUserIds
-                      )
-                    : content,
+            content,
             username: message.author.username,
             avatarURL: message.author.avatarURL() || '',
             attachments: attachments,

@@ -8,6 +8,15 @@ import logger from '../../src/utils/logging/logger';
 
 const ZWSP = '​';
 
+/** The reply quote line the transformers put above a reply's content. */
+const QUOTE_LINE = /^-# ↩️ .*\n/;
+
+/** Content without its leading reply quote line (which must be there). */
+function body(content: string): string {
+    expect(content).toMatch(QUOTE_LINE);
+    return content.replace(QUOTE_LINE, '');
+}
+
 function makeMessageLink(overrides: Partial<MessageLink> = {}): MessageLink {
     return {
         id: 'ml-1',
@@ -196,11 +205,13 @@ describe('DiscordMessageTransformer reply pings', () => {
             fakeDiscordReply({ pings: true }) as never
         );
 
-        expect(result.content.startsWith('<@fuser-original> ')).toBe(true);
-        expect(result.content).toBe('<@fuser-original> hello');
+        expect(body(result.content).startsWith('<@fuser-original> ')).toBe(
+            true
+        );
+        expect(body(result.content)).toBe('<@fuser-original> hello');
         expect(result.mentionUserIds).toEqual(['fuser-original']);
-        // The reply quote embed is still produced.
-        expect(result.embeds?.length).toBe(1);
+        // The reply quote is still produced, above the ping.
+        expect(result.content).toMatch(QUOTE_LINE);
     });
 
     it('does not mention anyone when the reply has pings turned off', async () => {
@@ -216,7 +227,7 @@ describe('DiscordMessageTransformer reply pings', () => {
             fakeDiscordReply({ pings: false }) as never
         );
 
-        expect(result.content).toBe('hello');
+        expect(body(result.content)).toBe('hello');
         expect(result.mentionUserIds).toBeUndefined();
         expect('mentionUserIds' in result).toBe(false);
     });
@@ -234,7 +245,7 @@ describe('DiscordMessageTransformer reply pings', () => {
             fakeDiscordReply({ pings: true }) as never
         );
 
-        expect(result.content).toBe('hello');
+        expect(body(result.content)).toBe('hello');
         expect(result.mentionUserIds).toBeUndefined();
     });
 
@@ -245,7 +256,7 @@ describe('DiscordMessageTransformer reply pings', () => {
             fakeDiscordReply({ pings: true }) as never
         );
 
-        expect(result.content).toBe('hello');
+        expect(body(result.content)).toBe('hello');
         expect(result.mentionUserIds).toBeUndefined();
     });
 
@@ -383,9 +394,9 @@ describe('DiscordMessageTransformer reply pings', () => {
             }) as never
         );
 
-        expect(result.content).toBe('<@fuser-original> hi <@fluxer-42>');
+        expect(body(result.content)).toBe('<@fuser-original> hi <@fluxer-42>');
         expect(result.mentionUserIds).toEqual(['fluxer-42', 'fuser-original']);
-        expect(result.embeds?.length).toBe(1);
+        expect(result.content).toMatch(QUOTE_LINE);
     });
 
     it('does not duplicate the ping when the reply target is also mentioned inline', async () => {
@@ -411,7 +422,7 @@ describe('DiscordMessageTransformer reply pings', () => {
             }) as never
         );
 
-        expect(result.content).toBe('hi <@fuser-original>');
+        expect(body(result.content)).toBe('hi <@fuser-original>');
         expect(result.mentionUserIds).toEqual(['fuser-original']);
     });
 
@@ -554,7 +565,7 @@ describe('DiscordMessageTransformer reply pings', () => {
         const reply = await transformer.transformMessage(
             fakeDiscordReply({ pings: true }) as never
         );
-        expect(reply.content).toBe('hello');
+        expect(body(reply.content)).toBe('hello');
         expect('mentionUserIds' in reply).toBe(false);
     });
 });
@@ -583,10 +594,12 @@ describe('FluxerMessageTransformer reply pings', () => {
             fakeFluxerReply({ pings: true }) as never
         );
 
-        expect(result.content.startsWith('<@duser-original> ')).toBe(true);
-        expect(result.content).toBe('<@duser-original> hello');
+        expect(body(result.content).startsWith('<@duser-original> ')).toBe(
+            true
+        );
+        expect(body(result.content)).toBe('<@duser-original> hello');
         expect(result.mentionUserIds).toEqual(['duser-original']);
-        expect(result.embeds?.length).toBe(1);
+        expect(result.content).toMatch(QUOTE_LINE);
     });
 
     it('keeps the injected mention intact while still zero-width-breaking other @s', async () => {
@@ -605,11 +618,11 @@ describe('FluxerMessageTransformer reply pings', () => {
             }) as never
         );
 
-        expect(result.content).toBe(
+        expect(body(result.content)).toBe(
             `<@duser-original> hey @${ZWSP}everyone and @${ZWSP}unknown-user`
         );
-        expect(result.content).toContain('<@duser-original>');
-        expect(result.content).not.toContain(`<@${ZWSP}duser-original>`);
+        expect(body(result.content)).toContain('<@duser-original>');
+        expect(body(result.content)).not.toContain(`<@${ZWSP}duser-original>`);
         expect(result.mentionUserIds).toEqual(['duser-original']);
     });
 
@@ -626,7 +639,7 @@ describe('FluxerMessageTransformer reply pings', () => {
             fakeFluxerReply({ pings: false }) as never
         );
 
-        expect(result.content).toBe('hello');
+        expect(body(result.content)).toBe('hello');
         expect('mentionUserIds' in result).toBe(false);
     });
 
@@ -643,7 +656,7 @@ describe('FluxerMessageTransformer reply pings', () => {
             fakeFluxerReply({ pings: true }) as never
         );
 
-        expect(result.content).toBe('hello');
+        expect(body(result.content)).toBe('hello');
         expect(result.mentionUserIds).toBeUndefined();
     });
 
@@ -773,11 +786,11 @@ describe('FluxerMessageTransformer reply pings', () => {
             }) as never
         );
 
-        expect(result.content).toBe(
+        expect(body(result.content)).toBe(
             `<@duser-original> hi <@discord-42> @${ZWSP}here`
         );
         expect(result.mentionUserIds).toEqual(['discord-42', 'duser-original']);
-        expect(result.embeds?.length).toBe(1);
+        expect(result.content).toMatch(QUOTE_LINE);
     });
 
     it('does not duplicate the ping when the reply target is also mentioned inline', async () => {
@@ -803,7 +816,7 @@ describe('FluxerMessageTransformer reply pings', () => {
             }) as never
         );
 
-        expect(result.content).toBe('hi <@duser-original>');
+        expect(body(result.content)).toBe('hi <@duser-original>');
         expect(result.mentionUserIds).toEqual(['duser-original']);
     });
 
@@ -878,7 +891,7 @@ describe('FluxerMessageTransformer reply pings', () => {
         const reply = await transformer.transformMessage(
             fakeFluxerReply({ pings: true }) as never
         );
-        expect(reply.content).toBe('hello');
+        expect(body(reply.content)).toBe('hello');
         expect('mentionUserIds' in reply).toBe(false);
     });
 });

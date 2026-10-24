@@ -1,6 +1,7 @@
 import {
     Message,
     MessageFlags,
+    MessageSnapshot,
     OmitPartialGroupDMChannel,
     PermissionFlagsBits,
     TextChannel,
@@ -16,6 +17,11 @@ import MentionBridgeService, {
     ResolvedRoleMention,
     ResolvedUserMention,
 } from '../mentionBridge/MentionBridgeService';
+import {
+    applyReplyQuote,
+    createReplyQuote,
+    ReplyQuote,
+} from '../replyQuote/replyQuote';
 
 type DiscordMessage = OmitPartialGroupDMChannel<Message<boolean>>;
 
@@ -206,6 +212,86 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         return userId ? [userId] : [];
     }
 
+    /**
+     * Carries a forward's snapshot over: its files and embeds, plus an embed
+     * quoting its text (or a bare label when it has none).
+     */
+    private addForwardedMessage(
+        message: DiscordMessage,
+        snapshot: MessageSnapshot,
+        attachments: WebhookAttachment[],
+        embeds: WebhookEmbed[]
+    ): void {
+        attachments.push(...this.buildAttachments(snapshot));
+        embeds.push(...this.buildRichEmbeds(snapshot));
+
+        const content = this.sanitizeContent(snapshot);
+        if (content && content.trim() !== '') {
+            const author = snapshot.author;
+            embeds.unshift(
+                new WebhookEmbed({
+                    description: content,
+                    color: 0x0b0d0e,
+                    author: {
+                        name: author
+                            ? `${author.username} ⏩`
+                            : 'Forwarded message ⏩',
+                        iconURL: author?.avatarURL() || undefined,
+                    },
+                    footer: this.buildForwardSourceFooter(message),
+                })
+            );
+        } else if (attachments.length > 0 || embeds.length > 0) {
+            embeds.unshift(
+                new WebhookEmbed({
+                    description: 'Forwarded message ⏩',
+                    color: 0x0b0d0e,
+                    footer: this.buildForwardSourceFooter(message),
+                })
+            );
+        }
+    }
+
+    /**
+     * The quote of the message being replied to: a linked subtext line, or an
+     * embed when the line does not fit (see {@link buildResult}).
+     */
+    private async buildReplyQuote(
+        message: DiscordMessage,
+        referencedMessage: DiscordMessage
+    ): Promise<ReplyQuote> {
+        // The quote may end up in the content, so it must never ping.
+        const sanitized = this.sanitizeContent(
+            referencedMessage,
+            undefined,
+            undefined,
+            MentionBridgeService.breakEveryoneMentions(
+                referencedMessage.content ?? ''
+            )
+        );
+        const url = await this.resolveReplyUrl('discord', {
+            messageId: referencedMessage.id ?? message.reference?.messageId,
+            guildId:
+                referencedMessage.guildId ??
+                message.reference?.guildId ??
+                message.guildId,
+            channelId:
+                referencedMessage.channelId ?? message.reference?.channelId,
+        });
+        return createReplyQuote({
+            authorName: referencedMessage.author.username,
+            authorIconURL: referencedMessage.author.avatarURL() || undefined,
+            url,
+            text: sanitized.trim() !== '' ? sanitized : null,
+            textlessDescription: this.describeTextlessMessage({
+                attachments: referencedMessage.attachments?.size ?? 0,
+                stickers: referencedMessage.stickers?.size ?? 0,
+                embeds: referencedMessage.embeds?.length ?? 0,
+            }),
+            color: 0x0b0d0e,
+        });
+    }
+
     private buildResult(
         message: DiscordMessage,
         rawContent: string,
@@ -213,7 +299,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         embeds: WebhookEmbed[],
         allMentionUserIds: string[],
         allMentionRoleIds: string[],
-        mentionEveryone: boolean
+        mentionEveryone: boolean,
+        replyQuote: ReplyQuote | null = null
     ): WebhookMessageData {
         // Mapped direct mentions sit in the content as placeholders until now
         // so that sanitising could not touch them; reply pings are prepended.
@@ -221,16 +308,16 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         // mentions stay inline where they were written.
         const mentionUserIds = [...new Set(allMentionUserIds)];
         const mentionRoleIds = [...new Set(allMentionRoleIds)];
-        const content =
+        const restored =
             MentionBridgeService.restoreMentionPlaceholders(rawContent);
+        let content =
+            mentionUserIds.length > 0
+                ? MentionBridgeService.applyMentions(restored, mentionUserIds)
+                : restored;
+        // Last, so the quote sits above reply pings and the text.
+        if (replyQuote) content = applyReplyQuote(content, replyQuote, embeds);
         return {
-            content:
-                mentionUserIds.length > 0
-                    ? MentionBridgeService.applyMentions(
-                          content,
-                          mentionUserIds
-                      )
-                    : content,
+            content,
             username: message.author.username,
             avatarURL: message.author.avatarURL() || '',
             attachments: attachments,
@@ -308,75 +395,36 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             : roleMentions.map((m) => m.counterpartId);
         const mentionEveryone = pingsEveryone && !isPollPresent;
 
+        let replyQuote: ReplyQuote | null = null;
         if (message.reference) {
-            const isForwarded = message.flags.has(MessageFlags.HasSnapshot);
-            const referencedMessage = isForwarded
-                ? message.messageSnapshots.first()
-                : await message.fetchReference();
-            if (!referencedMessage) {
-                return this.buildResult(
-                    message,
-                    messageContent,
-                    attachments,
-                    embeds,
-                    mentionUserIds,
-                    mentionRoleIds,
-                    mentionEveryone
-                );
-            }
-
-            // Polls carry generated content; never prepend a mention to them.
-            if (!isForwarded && !isPollPresent) {
-                mentionUserIds.push(
-                    ...(await this.resolveReplyMention(
+            if (message.flags.has(MessageFlags.HasSnapshot)) {
+                const snapshot = message.messageSnapshots.first();
+                if (snapshot) {
+                    this.addForwardedMessage(
+                        message,
+                        snapshot,
+                        attachments,
+                        embeds
+                    );
+                }
+            } else {
+                const referencedMessage = await message.fetchReference();
+                if (referencedMessage) {
+                    // Polls carry generated content; never prepend a mention
+                    // to them.
+                    if (!isPollPresent) {
+                        mentionUserIds.push(
+                            ...(await this.resolveReplyMention(
+                                message,
+                                referencedMessage
+                            ))
+                        );
+                    }
+                    replyQuote = await this.buildReplyQuote(
                         message,
                         referencedMessage
-                    ))
-                );
-            }
-
-            if (isForwarded) {
-                attachments.push(...this.buildAttachments(referencedMessage));
-                embeds.push(...this.buildRichEmbeds(referencedMessage));
-            }
-
-            const sanitized = this.sanitizeContent(referencedMessage);
-            const hasText = !!sanitized && sanitized.trim() !== '';
-            const content =
-                hasText || isForwarded
-                    ? sanitized
-                    : this.describeTextlessMessage({
-                          attachments: referencedMessage.attachments?.size ?? 0,
-                          stickers: referencedMessage.stickers?.size ?? 0,
-                          embeds: referencedMessage.embeds?.length ?? 0,
-                      });
-            const refrenceEmoji = isForwarded ? '⏩' : '↩️';
-            if (hasText || !isForwarded) {
-                const referencedAuthor = referencedMessage.author;
-                const footer = isForwarded
-                    ? this.buildForwardSourceFooter(message)
-                    : null;
-                embeds.unshift(
-                    new WebhookEmbed({
-                        description: `${content}`,
-                        color: 0x0b0d0e,
-                        author: {
-                            name: referencedAuthor
-                                ? `${referencedAuthor.username} ${refrenceEmoji}`
-                                : `Forwarded message ${refrenceEmoji}`,
-                            iconURL: referencedAuthor?.avatarURL() || undefined,
-                        },
-                        footer,
-                    })
-                );
-            } else if (attachments.length > 0 || embeds.length > 0) {
-                embeds.unshift(
-                    new WebhookEmbed({
-                        description: `Forwarded message ${refrenceEmoji}`,
-                        color: 0x0b0d0e,
-                        footer: this.buildForwardSourceFooter(message),
-                    })
-                );
+                    );
+                }
             }
         }
 
@@ -387,7 +435,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             embeds,
             mentionUserIds,
             mentionRoleIds,
-            mentionEveryone
+            mentionEveryone,
+            replyQuote
         );
     }
 }
