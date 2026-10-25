@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../services/commandRoles/CommandRoleService';
 import {
     Channel,
     Client,
@@ -60,7 +61,7 @@ function toCleanCandidate(message: Message): CleanCandidate {
 export default class CleanFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
         client: Client,
-        private readonly moderatorRoleIds: readonly string[],
+        private readonly moderatorRoleIds: RoleIdsResolver,
         private readonly triggerPrefixes: readonly string[]
     ) {
         super(client);
@@ -150,7 +151,10 @@ export default class CleanFluxerCommandHandler extends FluxerCommandHandler {
             );
             return;
         }
-        if (!(await this.requireRole(message, this.moderatorRoleIds))) {
+        const roleIds = message.guildId
+            ? await this.moderatorRoleIds(message.guildId)
+            : [];
+        if (!(await this.requireRole(message, roleIds))) {
             return;
         }
 

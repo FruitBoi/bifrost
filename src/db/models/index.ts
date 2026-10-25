@@ -13,6 +13,7 @@ import { UserTimezoneModel } from './UserTimezoneModel';
 import { ThreadDirectoryModel } from './ThreadDirectoryModel';
 import { ThreadDirectoryEntryModel } from './ThreadDirectoryEntryModel';
 import { MessageCountModel } from './MessageCountModel';
+import { CommandRoleModel } from './CommandRoleModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -139,4 +140,7 @@ export {
     ThreadDirectoryModel,
     ThreadDirectoryEntryModel,
     MessageCountModel,
+    // No associations: command_roles rows are keyed by raw platform guild IDs,
+    // independent of guild links (issue #43).
+    CommandRoleModel,
 };

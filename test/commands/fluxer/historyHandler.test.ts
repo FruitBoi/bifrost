@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../src/services/commandRoles/CommandRoleService';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     Client,
@@ -217,6 +218,9 @@ function colorOf(fn: ReturnType<typeof vi.fn>, call = 0): number | undefined {
 
 describe('HistoryFluxerCommandHandler', () => {
     let handler: HistoryFluxerCommandHandler;
+    let buildHandler: (
+        moderatorRoleIds: RoleIdsResolver
+    ) => HistoryFluxerCommandHandler;
     let linkService: FakeLinkService;
     let historyService: FakeHistoryService;
     let threadSyncService: { resolveFluxerThread: ReturnType<typeof vi.fn> };
@@ -240,17 +244,19 @@ describe('HistoryFluxerCommandHandler', () => {
             resolveFluxerThread: vi.fn().mockResolvedValue(null),
         };
         messageRelay = { buildPayload: vi.fn(), sendPayload: vi.fn() };
-        handler = new HistoryFluxerCommandHandler(client, {
-            linkService: linkService.asLinkService(),
-            threadSyncService:
-                threadSyncService as unknown as ThreadSyncService,
-            messageRelay:
-                messageRelay as unknown as FluxerToDiscordMessageRelay,
-            historyService: historyService.asService(),
-            moderatorRoleIds: [MODERATOR_ROLE],
-            limits: LIMITS,
-            delayMs: DELAY_MS,
-        });
+        buildHandler = (moderatorRoleIds) =>
+            new HistoryFluxerCommandHandler(client, {
+                linkService: linkService.asLinkService(),
+                threadSyncService:
+                    threadSyncService as unknown as ThreadSyncService,
+                messageRelay:
+                    messageRelay as unknown as FluxerToDiscordMessageRelay,
+                historyService: historyService.asService(),
+                moderatorRoleIds,
+                limits: LIMITS,
+                delayMs: DELAY_MS,
+            });
+        handler = buildHandler(async () => [MODERATOR_ROLE]);
     });
 
     afterEach(() => {
@@ -284,6 +290,23 @@ describe('HistoryFluxerCommandHandler', () => {
         await run(asWebhook.message);
         expect(replied(asWebhook.reply)).toEqual([
             'Bots cannot use this command.',
+        ]);
+        expect(historyService.startCalls).toHaveLength(0);
+    });
+
+    it('resolves the roles for the message guild (issue #43)', async () => {
+        const resolver = vi.fn(async (guildId: string) =>
+            guildId === 'guild-1' ? ['guild-1-mod'] : [MODERATOR_ROLE]
+        );
+        handler = buildHandler(resolver);
+        const { message, reply } = makeMessage({
+            content: '!b history',
+            roles: [MODERATOR_ROLE],
+        });
+        await run(message);
+        expect(resolver).toHaveBeenCalledWith('guild-1');
+        expect(replied(reply)).toEqual([
+            'You do not have a role that is allowed to use this command.',
         ]);
         expect(historyService.startCalls).toHaveLength(0);
     });

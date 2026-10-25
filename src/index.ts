@@ -32,6 +32,8 @@ import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
 import MessageCountService from './services/messageCount/MessageCountService';
 import { SequelizeMessageCountRepository } from './db/sequelizerepos/SequelizeMessageCountRepository';
+import CommandRoleService from './services/commandRoles/CommandRoleService';
+import { SequelizeCommandRoleRepository } from './db/sequelizerepos/SequelizeCommandRoleRepository';
 import { LinkService } from './services/LinkService';
 import { WebhookService } from './services/WebhookService';
 import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
@@ -192,6 +194,15 @@ const main = async () => {
         new SequelizeMessageCountRepository()
     );
     queueService?.setMessageCountService(messageCountService);
+    // Per-server command roles (issue #43): the config lists are only the
+    // defaults for servers an administrator has not customised.
+    const commandRoleService = new CommandRoleService(
+        new SequelizeCommandRoleRepository(),
+        {
+            moderator: botConfig.roles.moderator,
+            identity: botConfig.roles.identity,
+        }
+    );
     // Reminders (issue #9): one service for both platforms; each client
     // registers its own deliverer once it is ready, and the service starts
     // polling for due reminders after both clients have been started.
@@ -372,6 +383,7 @@ const main = async () => {
         fluxerStatsService,
         dbStatsService,
         messageCountService,
+        commandRoleService,
         botConfig,
         reminderService,
         reminderTimezoneService,
@@ -502,6 +514,7 @@ const main = async () => {
             fluxerStatsService,
             dbStatsService,
             messageCountService,
+            commandRoleService,
             botConfig,
             reminderService,
             reminderTimezoneService,

@@ -187,7 +187,7 @@ const commandList: Command[] = [
         aliases: ['map'],
         fluxer: {
             description:
-                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Alias `map`. Restricted to the roles configured in `roles.identity`.',
+                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Alias `map`. Restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.identity` from the config when none are set).',
             usageArgs: ['<@fluxerUser> <discordUserId>'],
         },
     },
@@ -272,7 +272,7 @@ const commandList: Command[] = [
         aliases: ['clear', 'cl'],
         discord: {
             description:
-                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages; messages older than two weeks cannot be deleted. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
+                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages; messages older than two weeks cannot be deleted. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.moderator` from the config when none are set).',
             usageArgs: [
                 '<num> [user]',
                 '[-r <regex>] [-im] [-i] [-ma <time>] [-minage <time>] [-nopin] [-a] [-bots] [-from <id>] [-to <id>]',
@@ -280,7 +280,7 @@ const commandList: Command[] = [
         },
         fluxer: {
             description:
-                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles configured in `roles.moderator`.',
+                'Deletes the last `num` messages (1–1000) in this channel, or only those by the given user (mention or ID, before or after the number). Switches: `-r <regex>` only messages matching the regex (`-im` inverts it, `-i` ignores case), `-ma <time>` / `-minage <time>` only messages younger / older than that (e.g. `1h30m`), `-nopin` skips pinned messages, `-a` only messages with attachments, `-bots` only bot messages, `-from <id>` / `-to <id>` only messages between those message IDs. Looks through the last 1000 messages. Aliases `clear`, `cl`; also triggered by `?clean` / `!clean`. Moderator command: restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.moderator` from the config when none are set).',
             usageArgs: [
                 '<num> [user]',
                 '[-r <regex>] [-im] [-i] [-ma <time>] [-minage <time>] [-nopin] [-a] [-bots] [-from <id>] [-to <id>]',
@@ -294,7 +294,7 @@ const commandList: Command[] = [
         aliases: ['backfill'],
         discord: {
             description:
-                "Copies this linked channel's or thread's message history to its Fluxer counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles configured in `roles.moderator`.",
+                "Copies this linked channel's or thread's message history to its Fluxer counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.moderator` from the config when none are set).",
             usageArgs: [
                 '[num | all | confirm | status | stop]',
                 '[-ma <time>] [-after <id>] [-before <id>] [-digest] [-notime]',
@@ -302,7 +302,7 @@ const commandList: Command[] = [
         },
         fluxer: {
             description:
-                "Copies this linked channel's or thread's message history to its Discord counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles configured in `roles.moderator`.",
+                "Copies this linked channel's or thread's message history to its Discord counterpart, oldest first, in the style of bridged messages (each copy starts with a timestamp line). `history` copies the last `history.defaultCount` messages, `history 250` the last 250 (up to `history.maxCount`), `history all` the whole history after `history confirm`. Switches: `-ma <time>` only messages younger than that, `-after <id>` / `-before <id>` only messages between those IDs, `-digest` packs many messages into transcript posts (faster, but those copies get no per-message links), `-notime` drops the timestamp lines. Already bridged or transferred messages are skipped, so it is safe to re-run and resumes. Runs in the background, one transfer at a time with a pause between posts; copies never ping anyone. `status` shows the transfer for this channel, `stop` cancels it. Alias `backfill`. Moderator command: restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.moderator` from the config when none are set).",
             usageArgs: [
                 '[num | all | confirm | status | stop]',
                 '[-ma <time>] [-after <id>] [-before <id>] [-digest] [-notime]',
@@ -405,6 +405,23 @@ const commandList: Command[] = [
             description:
                 'Shows how many messages were bridged from Discord and from Fluxer in this server over the last 24 hours, 7 days, 30 days and all time.',
             usageArgs: [],
+        },
+    },
+    {
+        name: 'commandroles',
+        aliases: ['cmdroles', 'roleperms'],
+        summary: 'Shows or sets which roles may use the moderator commands.',
+        discord: {
+            description:
+                'Shows or, with the Administrator permission, changes which roles of this server may use the role-gated commands. Groups: `moderator` (aliases `mod`, `moderators`; gates `clean` and `history`). `commandroles` shows every group, `commandroles <group>` one; `add`, `remove` (alias `rm`) and `set` take role mentions, IDs or exact role names (separate names with commas), `reset` returns to the config default. A server with at least one role in a group uses only those roles; with none, the roles from the config apply. At most 25 roles per group. Aliases `cmdroles`, `roleperms`. Viewing is open to everyone.',
+            usageArgs: ['[moderator] [add|remove|set <roles...> | reset]'],
+        },
+        fluxer: {
+            description:
+                'Shows or, with the Administrator permission, changes which roles of this server may use the role-gated commands. Groups: `moderator` (aliases `mod`, `moderators`; gates `clean` and `history`) and `identity` (aliases `role`, `map`; gates `role` / `map`). `commandroles` shows every group, `commandroles <group>` one; `add`, `remove` (alias `rm`) and `set` take role mentions, IDs or exact role names (separate names with commas), `reset` returns to the config default. A server with at least one role in a group uses only those roles; with none, the roles from the config apply. At most 25 roles per group. Aliases `cmdroles`, `roleperms`. Viewing is open to everyone.',
+            usageArgs: [
+                '[moderator|identity] [add|remove|set <roles...> | reset]',
+            ],
         },
     },
 ];

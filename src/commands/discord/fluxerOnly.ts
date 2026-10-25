@@ -1,7 +1,7 @@
 /**
  * Fluxer-only commands (issue #39): with `commands.fluxerOnly` on, Discord
  * only runs the moderator bridging commands, the ones ported from YAGPDB
- * (`remindme`, `clean`, …) and `clauderequest`. Every other command
+ * (`remindme`, `clean`, …) and `clauderequest` and `commandroles`. Every other command
  * invocation on Discord gets a teasing reply telling the user to come to
  * Fluxer instead.
  */
@@ -31,6 +31,8 @@ export const DISCORD_ALLOWED_COMMANDS: readonly string[] = [
     'clean',
     // Claude requests are bridged across both servers (issue #40).
     'clauderequest',
+    // Per-server command roles (issue #43).
+    'commandroles',
 ];
 
 export const FLUXER_ONLY_REPLIES: readonly string[] = [

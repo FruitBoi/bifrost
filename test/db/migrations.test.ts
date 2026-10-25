@@ -19,12 +19,14 @@ import * as claudeRequestNotices from '../../src/db/migrations/00013-claude-requ
 import * as threadDirectories from '../../src/db/migrations/00014-thread-directories';
 import * as threadDirectoryRoles from '../../src/db/migrations/00015-thread-directory-roles';
 import * as messageCounts from '../../src/db/migrations/00016-message-counts';
+import * as commandRoles from '../../src/db/migrations/00017-command-roles';
 import {
     MessageLinkModel,
     ThreadDirectoryEntryModel,
 } from '../../src/db/models';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
+import { SequelizeCommandRoleRepository } from '../../src/db/sequelizerepos/SequelizeCommandRoleRepository';
 import { SequelizeClaudeRequestNoticeRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
@@ -115,6 +117,11 @@ const umzug = new Umzug({
             name: '00016-message-counts.js',
             up: messageCounts.up,
             down: messageCounts.down,
+        },
+        {
+            name: '00017-command-roles.js',
+            up: commandRoles.up,
+            down: commandRoles.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -2160,5 +2167,81 @@ describe('migration 00016-message-counts', () => {
             discord: 0,
             fluxer: 0,
         });
+    });
+});
+
+describe('migration 00017-command-roles', () => {
+    it('adds command_roles, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00017-command-roles.js');
+        expect(await qi.tableExists('command_roles')).toBe(true);
+
+        const cols = await qi.describeTable('command_roles');
+        for (const name of ['platform', 'guildId', 'roleGroup', 'roleId']) {
+            expect(cols[name]).toMatchObject({
+                allowNull: false,
+                primaryKey: true,
+            });
+            expect(cols[name].type).toMatch(/VARCHAR|TEXT|CHAR/i);
+        }
+        expect(cols).not.toHaveProperty('createdAt');
+        expect(cols).not.toHaveProperty('updatedAt');
+
+        const repo = new SequelizeCommandRoleRepository();
+        expect(await repo.list('discord', 'dg1', 'moderator')).toEqual([]);
+
+        // Snowflakes stay exact strings (too big for a JS number).
+        const big = '1234567890123456789';
+        await repo.add('discord', 'dg1', 'moderator', [big, '200']);
+        // Re-adding a stored role is a no-op, not a constraint error.
+        await repo.add('discord', 'dg1', 'moderator', ['200', '300']);
+        await repo.add('discord', 'dg1', 'moderator', []);
+        expect(await repo.list('discord', 'dg1', 'moderator')).toEqual([
+            big,
+            '200',
+            '300',
+        ]);
+
+        // No guild link needed, and platforms, guilds and groups are apart.
+        await repo.add('fluxer', 'dg1', 'moderator', ['f1']);
+        await repo.add('discord', 'dg1', 'identity', ['i1']);
+        await repo.add('discord', 'dg2', 'moderator', ['g2']);
+        expect(await repo.list('fluxer', 'dg1', 'moderator')).toEqual(['f1']);
+        expect(await repo.list('discord', 'dg1', 'identity')).toEqual(['i1']);
+        expect(await repo.list('discord', 'dg2', 'moderator')).toEqual(['g2']);
+
+        await repo.remove('discord', 'dg1', 'moderator', ['200', 'missing']);
+        await repo.remove('discord', 'dg1', 'moderator', []);
+        expect(await repo.list('discord', 'dg1', 'moderator')).toEqual([
+            big,
+            '300',
+        ]);
+
+        // replace swaps the whole group and nothing else.
+        await repo.replace('discord', 'dg1', 'moderator', [
+            '400',
+            '400',
+            '500',
+        ]);
+        expect(await repo.list('discord', 'dg1', 'moderator')).toEqual([
+            '400',
+            '500',
+        ]);
+        await repo.replace('discord', 'dg1', 'moderator', []);
+        expect(await repo.list('discord', 'dg1', 'moderator')).toEqual([]);
+        expect(await repo.list('fluxer', 'dg1', 'moderator')).toEqual(['f1']);
+        expect(await repo.list('discord', 'dg1', 'identity')).toEqual(['i1']);
+        expect(await repo.list('discord', 'dg2', 'moderator')).toEqual(['g2']);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00017-command-roles.js' });
+        expect(await executed()).not.toContain('00017-command-roles.js');
+        expect(await executed()).toContain('00016-message-counts.js');
+        expect(await qi.tableExists('command_roles')).toBe(false);
+        expect(await qi.tableExists('message_counts')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00017-command-roles.js');
+        expect(await repo.list('fluxer', 'dg1', 'moderator')).toEqual([]);
     });
 });

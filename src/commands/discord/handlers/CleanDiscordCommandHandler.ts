@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../services/commandRoles/CommandRoleService';
 import {
     Client,
     EmbedBuilder,
@@ -33,8 +34,8 @@ export const CLEAN_CONFIRMATION_DELETE_DELAY_MS = 5_000;
 /**
  * `clean <num> [user] [switches]` (aliases `clear`, `cl`): bulk-deletes the
  * last `num` matching messages in the channel, YAGPDB-style (issue #12).
- * A moderator command: only members holding one of the configured
- * `roles.moderator` IDs may run it. Reachable with the bot prefix and with
+ * A moderator command: only members holding one of the server's
+ * moderator role IDs (issue #43) may run it. Reachable with the bot prefix and with
  * the short trigger prefixes (`?clean 10`). The filters live in
  * `services/clean`; this handler adapts Discord messages to them and
  * mirrors the confirmation flow of YAGPDB (a short-lived "Deleted n
@@ -43,7 +44,7 @@ export const CLEAN_CONFIRMATION_DELETE_DELAY_MS = 5_000;
 export default class CleanDiscordCommandHandler extends DiscordCommandHandler {
     constructor(
         client: Client,
-        private readonly moderatorRoleIds: readonly string[],
+        private readonly moderatorRoleIds: RoleIdsResolver,
         private readonly triggerPrefixes: readonly string[]
     ) {
         super(client);
@@ -125,7 +126,10 @@ export default class CleanDiscordCommandHandler extends DiscordCommandHandler {
             return;
         }
 
-        if (!(await this.requireRole(message, this.moderatorRoleIds))) {
+        const roleIds = message.guildId
+            ? await this.moderatorRoleIds(message.guildId)
+            : [];
+        if (!(await this.requireRole(message, roleIds))) {
             return;
         }
 

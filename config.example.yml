@@ -38,10 +38,18 @@ roles:
     # Discord role IDs only Discord members, so list IDs from both platforms
     # if a group should work on both. Quote the IDs: unquoted numbers lose
     # precision when parsed.
+    #
+    # `moderator` and `identity` are only defaults: an administrator of a
+    # server can give that server its own list with `!b commandroles <group>
+    # add|remove|set|reset <role...>` (stored in the database). A server
+    # that has set its own list ignores the default for that group; `reset`
+    # (or removing its last role) goes back to the default.
+    # `claudeRequest` is not per server: it is always this list.
 
-    # Moderator commands: `clean` (aliases `clear`, `cl`). The default is a
-    # Fluxer role, so nobody can run `clean` on Discord until you add a
-    # Discord role ID here.
+    # Moderator commands: `clean` (aliases `clear`, `cl`) and `history`. The
+    # default is a Fluxer role, so nobody can run them on Discord until you
+    # add a Discord role ID here or a Discord administrator runs
+    # `!b commandroles moderator add <role>`.
     moderator:
         - "1561105750388908139"
     # Identity command (Fluxer only). `!b role <@user> <discordUserId>`

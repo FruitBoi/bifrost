@@ -60,6 +60,9 @@ import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
 import MessageCountService from './services/messageCount/MessageCountService';
+import CommandRoleService from './services/commandRoles/CommandRoleService';
+import { COMMAND_ROLES_COMMAND_NAMES } from './commands/commandRolesCommand';
+import CommandRolesFluxerCommandHandler from './commands/fluxer/handlers/CommandRolesFluxerCommandHandler';
 import MessageCountFluxerCommandHandler from './commands/fluxer/handlers/MessageCountFluxerCommandHandler';
 import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
 import FluxerThreadDirectoryAdapter from './services/threadDirectory/FluxerThreadDirectoryAdapter';
@@ -121,6 +124,7 @@ const startFluxerClient = async ({
     fluxerStatsService,
     dbStatsService,
     messageCountService,
+    commandRoleService,
     botConfig,
     reminderService,
     reminderTimezoneService,
@@ -149,6 +153,7 @@ const startFluxerClient = async ({
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
     messageCountService: MessageCountService;
+    commandRoleService: CommandRoleService;
     botConfig: BotConfig;
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
@@ -253,6 +258,14 @@ const startFluxerClient = async ({
             dbStatsService
         )
     );
+    // Per-server command role allowlists (issue #43).
+    const commandRolesHandler = new CommandRolesFluxerCommandHandler(
+        client,
+        commandRoleService
+    );
+    for (const name of COMMAND_ROLES_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, commandRolesHandler);
+    }
     const messageCountHandler = new MessageCountFluxerCommandHandler(
         client,
         linkService,
@@ -329,7 +342,7 @@ const startFluxerClient = async ({
         linkService,
         discordEntityResolver,
         threadMemberSyncService,
-        botConfig.roles.identity
+        commandRoleService.resolver('fluxer', 'identity')
     );
     commandRegistry.registerCommand('role', identityHandler);
     commandRegistry.registerCommand('map', identityHandler);
@@ -390,7 +403,7 @@ const startFluxerClient = async ({
     if (botConfig.clean.enabled) {
         const cleanHandler = new CleanFluxerCommandHandler(
             client,
-            botConfig.roles.moderator,
+            commandRoleService.resolver('fluxer', 'moderator'),
             botConfig.clean.triggerPrefixes
         );
         for (const name of CLEAN_COMMAND_NAMES) {
@@ -403,7 +416,10 @@ const startFluxerClient = async ({
             threadSyncService,
             messageRelay,
             historyService,
-            moderatorRoleIds: botConfig.roles.moderator,
+            moderatorRoleIds: commandRoleService.resolver(
+                'fluxer',
+                'moderator'
+            ),
             limits: {
                 defaultCount: botConfig.history.defaultCount,
                 maxCount: botConfig.history.maxCount,

@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../src/services/commandRoles/CommandRoleService';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client, Message } from '@fluxerjs/core';
 import { Collection } from 'discord.js';
@@ -119,6 +120,7 @@ function makeServices(discordRoles: FakeDiscordRole[] = []) {
         failed: [],
         unchecked: [],
     });
+    const roleResolver = vi.fn<RoleIdsResolver>(async () => [IDENTITY_ROLE]);
     const handler = new IdentityFluxerCommandHandler(
         client,
         linkService as unknown as LinkService,
@@ -126,9 +128,14 @@ function makeServices(discordRoles: FakeDiscordRole[] = []) {
         {
             addFluxerUserToDiscordUsersThreads,
         } as unknown as ThreadMemberSyncService,
-        [IDENTITY_ROLE]
+        roleResolver
     );
-    return { handler, setUserLink, addFluxerUserToDiscordUsersThreads };
+    return {
+        handler,
+        roleResolver,
+        setUserLink,
+        addFluxerUserToDiscordUsersThreads,
+    };
 }
 
 /** The single embed of the first reply. */
@@ -167,6 +174,28 @@ describe('IdentityFluxerCommandHandler', () => {
             );
             expect(replyEmbed(reply)).toMatchObject({
                 description: 'This command must be used in a server.',
+                color: EmbedColors.Error,
+            });
+            expect(services.setUserLink).not.toHaveBeenCalled();
+        });
+
+        it('resolves the roles for the message guild (issue #43)', async () => {
+            services.roleResolver.mockImplementation(async (guildId) =>
+                guildId === 'guild-1' ? ['guild-1-identity'] : [IDENTITY_ROLE]
+            );
+            const { message, reply } = makeMessage({
+                roles: [IDENTITY_ROLE],
+            });
+            await services.handler.handleCommand(
+                message,
+                'role',
+                `<@${FLUXER_USER}>`,
+                DISCORD_USER
+            );
+            expect(services.roleResolver).toHaveBeenCalledWith('guild-1');
+            expect(replyEmbed(reply)).toMatchObject({
+                description:
+                    'You do not have a role that is allowed to use this command.',
                 color: EmbedColors.Error,
             });
             expect(services.setUserLink).not.toHaveBeenCalled();
@@ -224,7 +253,7 @@ describe('IdentityFluxerCommandHandler', () => {
                 linkService as unknown as LinkService,
                 {} as DiscordEntityResolver,
                 {} as ThreadMemberSyncService,
-                [IDENTITY_ROLE]
+                async () => [IDENTITY_ROLE]
             );
             const { message, reply } = makeMessage();
             await handler.handleCommand(

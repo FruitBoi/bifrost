@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../services/commandRoles/CommandRoleService';
 import {
     Client,
     EmbedBuilder,
@@ -52,7 +53,7 @@ type IdentityOutcome =
 /**
  * The Fluxer `role` command (alias `map`), which pairs a Fluxer member with a
  * Discord user. It takes `<@fluxerUser> <discordUserId>`, only members
- * holding one of the configured Fluxer role IDs may run it, and it treats the
+ * holding one of the server's identity role IDs (issue #43) may run it, and it treats the
  * mentioned Fluxer member as the given Discord user:
  *
  * 1. adds every Fluxer role named like one of the Discord user's roles,
@@ -69,7 +70,7 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
         private readonly linkService: LinkService,
         private readonly discordEntityResolver: DiscordEntityResolver,
         private readonly threadMemberSyncService: ThreadMemberSyncService,
-        private readonly allowedRoleIds: readonly string[]
+        private readonly allowedRoleIds: RoleIdsResolver
     ) {
         super(client);
     }
@@ -136,7 +137,10 @@ export default class IdentityFluxerCommandHandler extends FluxerCommandHandler {
         }
 
         // Permission: the caller must hold one of the allowed role IDs.
-        if (!(await this.requireRole(message, this.allowedRoleIds))) {
+        const roleIds = message.guildId
+            ? await this.allowedRoleIds(message.guildId)
+            : [];
+        if (!(await this.requireRole(message, roleIds))) {
             return null;
         }
 

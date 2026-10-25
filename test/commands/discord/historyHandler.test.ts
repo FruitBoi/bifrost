@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../src/services/commandRoles/CommandRoleService';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 import HistoryDiscordCommandHandler from '../../../src/commands/discord/handlers/HistoryDiscordCommandHandler';
@@ -216,6 +217,9 @@ const client = {
 
 describe('HistoryDiscordCommandHandler', () => {
     let handler: HistoryDiscordCommandHandler;
+    let buildHandler: (
+        moderatorRoleIds: RoleIdsResolver
+    ) => HistoryDiscordCommandHandler;
     let linkService: FakeLinkService;
     let historyService: FakeHistoryService;
     let threadSyncService: { resolveDiscordThread: ReturnType<typeof vi.fn> };
@@ -239,17 +243,19 @@ describe('HistoryDiscordCommandHandler', () => {
             resolveDiscordThread: vi.fn().mockResolvedValue(null),
         };
         messageRelay = { buildPayload: vi.fn(), sendPayload: vi.fn() };
-        handler = new HistoryDiscordCommandHandler(client, {
-            linkService: linkService.asLinkService(),
-            threadSyncService:
-                threadSyncService as unknown as ThreadSyncService,
-            messageRelay:
-                messageRelay as unknown as DiscordToFluxerMessageRelay,
-            historyService: historyService.asService(),
-            moderatorRoleIds: [MOD_ROLE],
-            limits: LIMITS,
-            delayMs: DELAY_MS,
-        });
+        buildHandler = (moderatorRoleIds) =>
+            new HistoryDiscordCommandHandler(client, {
+                linkService: linkService.asLinkService(),
+                threadSyncService:
+                    threadSyncService as unknown as ThreadSyncService,
+                messageRelay:
+                    messageRelay as unknown as DiscordToFluxerMessageRelay,
+                historyService: historyService.asService(),
+                moderatorRoleIds,
+                limits: LIMITS,
+                delayMs: DELAY_MS,
+            });
+        handler = buildHandler(async () => [MOD_ROLE]);
     });
 
     afterEach(() => {
@@ -278,6 +284,23 @@ describe('HistoryDiscordCommandHandler', () => {
         });
         await run(message);
         expect(replied(reply)).toEqual(['Bots cannot use this command.']);
+        expect(historyService.startCalls).toHaveLength(0);
+    });
+
+    it('resolves the roles for the message guild (issue #43)', async () => {
+        const resolver = vi.fn(async (guildId: string) =>
+            guildId === 'guild-1' ? ['guild-1-mod'] : [MOD_ROLE]
+        );
+        handler = buildHandler(resolver);
+        const { message, reply } = makeMessage({
+            content: '!b history',
+            member: makeMember([MOD_ROLE]),
+        });
+        await run(message);
+        expect(resolver).toHaveBeenCalledWith('guild-1');
+        expect(replied(reply)).toEqual([
+            'You do not have a role that is allowed to use this command.',
+        ]);
         expect(historyService.startCalls).toHaveLength(0);
     });
 

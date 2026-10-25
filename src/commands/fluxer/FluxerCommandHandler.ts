@@ -138,7 +138,8 @@ export default abstract class FluxerCommandHandler extends CommandHandler<
 
     /**
      * Whether the author holds at least one of `roleIds` in the guild of
-     * `message`. Like {@link requirePermission}, a failure is reported to the
+     * `message` (callers pass the per-server allowlist, issue #43;
+     * an empty list never passes). Like {@link requirePermission}, a failure is reported to the
      * author ("Could not fetch your member information." or "You do not have
      * a role that is allowed to use this command.") and yields false.
      */

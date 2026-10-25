@@ -48,6 +48,9 @@ import DiscordStatsService from './services/statsService/DiscordStatsService';
 import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscordCommandHandler';
 import { DbStatsService } from './services/DbStatsService';
 import MessageCountService from './services/messageCount/MessageCountService';
+import CommandRoleService from './services/commandRoles/CommandRoleService';
+import { COMMAND_ROLES_COMMAND_NAMES } from './commands/commandRolesCommand';
+import CommandRolesDiscordCommandHandler from './commands/discord/handlers/CommandRolesDiscordCommandHandler';
 import MessageCountDiscordCommandHandler from './commands/discord/handlers/MessageCountDiscordCommandHandler';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
@@ -110,6 +113,7 @@ const startDiscordClient = async ({
     fluxerStatsService,
     dbStatsService,
     messageCountService,
+    commandRoleService,
     reminderService,
     reminderTimezoneService,
     historyService,
@@ -135,6 +139,7 @@ const startDiscordClient = async ({
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
     messageCountService: MessageCountService;
+    commandRoleService: CommandRoleService;
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
@@ -229,6 +234,14 @@ const startDiscordClient = async ({
             dbStatsService
         )
     );
+    // Per-server command role allowlists (issue #43).
+    const commandRolesHandler = new CommandRolesDiscordCommandHandler(
+        client,
+        commandRoleService
+    );
+    for (const name of COMMAND_ROLES_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, commandRolesHandler);
+    }
     const messageCountHandler = new MessageCountDiscordCommandHandler(
         client,
         linkService,
@@ -345,7 +358,7 @@ const startDiscordClient = async ({
     if (cleanEnabled) {
         const cleanHandler = new CleanDiscordCommandHandler(
             client,
-            botConfig.roles.moderator,
+            commandRoleService.resolver('discord', 'moderator'),
             botConfig.clean.triggerPrefixes
         );
         for (const name of CLEAN_COMMAND_NAMES) {
@@ -359,7 +372,10 @@ const startDiscordClient = async ({
             threadSyncService,
             messageRelay,
             historyService,
-            moderatorRoleIds: botConfig.roles.moderator,
+            moderatorRoleIds: commandRoleService.resolver(
+                'discord',
+                'moderator'
+            ),
             limits: {
                 defaultCount: botConfig.history.defaultCount,
                 maxCount: botConfig.history.maxCount,

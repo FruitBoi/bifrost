@@ -197,7 +197,11 @@ describe('CleanDiscordCommandHandler', () => {
     beforeEach(() => {
         vi.useFakeTimers();
         vi.setSystemTime(NOW);
-        handler = new CleanDiscordCommandHandler(client, [MOD_ROLE], TRIGGERS);
+        handler = new CleanDiscordCommandHandler(
+            client,
+            async () => [MOD_ROLE],
+            TRIGGERS
+        );
     });
 
     afterEach(() => {
@@ -224,6 +228,23 @@ describe('CleanDiscordCommandHandler', () => {
         await handler.handleCommand(message, 'clean', '3');
         expect(replied(reply)).toEqual(['Bots cannot use this command.']);
         expect(channel.messages.fetch).not.toHaveBeenCalled();
+    });
+
+    it('resolves the roles for the message guild (issue #43)', async () => {
+        const resolver = vi.fn(async (guildId: string) =>
+            guildId === 'guild-1' ? ['guild-1-mod'] : [MOD_ROLE]
+        );
+        handler = new CleanDiscordCommandHandler(client, resolver, TRIGGERS);
+        const { message, reply, channel } = makeMessage({
+            content: '?clean 3',
+            member: makeMember([MOD_ROLE]),
+        });
+        await handler.handleCommand(message, 'clean', '3');
+        expect(resolver).toHaveBeenCalledWith('guild-1');
+        expect(replied(reply)).toEqual([
+            'You do not have a role that is allowed to use this command.',
+        ]);
+        expect(channel.bulkDelete).not.toHaveBeenCalled();
     });
 
     it('rejects members without a moderator role', async () => {
@@ -546,7 +567,11 @@ describe('CleanDiscordCommandHandler', () => {
         try {
             const { default: Handler } =
                 await import('../../../src/commands/discord/handlers/CleanDiscordCommandHandler');
-            const freshHandler = new Handler(client, [MOD_ROLE], TRIGGERS);
+            const freshHandler = new Handler(
+                client,
+                async () => [MOD_ROLE],
+                TRIGGERS
+            );
             const history = makeHistory(3);
             const {
                 message,

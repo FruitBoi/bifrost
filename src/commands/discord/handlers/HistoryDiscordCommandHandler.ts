@@ -1,3 +1,4 @@
+import type { RoleIdsResolver } from '../../../services/commandRoles/CommandRoleService';
 import {
     Client,
     EmbedBuilder,
@@ -46,7 +47,8 @@ export interface HistoryDiscordCommandOptions {
     threadSyncService: ThreadSyncService;
     messageRelay: DiscordToFluxerMessageRelay;
     historyService: HistoryTransferService;
-    moderatorRoleIds: readonly string[];
+    /** Per-server moderator role IDs (issue #43). */
+    moderatorRoleIds: RoleIdsResolver;
     /** Short trigger prefixes (`commands.triggerPrefixes`) besides the bot prefix. */
     triggerPrefixes?: readonly string[];
     limits: HistoryArgsLimits;
@@ -57,7 +59,7 @@ export interface HistoryDiscordCommandOptions {
  * `history [num|all|confirm|status|stop] [switches]` (alias `backfill`):
  * copies the history of the linked channel or thread the command is run in
  * to its Fluxer counterpart, through the same pipeline as live bridging
- * (issue #16). A moderator command (`roles.moderator`), bot prefix only.
+ * (issue #16). A moderator command (per-server moderator roles), bot prefix only.
  * `all` needs a `confirm` within two minutes; already bridged messages are
  * skipped so re-runs resume; the job runs in the background and this
  * handler keeps its status reply up to date.
@@ -167,7 +169,10 @@ export default class HistoryDiscordCommandHandler extends DiscordCommandHandler 
             );
             return;
         }
-        if (!(await this.requireRole(message, this.options.moderatorRoleIds))) {
+        const roleIds = message.guildId
+            ? await this.options.moderatorRoleIds(message.guildId)
+            : [];
+        if (!(await this.requireRole(message, roleIds))) {
             return;
         }
 

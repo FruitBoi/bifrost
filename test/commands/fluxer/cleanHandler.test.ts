@@ -185,7 +185,7 @@ describe('CleanFluxerCommandHandler', () => {
         vi.setSystemTime(NOW);
         handler = new CleanFluxerCommandHandler(
             client,
-            [MODERATOR_ROLE],
+            async () => [MODERATOR_ROLE],
             TRIGGERS
         );
     });
@@ -237,6 +237,24 @@ describe('CleanFluxerCommandHandler', () => {
         expect(bulkDelete).not.toHaveBeenCalled();
     });
 
+    it('resolves the roles for the message guild (issue #43)', async () => {
+        const resolver = vi.fn(async (guildId: string) =>
+            guildId === 'guild-1' ? ['guild-1-mod'] : [MODERATOR_ROLE]
+        );
+        handler = new CleanFluxerCommandHandler(client, resolver, TRIGGERS);
+        const { message, reply, bulkDelete } = makeMessage({
+            content: '?clean 3',
+            roles: [MODERATOR_ROLE],
+            history: makeHistory(3),
+        });
+        await handler.handleCommand(message, 'clean', '3');
+        expect(resolver).toHaveBeenCalledWith('guild-1');
+        expect(embedDescriptions(reply)).toEqual([
+            'You do not have a role that is allowed to use this command.',
+        ]);
+        expect(bulkDelete).not.toHaveBeenCalled();
+    });
+
     it('reports when the author member cannot be fetched', async () => {
         const { message, reply, fetch } = makeMessage({
             content: '?clean 3',
@@ -252,7 +270,7 @@ describe('CleanFluxerCommandHandler', () => {
     it('accepts members holding any of the moderator roles', async () => {
         handler = new CleanFluxerCommandHandler(
             client,
-            ['role-a', MODERATOR_ROLE],
+            async () => ['role-a', MODERATOR_ROLE],
             TRIGGERS
         );
         const { message, reply, bulkDelete } = makeMessage({
@@ -351,7 +369,11 @@ describe('CleanFluxerCommandHandler', () => {
         try {
             const { default: Handler } =
                 await import('../../../src/commands/fluxer/handlers/CleanFluxerCommandHandler');
-            const mocked = new Handler(client, [MODERATOR_ROLE], TRIGGERS);
+            const mocked = new Handler(
+                client,
+                async () => [MODERATOR_ROLE],
+                TRIGGERS
+            );
             const { message, deleteInvocation, bulkDelete } = makeMessage({
                 content: '?clean 1',
                 history: makeHistory(1),

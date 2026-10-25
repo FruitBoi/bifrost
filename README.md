@@ -247,7 +247,7 @@ Only live-bridged messages are counted, once each, under the platform they were 
 
 ## Identity mapping
 
-Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with the Fluxer command `!b role <@fluxerUser> <discordUserId>` (alias `!b map`; both names do exactly the same). It takes the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.
+Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with the Fluxer command `!b role <@fluxerUser> <discordUserId>` (alias `!b map`; both names do exactly the same). It takes the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the server's `identity` roles may run it: those set with [`commandroles identity`](#command-roles), or, when the server has set none, the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file).
 
 The `role` command does three things at once and reports the outcome of each:
 
@@ -265,7 +265,7 @@ The bot never guesses mappings from names, IDs, or who replies to whom. In addit
 
 - `iam` never replaces an existing mapping. If either account is already mapped, it refuses. Run `!b iam remove` (alias `unlink`) to remove your own mapping first, or ask an admin to change it with `!b role`.
 - There is one pending request per target account; a new request replaces the old one. You can send one request per minute.
-- Any member may use `iam`; the `roles.identity` restriction does not apply to it. Members who may run `!b role` (the roles in `roles.identity`) can still map anyone, as before.
+- Any member may use `iam`; the `identity` role restriction does not apply to it. Members who may run `!b role` (the server's `identity` roles) can still map anyone, as before.
 
 ### Commands
 
@@ -392,6 +392,23 @@ Reminders ship as migration `00009-reminders`, which adds the `reminders` table 
 
 ## Moderation
 
+### Command roles
+
+Which roles may run the role-gated commands is set **per server** by that server's administrators, with `!b commandroles` (aliases `cmdroles`, `roleperms`). It works on both platforms; each Discord and each Fluxer server keeps its own lists. There are two groups:
+
+| Group | Commands it gates | Config default |
+|---|---|---|
+| `moderator` | `clean`, `history` | `roles.moderator` |
+| `identity` | `role` / `map` (Fluxer only) | `roles.identity` |
+
+- `commandroles` shows every group with the roles allowed in this server; `commandroles <group>` shows one.
+- `commandroles <group> add <role...>` / `remove <role...>` (alias `rm`) / `set <role...>` change the server's list; `commandroles <group> reset` drops it. A role is a mention, an ID or its exact name; `remove` also accepts the ID of a role that was deleted since. At most 25 roles per group per server.
+- While a server has no roles of its own for a group, the config list (`roles.moderator` / `roles.identity`) applies there, as before. The first `add` starts a fresh list (the config IDs are not copied, they usually belong to another server), and removing the last role or `reset` falls back to the config list again.
+- Viewing is open to everyone; changing needs the **Administrator** permission in that server. On Discord only the `moderator` group exists, since `role` / `map` only run on Fluxer.
+- `clauderequest` is not configurable per server: it files issues on GitHub, outside any one server, so it stays restricted to `roles.claudeRequest` in the [configuration file](#configuration-file).
+
+The lists live in the `command_roles` table, added by migration `00017-command-roles`, which runs automatically on startup.
+
 ### Clean
 
 Bifröst has a bulk-delete command modelled on [YAGPDB's `clean`](https://help.yagpdb.xyz/docs/core/all-commands/#clean): tell it how many messages to remove, optionally whose and which, and it deletes them from the current channel. It works the same on Discord and on Fluxer, and is a **moderator command** (see [Permissions](#permissions-3) below).
@@ -439,7 +456,7 @@ Examples:
 
 #### Permissions
 
-- **Who may run it.** The member needs at least one of the roles listed in `roles.moderator` in the [configuration file](#configuration-file). Role IDs are matched on the platform the command is run on, and the default (`1561105750388908139`) is a **Fluxer** role, so out of the box nobody can run `clean` on Discord: add a Discord role ID to `roles.moderator` to allow it there.
+- **Who may run it.** The member needs at least one of the server's `moderator` roles, set with [`commandroles`](#command-roles); a server that has not set any uses `roles.moderator` from the [configuration file](#configuration-file). Role IDs are matched on the platform the command is run on, and the config default (`1561105750388908139`) is a **Fluxer** role, so out of the box nobody can run `clean` on Discord: a Discord administrator can run `!b commandroles moderator add <role>` to allow it there.
 - **What the bot needs.** **Manage Messages** and **Read Message History** in the channel.
 
 ### History transfer
@@ -468,7 +485,7 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 
 #### Permissions
 
-- **Who may run it.** A member with one of the roles listed in `roles.moderator`, like [Clean](#clean); add a Discord role ID there to allow it on Discord.
+- **Who may run it.** A member with one of the server's `moderator` roles, like [Clean](#clean) (see [Command roles](#command-roles)).
 - **What the bot needs.** **Read Message History** in the channel the command is run in. Posting on the other side goes through the link's webhook, which exists already.
 
 `history.enabled: false` switches the command off. The transfer state ships as migration `00010-history-messages`, which adds the `history_messages` table (one row per transferred message, so re-runs can skip them); it runs automatically on startup.
@@ -477,7 +494,7 @@ Linking two channels bridges new messages only. `history` (alias `backfill`) cop
 
 `!b clauderequest <request>` turns a chat message into a GitHub issue for Claude, without opening GitHub: everything after the command (newlines kept, up to 4000 characters) becomes an issue in the bot's repository (`claudeRequests.repo`, `FruitBoi/bifrost` by default) with the `claude` label (`claudeRequests.label`), the same label the **Claude request** issue template sets. The first line becomes the issue title (cut to 80 characters), the full text the body, followed by who sent it and from which server and channel. The bot replies with a link to the new issue. `@name` mentions in the text are defused so filing a request never pings anyone on GitHub.
 
-- **Who may run it.** Members with one of the roles in `roles.claudeRequest` (by default the same Fluxer roles as `roles.identity`; add a Discord role ID to allow it on Discord). One request per minute per user.
+- **Who may run it.** Members with one of the roles in `roles.claudeRequest` (by default the same Fluxer roles as `roles.identity`; add a Discord role ID to allow it on Discord). This list applies in every server and cannot be changed per server with `commandroles`, since requests go to GitHub rather than to one server. One request per minute per user.
 - **Setup.** Set `BF_GITHUB_TOKEN` (or `BF_GITHUB_TOKEN_FILE`) to a GitHub token that may create issues and apply labels in the repository, for example a fine-grained token limited to that repository with **Issues: Read and write**. Without it the command replies that it is not configured. `claudeRequests.enabled: false` switches the command off.
 
 - **Bridged across both servers.** In a bridged channel the `clauderequest` message, the bot's reply to it and the done notification below are all relayed to the linked channel on the other platform, so both servers see the request and its outcome. Slash-command invocations have no message to relay; only the bot's reply is bridged for them.
@@ -534,8 +551,8 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `threads.mirrorDeletes` | `false` | When a linked thread is deleted on one side, delete its counterpart too. Requires `permissions.manageThreads` on Discord and the matching right on Fluxer; otherwise the counterpart stays and only the link is removed. |
 | `categories.mirrorChannelRenames` | `true` | Mirror Discord channel renames onto the Fluxer thread a category link created for the channel. |
 | `categories.unlinkWhenChannelLeaves` | `true` | Drop a channel's link when it is moved out of a linked category (the Fluxer thread stays). |
-| `roles.moderator` | `["1561105750388908139"]` | Role IDs whose members may run the moderator commands (`clean`, `history`); see [Clean](#clean) and [History transfer](#history-transfer). IDs are matched on the platform the command is run on, so add a Discord role ID to allow them on Discord. Quote the IDs, unquoted numbers lose precision. |
-| `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Fluxer role IDs whose members may run the identity command `!b role` (alias `!b map`); see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
+| `roles.moderator` | `["1561105750388908139"]` | Default role IDs whose members may run the moderator commands (`clean`, `history`), used in every server that has not set its own with [`commandroles`](#command-roles); see [Clean](#clean) and [History transfer](#history-transfer). IDs are matched on the platform the command is run on. Quote the IDs, unquoted numbers lose precision. |
+| `roles.identity` | `["1561105750388908139", "1561105750388908112"]` | Default Fluxer role IDs whose members may run the identity command `!b role` (alias `!b map`), used in every server that has not set its own with [`commandroles`](#command-roles); see [Identity mapping](#identity-mapping). Formerly `roles.copyAllowedRoleIds`. Quote the IDs, unquoted numbers lose precision. |
 | `roles.bridgeMentions` | `true` | Relay role mentions as real pings of the role with the same name in the linked server on the other platform, if the author could ping the role on their own side. Without a same-named role the mention stays plaintext `@RoleName`; `@everyone`/`@here` are never bridged and edits never re-ping. `false` relays every role mention as plaintext. See [Pings](#pings). |
 | `roles.claudeRequest` | `["1561105750388908139", "1561105750388908112"]` | Role IDs whose members may run `!b clauderequest`; see [Claude requests](#claude-requests). Quote the IDs, unquoted numbers lose precision. |
 | `claudeRequests.enabled` | `true` | Enable the `clauderequest` command on both platforms. It also needs `BF_GITHUB_TOKEN`. |

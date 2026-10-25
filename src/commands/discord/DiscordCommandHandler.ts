@@ -104,10 +104,9 @@ export default abstract class DiscordCommandHandler extends CommandHandler<
 
     /**
      * Checks that the author holds at least one of `roleIds` (e.g. the
-     * configured `roles.moderator` IDs), replying with an error embed when
-     * they do not or when their member cannot be fetched. The IDs come from
-     * the config and may belong to the other platform, in which case nobody
-     * on Discord passes until a Discord role ID is configured.
+     * moderator role IDs resolved for this guild, issue #43), replying with an
+     * error embed when they do not or when their member cannot be fetched.
+     * Callers pass the per-server allowlist; an empty list never passes.
      */
     protected async requireRole(
         message: DiscordCommandHandlerMessage,
