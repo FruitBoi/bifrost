@@ -404,22 +404,23 @@ const startFluxerClient = async ({
     }
 
     // Issue #40: `clauderequest` invocations, the bot's replies to them and
-    // the "done" notices are bridged like ordinary chat.
+    // the "done" notices are bridged like ordinary chat. Issue #42 does the
+    // same for `fishtrade` (one way: Discord still cannot run it).
     // Sent messages may lack a guild ID; the relay only bridges messages in
     // linked channels anyway.
-    const bridgeClaudeRequestMessage = async (bridged: Message) => {
+    const bridgeCommandMessage = async (bridged: Message) => {
         try {
             await messageRelay.relayMessage(bridged);
         } catch (error) {
-            logger.error(
-                '❌ Failed to bridge a Claude request message:',
-                error
-            );
+            logger.error('❌ Failed to bridge a command message:', error);
         }
     };
-    const isClaudeRequestCommand = (command: string) =>
-        botConfig.claudeRequests.enabled &&
-        (CLAUDE_REQUEST_COMMAND_NAMES as readonly string[]).includes(command);
+    const isBridgedCommand = (command: string) =>
+        (botConfig.claudeRequests.enabled &&
+            (CLAUDE_REQUEST_COMMAND_NAMES as readonly string[]).includes(
+                command
+            )) ||
+        (FISH_TRADE_COMMAND_NAMES as readonly string[]).includes(command);
 
     // Replies to "Claude request implemented/closed" notices (issue #35).
     const claudeRequestReplyHandler =
@@ -437,7 +438,7 @@ const startFluxerClient = async ({
             claudeRequestService,
             botConfig.roles.claudeRequest,
             claudeRequestNotifyService,
-            bridgeClaudeRequestMessage
+            bridgeCommandMessage
         );
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
@@ -452,7 +453,10 @@ const startFluxerClient = async ({
         commandRegistry.registerCommand(name, linesHandler);
     }
 
-    const fishTradeHandler = new FishTradeFluxerCommandHandler(client);
+    const fishTradeHandler = new FishTradeFluxerCommandHandler(
+        client,
+        bridgeCommandMessage
+    );
     for (const name of FISH_TRADE_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, fishTradeHandler);
     }
@@ -470,7 +474,7 @@ const startFluxerClient = async ({
         }
         claudeRequestNotifyService?.setNotifier(
             'fluxer',
-            new FluxerClaudeRequestNotifier(client, bridgeClaudeRequestMessage)
+            new FluxerClaudeRequestNotifier(client, bridgeCommandMessage)
         );
     });
 
@@ -756,11 +760,11 @@ const startFluxerClient = async ({
             args: string[]
         ) => {
             if (
-                isClaudeRequestCommand(command) &&
+                isBridgedCommand(command) &&
                 !message.author.bot &&
                 !message.webhookId
             ) {
-                await bridgeClaudeRequestMessage(message);
+                await bridgeCommandMessage(message);
             }
             try {
                 await handler.handleCommand(message, command, ...args);

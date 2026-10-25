@@ -237,6 +237,8 @@ The reply also shows progress toward **fish financial independence**: the portfo
 
 `-sim` trades a simulated day on a made-up fish ticker instead (no network access), and `-seed <n>` replays a simulated day (same prices, same outcome); `-seed` implies `-sim` and can't be combined with a ticker. `-cash <amount>` sets the starting bankroll (default $100). None of it is financial advice, for fish or anyone else.
 
+**Bridged to Discord, one way.** In a bridged channel a Fluxer `fishtrade` message and the bot's reply to it are relayed to the linked Discord channel, so Discord can watch the fish trade. Discord can't take part: with `commands.fluxerOnly` on (the default) a `fishtrade` typed on Discord just gets a "come to Fluxer" reply, and nothing is sent back to Fluxer.
+
 ## Identity mapping
 
 Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with the Fluxer command `!b role <@fluxerUser> <discordUserId>` (alias `!b map`; both names do exactly the same). It takes the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.

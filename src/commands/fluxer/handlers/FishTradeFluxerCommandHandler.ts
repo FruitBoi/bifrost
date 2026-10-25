@@ -22,15 +22,39 @@ const COLORS = {
  * `fishtrade` (issue #34): the user's fish day-trades one session with a
  * trend-following algorithm. By default it paper-trades real one-minute
  * prices of a real ticker; `-sim` / `-seed` use the simulated fish exchange.
- * No real orders; open to everyone.
+ * No real orders; open to everyone. In a bridged channel the replies are
+ * relayed to the linked Discord channel (issue #42).
  */
 export default class FishTradeFluxerCommandHandler extends FluxerCommandHandler {
-    constructor(client: Client) {
+    constructor(
+        client: Client,
+        /**
+         * Called with every reply this handler sends, so it can be bridged to
+         * the linked Discord channel (issue #42).
+         */
+        private readonly relayReply:
+            | ((reply: Message) => Promise<void>)
+            | null = null
+    ) {
         super(client);
     }
 
+    /** Replies and hands the sent message to `relayReply`, never throwing from it. */
+    private async send(
+        message: Message,
+        options: Parameters<Message['reply']>[0]
+    ): Promise<void> {
+        const sent = await message.reply(options);
+        if (!sent || !this.relayReply) return;
+        try {
+            await this.relayReply(sent);
+        } catch (err: unknown) {
+            logger.error('❌ Failed to bridge a fish trading reply:', err);
+        }
+    }
+
     private async replyError(message: Message, description: string) {
-        await message.reply({
+        await this.send(message, {
             embeds: [
                 new EmbedBuilder()
                     .setDescription(description)
@@ -63,7 +87,7 @@ export default class FishTradeFluxerCommandHandler extends FluxerCommandHandler 
             const summary = buildFishTradeSummary(
                 await runFishTradingDay(parsed.options)
             );
-            await message.reply({
+            await this.send(message, {
                 embeds: [
                     new EmbedBuilder()
                         .setTitle(summary.title)
