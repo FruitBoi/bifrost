@@ -274,7 +274,7 @@ User pings need an identity mapping; role pings need a role with the same name i
 
 - With a mapping, a `<@user>` mention written on one platform is relayed as a real mention of the mapped account on the other, and a reply-with-ping to a message that was written on the replier's own platform pings the author's mapped account on the other side.
 - Without a mapping, mentions are relayed as plaintext `@name` and nobody is pinged on the other side.
-- Replying with a ping to a *bridged copy* of a message (one the bridge posted on your platform) has always pinged the original author on their platform and still does, mapping or not.
+- Replying with a ping to a *bridged copy* of a message (one the bridge posted on your platform) has always pinged the original author on their platform and still does, mapping or not. On Fluxer every reply to a bridged copy pings the Discord author, because Fluxer has no ping toggle for replies to webhook messages.
 - A `<@&role>` mention is relayed as a real mention of the role with the **same name** in the linked server on the other platform, Discord → Fluxer and Fluxer → Discord. Names are matched the same way as for custom emojis and `!b role`.
 - The role is only pinged on the other side if the author could ping it on their own: the role is mentionable there, or the author has **Mention Everyone** (or the Fluxer equivalent).
 - If the other server has no role with that name, or the author could not ping the role, the mention is relayed as plaintext `@RoleName` and nobody is pinged.

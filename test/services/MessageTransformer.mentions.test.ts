@@ -146,25 +146,32 @@ function fakeFluxerMessage(
     };
 }
 
-/** A reply to a message that our Fluxer webhook posted (bridged copy). */
+/**
+ * A reply to a message that our Fluxer webhook posted (bridged copy), or with
+ * `toWebhook: false` to a message a Fluxer user wrote themselves.
+ */
 function fakeFluxerReply({
     pings,
     content = 'hello',
     guildId,
     client = fakeFluxerClient([]),
+    toWebhook = true,
 }: {
     pings: boolean;
     content?: string;
     guildId?: string;
     client?: ReturnType<typeof fakeFluxerClient>;
+    toWebhook?: boolean;
 }) {
-    const webhookAuthor = fakeFluxerUser('fwebhook', 'Bifröst');
+    const repliedAuthor = toWebhook
+        ? fakeFluxerUser('fwebhook', 'Bifröst')
+        : fakeFluxerUser('fuser-original', 'olga');
     const referenced = fakeFluxerMessage(
         {
             id: 'fmsg-bridged',
             content: 'original',
-            author: webhookAuthor,
-            webhookId: 'fwebhook',
+            author: repliedAuthor,
+            webhookId: toWebhook ? 'fwebhook' : null,
         },
         client
     );
@@ -173,7 +180,7 @@ function fakeFluxerReply({
             content,
             ...(guildId ? { guildId } : {}),
             referencedMessage: referenced,
-            mentions: pings ? [webhookAuthor] : [],
+            mentions: pings ? [repliedAuthor] : [],
         },
         client
     );
@@ -626,7 +633,7 @@ describe('FluxerMessageTransformer reply pings', () => {
         expect(result.mentionUserIds).toEqual(['duser-original']);
     });
 
-    it('does not mention anyone when the reply has pings turned off', async () => {
+    it('pings the Discord author even without a reply ping, since Fluxer has no toggle for webhook replies', async () => {
         links.messageLinks.push(
             makeMessageLink({
                 sourcePlatform: 'discord',
@@ -639,8 +646,37 @@ describe('FluxerMessageTransformer reply pings', () => {
             fakeFluxerReply({ pings: false }) as never
         );
 
-        expect(body(result.content)).toBe('hello');
-        expect('mentionUserIds' in result).toBe(false);
+        expect(body(result.content)).toBe('<@duser-original> hello');
+        expect(result.mentionUserIds).toEqual(['duser-original']);
+    });
+
+    it("honours the reply ping toggle when replying to a Fluxer user's own message", async () => {
+        links.messageLinks.push(
+            makeMessageLink({
+                sourcePlatform: 'fluxer',
+                sourceAuthorId: 'fuser-original',
+            })
+        );
+        links.userLinks.push(
+            makeUserLink({
+                guildLinkId: 'guild-link-1',
+                discordUserId: 'duser-mapped',
+                fluxerUserId: 'fuser-original',
+            })
+        );
+        const transformer = new FluxerMessageTransformer(mentionBridge);
+
+        const silent = await transformer.transformMessage(
+            fakeFluxerReply({ pings: false, toWebhook: false }) as never
+        );
+        expect(body(silent.content)).toBe('hello');
+        expect('mentionUserIds' in silent).toBe(false);
+
+        const pinging = await transformer.transformMessage(
+            fakeFluxerReply({ pings: true, toWebhook: false }) as never
+        );
+        expect(body(pinging.content)).toBe('<@duser-mapped> hello');
+        expect(pinging.mentionUserIds).toEqual(['duser-mapped']);
     });
 
     it('does not mention anyone when the original author is also on Fluxer', async () => {

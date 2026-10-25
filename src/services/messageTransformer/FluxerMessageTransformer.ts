@@ -81,6 +81,8 @@ export default class FluxerMessageTransformer extends MessageTransformer<
     /**
      * When a reply pings the author of a bridged message, resolves the Discord
      * user that the relayed copy must ping. Empty when there is nobody to ping.
+     * Fluxer has no ping toggle on replies to webhook messages, so a reply to
+     * a webhook copy (a message bridged from Discord) always pings (issue #41).
      */
     private async resolveReplyMention(
         message: Message,
@@ -93,7 +95,9 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             replierId: message.author.id,
             repliedMessageId: referencedMessage.id,
             repliedAuthorId,
-            replyPings: message.mentions.some((u) => u.id === repliedAuthorId),
+            replyPings:
+                referencedMessage.webhookId != null ||
+                message.mentions.some((u) => u.id === repliedAuthorId),
         });
         return userId ? [userId] : [];
     }
