@@ -18,6 +18,7 @@ import * as userTimezones from '../../src/db/migrations/00012-user-timezones';
 import * as claudeRequestNotices from '../../src/db/migrations/00013-claude-request-notices';
 import * as threadDirectories from '../../src/db/migrations/00014-thread-directories';
 import * as threadDirectoryRoles from '../../src/db/migrations/00015-thread-directory-roles';
+import * as messageCounts from '../../src/db/migrations/00016-message-counts';
 import {
     MessageLinkModel,
     ThreadDirectoryEntryModel,
@@ -27,6 +28,7 @@ import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/Se
 import { SequelizeClaudeRequestNoticeRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import { SequelizeChannelLinkRepository } from '../../src/db/sequelizerepos/SequelizeChannelLinkRepository';
 import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/SequelizeHistoryMessageRepository';
+import { SequelizeMessageCountRepository } from '../../src/db/sequelizerepos/SequelizeMessageCountRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
 import { SequelizeThreadDirectoryRepository } from '../../src/db/sequelizerepos/SequelizeThreadDirectoryRepository';
@@ -108,6 +110,11 @@ const umzug = new Umzug({
             name: '00015-thread-directory-roles.js',
             up: threadDirectoryRoles.up,
             down: threadDirectoryRoles.down,
+        },
+        {
+            name: '00016-message-counts.js',
+            up: messageCounts.up,
+            down: messageCounts.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -2022,6 +2029,136 @@ describe('migration 00015-thread-directory-roles', () => {
         expect((await repo.listEntries('fluxer', 'c1'))[0]).toMatchObject({
             threadId: 't1',
             guildId: 'g1',
+        });
+    });
+});
+
+describe('migration 00016-message-counts', () => {
+    it('adds message_counts, works with the repository, cascades with the guild link, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00016-message-counts.js');
+        expect(await qi.tableExists('message_counts')).toBe(true);
+
+        const cols = await qi.describeTable('message_counts');
+        expect(cols.guildLinkId).toMatchObject({
+            allowNull: false,
+            primaryKey: true,
+        });
+        expect(cols.sourcePlatform).toMatchObject({
+            allowNull: false,
+            primaryKey: true,
+        });
+        expect(cols.hour).toMatchObject({
+            allowNull: false,
+            primaryKey: true,
+        });
+        expect(cols.hour.type).toMatch(/INT/i);
+        expect(cols.count).toMatchObject({ allowNull: false });
+        expect(cols.count.type).toMatch(/INT/i);
+        expect(cols).not.toHaveProperty('createdAt');
+        expect(cols).not.toHaveProperty('updatedAt');
+
+        await qi.bulkInsert('guild_links', [
+            {
+                id: 'g-count1',
+                discordGuildId: 'dg-count1',
+                fluxerGuildId: 'fg-count1',
+                createdAt: now,
+            },
+            {
+                id: 'g-count2',
+                discordGuildId: 'dg-count2',
+                fluxerGuildId: 'fg-count2',
+                createdAt: now,
+            },
+        ]);
+
+        const repo = new SequelizeMessageCountRepository();
+        const rowsOf = (guildLinkId: string) =>
+            select<{ sourcePlatform: string; hour: number; count: number }>(
+                `SELECT "sourcePlatform", "hour", "count" FROM message_counts WHERE "guildLinkId" = '${guildLinkId}' ORDER BY "sourcePlatform", "hour"`
+            );
+
+        expect(await repo.sumByPlatform('g-count1')).toEqual({
+            discord: 0,
+            fluxer: 0,
+        });
+        expect(await repo.firstHour('g-count1')).toBeNull();
+
+        // The first increment creates the bucket, the next ones bump it.
+        const hour = 493_000;
+        await repo.increment('g-count1', 'discord', hour);
+        expect(await rowsOf('g-count1')).toEqual([
+            { sourcePlatform: 'discord', hour, count: 1 },
+        ]);
+        await repo.increment('g-count1', 'discord', hour);
+        expect(await rowsOf('g-count1')).toEqual([
+            { sourcePlatform: 'discord', hour, count: 2 },
+        ]);
+
+        // Concurrent increments of one bucket are not lost.
+        await Promise.all(
+            Array.from({ length: 50 }, () =>
+                repo.increment('g-count1', 'fluxer', hour)
+            )
+        );
+        await repo.increment('g-count1', 'fluxer', hour - 30);
+        await repo.increment('g-count1', 'discord', hour - 100);
+        await repo.increment('g-count2', 'discord', hour - 500);
+        expect(await rowsOf('g-count1')).toEqual([
+            { sourcePlatform: 'discord', hour: hour - 100, count: 1 },
+            { sourcePlatform: 'discord', hour, count: 2 },
+            { sourcePlatform: 'fluxer', hour: hour - 30, count: 1 },
+            { sourcePlatform: 'fluxer', hour, count: 50 },
+        ]);
+
+        // Sums are numbers, split by platform and limited to hour >= since.
+        const all = await repo.sumByPlatform('g-count1');
+        expect(all).toEqual({ discord: 3, fluxer: 51 });
+        expect(typeof all.discord).toBe('number');
+        expect(await repo.sumByPlatform('g-count1', hour - 30)).toEqual({
+            discord: 2,
+            fluxer: 51,
+        });
+        expect(await repo.sumByPlatform('g-count1', hour - 29)).toEqual({
+            discord: 2,
+            fluxer: 50,
+        });
+        expect(await repo.sumByPlatform('g-count1', hour + 1)).toEqual({
+            discord: 0,
+            fluxer: 0,
+        });
+        expect(await repo.sumByPlatform('g-count2')).toEqual({
+            discord: 1,
+            fluxer: 0,
+        });
+        expect(await repo.firstHour('g-count1')).toBe(hour - 100);
+        expect(await repo.firstHour('g-count2')).toBe(hour - 500);
+        expect(await repo.firstHour('g-missing')).toBeNull();
+
+        // Buckets need an existing guild link and go away with it.
+        await expect(
+            repo.increment('g-missing', 'discord', hour)
+        ).rejects.toThrow();
+        await qi.bulkDelete('guild_links', { id: 'g-count2' });
+        expect(await rowsOf('g-count2')).toEqual([]);
+        expect(await rowsOf('g-count1')).toHaveLength(4);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00016-message-counts.js' });
+        expect(await executed()).not.toContain('00016-message-counts.js');
+        expect(await executed()).toContain('00015-thread-directory-roles.js');
+        expect(await qi.tableExists('message_counts')).toBe(false);
+        const guilds = await select<{ id: string }>(
+            "SELECT id FROM guild_links WHERE id = 'g-count1'"
+        );
+        expect(guilds).toHaveLength(1);
+
+        await umzug.up();
+        expect(await executed()).toContain('00016-message-counts.js');
+        expect(await repo.sumByPlatform('g-count1')).toEqual({
+            discord: 0,
+            fluxer: 0,
         });
     });
 });

@@ -30,6 +30,8 @@ import DiscordEntityResolver from './services/entityResolver/DiscordEntityResolv
 import HealthCheckService from './services/HealthCheckService';
 import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
+import MessageCountService from './services/messageCount/MessageCountService';
+import { SequelizeMessageCountRepository } from './db/sequelizerepos/SequelizeMessageCountRepository';
 import { LinkService } from './services/LinkService';
 import { WebhookService } from './services/WebhookService';
 import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
@@ -184,6 +186,12 @@ const main = async () => {
         cachedChannelLinkRepo,
         cachedMessageLinkRepo
     );
+    // Bridged message counts (issue #46): every message relayed live or
+    // delivered from the retry queue, per guild link and source platform.
+    const messageCountService = new MessageCountService(
+        new SequelizeMessageCountRepository()
+    );
+    queueService?.setMessageCountService(messageCountService);
     // Reminders (issue #9): one service for both platforms; each client
     // registers its own deliverer once it is ready, and the service starts
     // polling for due reminders after both clients have been started.
@@ -363,6 +371,7 @@ const main = async () => {
         discordStatsService,
         fluxerStatsService,
         dbStatsService,
+        messageCountService,
         botConfig,
         reminderService,
         reminderTimezoneService,
@@ -492,6 +501,7 @@ const main = async () => {
             discordStatsService,
             fluxerStatsService,
             dbStatsService,
+            messageCountService,
             botConfig,
             reminderService,
             reminderTimezoneService,

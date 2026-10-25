@@ -12,6 +12,7 @@ import { ClaudeRequestNoticeModel } from './ClaudeRequestNoticeModel';
 import { UserTimezoneModel } from './UserTimezoneModel';
 import { ThreadDirectoryModel } from './ThreadDirectoryModel';
 import { ThreadDirectoryEntryModel } from './ThreadDirectoryEntryModel';
+import { MessageCountModel } from './MessageCountModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -110,6 +111,18 @@ UserLinkModel.belongsTo(GuildLinkModel, {
     as: 'guildLink',
 });
 
+// Guild -> MessageCounts
+GuildLinkModel.hasMany(MessageCountModel, {
+    foreignKey: 'guildLinkId',
+    as: 'messageCounts',
+    onDelete: 'CASCADE',
+});
+
+MessageCountModel.belongsTo(GuildLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'guildLink',
+});
+
 export {
     GuildLinkModel,
     ChannelLinkModel,
@@ -125,4 +138,5 @@ export {
     UserTimezoneModel,
     ThreadDirectoryModel,
     ThreadDirectoryEntryModel,
+    MessageCountModel,
 };

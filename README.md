@@ -239,6 +239,12 @@ The reply also shows progress toward **fish financial independence**: the portfo
 
 **Bridged to Discord, one way.** In a bridged channel a Fluxer `fishtrade` message and the bot's reply to it are relayed to the linked Discord channel, so Discord can watch the fish trade. Discord can't take part: with `commands.fluxerOnly` on (the default) a `fishtrade` typed on Discord just gets a "come to Fluxer" reply, and nothing is sent back to Fluxer.
 
+## Message counts
+
+`!b messagecount` (aliases `messages`, `msgcount`) shows how many messages the bridge relayed for the server it is run in, so you can see how active each side of the link is. It is open to everyone and read-only. Like other non-bridging commands it runs on Fluxer only while `commands.fluxerOnly` is on (the default); the counts cover messages from both sides either way. The reply gives, for the last 24 hours, the last 7 days, the last 30 days and all time, the number of messages bridged from Discord, from Fluxer, the total, and each platform's share.
+
+Only live-bridged messages are counted, once each, under the platform they were written on (commands, edits, reactions and history imports are not). Counts are kept per server link in hourly UTC buckets in the database, so they survive restarts, and they start from when the feature was first deployed: the reply says when counting began.
+
 ## Identity mapping
 
 Many people are on both platforms. An **identity mapping** (a *user link*) tells the bridge which Fluxer account and which Discord account are the same person, so a ping on one side reaches that person on the other. Mappings are created with the Fluxer command `!b role <@fluxerUser> <discordUserId>` (alias `!b map`; both names do exactly the same). It takes the Fluxer member as a mention and the ID of their Discord account, and only members holding one of the Fluxer roles listed in `roles.identity` in the [configuration file](#configuration-file) may run it.

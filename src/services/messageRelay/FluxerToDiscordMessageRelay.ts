@@ -3,6 +3,7 @@ import MessageRelay from './MessageRelay';
 import logger from '../../utils/logging/logger';
 import { formatJoinMessage } from '../../utils/formatJoinMessage';
 import MessageQueueService, { toSerializable } from '../MessageQueueService';
+import type MessageCountService from '../messageCount/MessageCountService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import DiscordEntityResolver from '../entityResolver/DiscordEntityResolver';
 import { ChannelLink } from '../../db/entities/ChannelLink';
@@ -41,6 +42,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         messageTransformer,
         metricsService,
         queueService,
+        messageCountService,
         discordEntityResolver,
         threadSyncService,
     }: {
@@ -49,6 +51,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         messageTransformer: MessageTransformer<Message, WebhookMessageData>;
         metricsService?: MetricsService;
         queueService?: MessageQueueService;
+        messageCountService?: MessageCountService;
         discordEntityResolver: DiscordEntityResolver;
         threadSyncService: ThreadSyncService;
     }) {
@@ -58,6 +61,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
             messageTransformer,
             metricsService,
             queueService,
+            messageCountService,
         });
         this.discordEntityResolver = discordEntityResolver;
         this.threadSyncService = threadSyncService;
@@ -160,6 +164,8 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
             );
 
             if (message.type !== MessageType.UserJoin) {
+                // Join notices are not chat messages and are not counted.
+                this.countBridgedMessage(linkedChannel.guildLinkId, 'fluxer');
                 await linkService.createMessageLink({
                     discordMessageId: webhookMessageId,
                     fluxerMessageId: message.id,
@@ -187,7 +193,9 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
                 'fluxer_to_discord',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg, sourceAuthorId)
+                toSerializable(msg, sourceAuthorId, {
+                    uncounted: message.type === MessageType.UserJoin,
+                })
             );
         }
     }

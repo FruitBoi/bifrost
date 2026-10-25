@@ -392,6 +392,21 @@ const commandList: Command[] = [
             usageArgs: [],
         },
     },
+    {
+        name: 'messagecount',
+        aliases: ['messages', 'msgcount'],
+        summary: 'Shows how many messages were bridged in this server.',
+        discord: {
+            description:
+                'Shows how many messages were bridged from Discord and from Fluxer in this server over the last 24 hours, 7 days, 30 days and all time.',
+            usageArgs: [],
+        },
+        fluxer: {
+            description:
+                'Shows how many messages were bridged from Discord and from Fluxer in this server over the last 24 hours, 7 days, 30 days and all time.',
+            usageArgs: [],
+        },
+    },
 ];
 
 /**

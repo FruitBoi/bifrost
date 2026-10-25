@@ -59,6 +59,8 @@ import StatsFluxerCommandHandler from './commands/fluxer/handlers/StatsFluxerCom
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
+import MessageCountService from './services/messageCount/MessageCountService';
+import MessageCountFluxerCommandHandler from './commands/fluxer/handlers/MessageCountFluxerCommandHandler';
 import ThreadDirectoryService from './services/threadDirectory/ThreadDirectoryService';
 import FluxerThreadDirectoryAdapter from './services/threadDirectory/FluxerThreadDirectoryAdapter';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
@@ -118,6 +120,7 @@ const startFluxerClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
+    messageCountService,
     botConfig,
     reminderService,
     reminderTimezoneService,
@@ -145,6 +148,7 @@ const startFluxerClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
+    messageCountService: MessageCountService;
     botConfig: BotConfig;
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
@@ -217,6 +221,7 @@ const startFluxerClient = async ({
         messageTransformer,
         metricsService,
         queueService,
+        messageCountService,
         discordEntityResolver,
         threadSyncService,
     });
@@ -248,6 +253,14 @@ const startFluxerClient = async ({
             dbStatsService
         )
     );
+    const messageCountHandler = new MessageCountFluxerCommandHandler(
+        client,
+        linkService,
+        messageCountService
+    );
+    for (const name of ['messagecount', 'messages', 'msgcount']) {
+        commandRegistry.registerCommand(name, messageCountHandler);
+    }
     commandRegistry.registerCommand(
         'link',
         new LinkFluxerCommandHandler(

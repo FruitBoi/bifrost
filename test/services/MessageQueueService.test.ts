@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebhookService } from '../../src/services/WebhookService';
+import type MessageCountService from '../../src/services/messageCount/MessageCountService';
 import { FakeLinkService, makeChannelLink } from '../helpers/fakes';
 
 // In-memory stand-in for the queued_messages table.
@@ -145,6 +146,153 @@ describe('MessageQueueService drain', () => {
         expect(links.messageLinks[0]).toMatchObject({
             sourcePlatform: 'discord',
             sourceAuthorId: null,
+        });
+    });
+
+    describe('message counting', () => {
+        function fakeCounter(
+            record: MessageCountService['record'] = vi.fn(async () => {})
+        ) {
+            return {
+                record: vi.fn(record),
+            };
+        }
+
+        it('counts a delivered Discord message once, from discord', async () => {
+            const queue = new MessageQueueService(60_000);
+            const counter = fakeCounter();
+            queue.setMessageCountService(
+                counter as unknown as MessageCountService
+            );
+            const { service } = fakeWebhookService();
+
+            await queue.enqueue(
+                'discord_to_fluxer',
+                channelLink.id,
+                'dmsg-c1',
+                toSerializable(payload, 'duser-1')
+            );
+            await queue.drain(service, links.asLinkService());
+
+            expect(counter.record).toHaveBeenCalledTimes(1);
+            expect(counter.record).toHaveBeenCalledWith(
+                channelLink.guildLinkId,
+                'discord'
+            );
+        });
+
+        it('counts a delivered Fluxer message once, from fluxer', async () => {
+            const queue = new MessageQueueService(60_000);
+            const counter = fakeCounter();
+            queue.setMessageCountService(
+                counter as unknown as MessageCountService
+            );
+            const { service } = fakeWebhookService();
+
+            await queue.enqueue(
+                'fluxer_to_discord',
+                channelLink.id,
+                'fmsg-c1',
+                toSerializable(payload, 'fuser-1')
+            );
+            await queue.drain(service, links.asLinkService());
+
+            expect(counter.record).toHaveBeenCalledTimes(1);
+            expect(counter.record).toHaveBeenCalledWith(
+                channelLink.guildLinkId,
+                'fluxer'
+            );
+        });
+
+        it('delivers but does not count a queued join notice', async () => {
+            const queue = new MessageQueueService(60_000);
+            const counter = fakeCounter();
+            queue.setMessageCountService(
+                counter as unknown as MessageCountService
+            );
+            const { service, sendDiscord } = fakeWebhookService();
+
+            await queue.enqueue(
+                'fluxer_to_discord',
+                channelLink.id,
+                'fmsg-join',
+                toSerializable(payload, 'fuser-1', { uncounted: true })
+            );
+            await queue.drain(service, links.asLinkService());
+
+            expect(sendDiscord).toHaveBeenCalledTimes(1);
+            expect(sendDiscord.mock.calls[0]).not.toContainEqual(
+                expect.objectContaining({ uncounted: true })
+            );
+            expect(counter.record).not.toHaveBeenCalled();
+        });
+
+        it('does not count an entry whose send fails', async () => {
+            const queue = new MessageQueueService(60_000);
+            const counter = fakeCounter();
+            queue.setMessageCountService(
+                counter as unknown as MessageCountService
+            );
+            const { service, sendDiscord } = fakeWebhookService();
+            sendDiscord.mockRejectedValueOnce(new Error('discord down'));
+
+            await queue.enqueue(
+                'fluxer_to_discord',
+                channelLink.id,
+                'fmsg-c2',
+                toSerializable(payload)
+            );
+            await queue.drain(service, links.asLinkService());
+
+            expect(counter.record).not.toHaveBeenCalled();
+            expect(entries).toHaveLength(1);
+            expect(entries[0]!.retryCount).toBe(1);
+        });
+
+        it('a failing counter never makes drain retry a delivered message', async () => {
+            const queue = new MessageQueueService(60_000);
+            const counter = fakeCounter(async () => {
+                throw new Error('db down');
+            });
+            queue.setMessageCountService(
+                counter as unknown as MessageCountService
+            );
+            const { service, sendFluxer } = fakeWebhookService();
+
+            await queue.enqueue(
+                'discord_to_fluxer',
+                channelLink.id,
+                'dmsg-c3',
+                toSerializable(payload)
+            );
+            await queue.drain(service, links.asLinkService());
+            await queue.drain(service, links.asLinkService());
+
+            expect(sendFluxer).toHaveBeenCalledTimes(1);
+            expect(entries).toHaveLength(0);
+            expect(links.messageLinks).toHaveLength(1);
+        });
+
+        it('a synchronously throwing counter never makes drain retry either', async () => {
+            const queue = new MessageQueueService(60_000);
+            queue.setMessageCountService({
+                record: () => {
+                    throw new Error('boom');
+                },
+            } as unknown as MessageCountService);
+            const { service, sendDiscord } = fakeWebhookService();
+
+            await queue.enqueue(
+                'fluxer_to_discord',
+                channelLink.id,
+                'fmsg-c4',
+                toSerializable(payload)
+            );
+            await queue.drain(service, links.asLinkService());
+            await queue.drain(service, links.asLinkService());
+
+            expect(sendDiscord).toHaveBeenCalledTimes(1);
+            expect(entries).toHaveLength(0);
         });
     });
 });

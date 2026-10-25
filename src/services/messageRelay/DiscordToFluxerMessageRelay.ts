@@ -8,6 +8,7 @@ import {
 } from '../../utils/fluxerApiGuard';
 import { formatJoinMessage } from '../../utils/formatJoinMessage';
 import MessageQueueService, { toSerializable } from '../MessageQueueService';
+import type MessageCountService from '../messageCount/MessageCountService';
 import { WebhookMessageData, WebhookService } from '../WebhookService';
 import FluxerEntityResolver from '../entityResolver/FluxerEntityResolver';
 import { ChannelLink } from '../../db/entities/ChannelLink';
@@ -40,6 +41,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         messageTransformer,
         metricsService,
         queueService,
+        messageCountService,
         fluxerEntityResolver,
         threadSyncService,
     }: {
@@ -51,6 +53,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         >;
         metricsService?: MetricsService;
         queueService?: MessageQueueService;
+        messageCountService?: MessageCountService;
         fluxerEntityResolver: FluxerEntityResolver;
         threadSyncService: ThreadSyncService;
     }) {
@@ -60,6 +63,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
             messageTransformer,
             metricsService,
             queueService,
+            messageCountService,
         });
         this.fluxerEntityResolver = fluxerEntityResolver;
         this.threadSyncService = threadSyncService;
@@ -154,7 +158,9 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg, sourceAuthorId)
+                toSerializable(msg, sourceAuthorId, {
+                    uncounted: message.type === MessageType.UserJoin,
+                })
             );
             return;
         }
@@ -166,6 +172,8 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
             );
 
             if (message.type !== MessageType.UserJoin) {
+                // Join notices are not chat messages and are not counted.
+                this.countBridgedMessage(linkedChannel.guildLinkId, 'discord');
                 await linkService.createMessageLink({
                     discordMessageId: message.id,
                     fluxerMessageId: webhookMessageId,
@@ -188,7 +196,9 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg, sourceAuthorId)
+                toSerializable(msg, sourceAuthorId, {
+                    uncounted: message.type === MessageType.UserJoin,
+                })
             );
         }
     }

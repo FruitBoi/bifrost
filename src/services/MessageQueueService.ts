@@ -8,6 +8,8 @@ import {
     WebhookService,
 } from './WebhookService';
 import logger from '../utils/logging/logger';
+import type MessageCountService from './messageCount/MessageCountService';
+import type { MessagePlatform } from '../db/entities/MessageLink';
 import {
     isFluxerApiBlockError,
     isFluxerApiBlocked,
@@ -30,24 +32,36 @@ export type SerializableWebhookMessageData = {
      * author tracking.
      */
     sourceAuthorId?: string;
+    /**
+     * Set for member-join notices, which are not chat messages and are left
+     * out of the bridged message counts when the entry is delivered.
+     */
+    uncounted?: true;
 };
 
 export function toSerializable(
     data: WebhookMessageData,
-    sourceAuthorId?: string
+    sourceAuthorId?: string,
+    { uncounted = false }: { uncounted?: boolean } = {}
 ): SerializableWebhookMessageData {
     return {
         ...data,
         embeds: data.embeds?.map((e) => e.toPlainObject()),
         ...(sourceAuthorId ? { sourceAuthorId } : {}),
+        ...(uncounted ? { uncounted: true as const } : {}),
     };
 }
 
 function toWebhookMessageData(
     data: SerializableWebhookMessageData
 ): WebhookMessageData {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { sourceAuthorId: _sourceAuthorId, ...rest } = data;
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const {
+        sourceAuthorId: _sourceAuthorId,
+        uncounted: _uncounted,
+        ...rest
+    } = data;
+    /* eslint-enable @typescript-eslint/no-unused-vars */
     return {
         ...rest,
         embeds: data.embeds?.map((e) => WebhookEmbed.fromPlainObject(e)),
@@ -57,7 +71,17 @@ function toWebhookMessageData(
 export default class MessageQueueService {
     private drainInterval: ReturnType<typeof setInterval> | null = null;
 
+    private messageCountService: MessageCountService | null = null;
+
     constructor(private readonly ttlMs: number) {}
+
+    /**
+     * Counts each queued message once it is finally delivered (issue #46);
+     * the live relay does not count messages it only queued.
+     */
+    setMessageCountService(service: MessageCountService | null): void {
+        this.messageCountService = service;
+    }
 
     async enqueue(
         direction: 'discord_to_fluxer' | 'fluxer_to_discord',
@@ -134,6 +158,8 @@ export default class MessageQueueService {
                             payload,
                             channelLink.fluxerThreadId
                         );
+                    if (!serialized.uncounted)
+                        this.countDelivered(channelLink.guildLinkId, 'discord');
                     await linkService.createMessageLink({
                         discordMessageId: entry.sourceMessageId,
                         fluxerMessageId,
@@ -158,6 +184,8 @@ export default class MessageQueueService {
                             payload,
                             channelLink.discordThreadId
                         );
+                    if (!serialized.uncounted)
+                        this.countDelivered(channelLink.guildLinkId, 'fluxer');
                     await linkService.createMessageLink({
                         discordMessageId,
                         fluxerMessageId: entry.sourceMessageId,
@@ -182,6 +210,23 @@ export default class MessageQueueService {
                     `⚠️ Queue drain: retry failed for entry ${entry.id} (attempt ${entry.retryCount + 1}): ${err}`
                 );
             }
+        }
+    }
+
+    /**
+     * Fire and forget: the message was already delivered, so a counting
+     * failure must never reach drain's retry path (that would re-send it).
+     */
+    private countDelivered(guildLinkId: string, source: MessagePlatform): void {
+        if (!this.messageCountService) return;
+        try {
+            this.messageCountService
+                .record(guildLinkId, source)
+                .catch((err: unknown) =>
+                    logger.warn('⚠️ Failed to count bridged message:', err)
+                );
+        } catch (err) {
+            logger.warn('⚠️ Failed to count bridged message:', err);
         }
     }
 

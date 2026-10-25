@@ -47,6 +47,8 @@ import FluxerStatsService from './services/statsService/FluxerStatsService';
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscordCommandHandler';
 import { DbStatsService } from './services/DbStatsService';
+import MessageCountService from './services/messageCount/MessageCountService';
+import MessageCountDiscordCommandHandler from './commands/discord/handlers/MessageCountDiscordCommandHandler';
 import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
@@ -107,6 +109,7 @@ const startDiscordClient = async ({
     discordStatsService,
     fluxerStatsService,
     dbStatsService,
+    messageCountService,
     reminderService,
     reminderTimezoneService,
     historyService,
@@ -131,6 +134,7 @@ const startDiscordClient = async ({
     discordStatsService: DiscordStatsService;
     fluxerStatsService: FluxerStatsService;
     dbStatsService: DbStatsService;
+    messageCountService: MessageCountService;
     reminderService: ReminderService;
     reminderTimezoneService: ReminderTimezoneService;
     historyService: HistoryTransferService;
@@ -195,6 +199,7 @@ const startDiscordClient = async ({
         messageTransformer,
         metricsService,
         queueService,
+        messageCountService,
         fluxerEntityResolver,
         threadSyncService,
     });
@@ -224,6 +229,14 @@ const startDiscordClient = async ({
             dbStatsService
         )
     );
+    const messageCountHandler = new MessageCountDiscordCommandHandler(
+        client,
+        linkService,
+        messageCountService
+    );
+    for (const name of ['messagecount', 'messages', 'msgcount']) {
+        commandRegistry.registerCommand(name, messageCountHandler);
+    }
     commandRegistry.registerCommand(
         'link',
         new LinkDiscordCommandHandler(
