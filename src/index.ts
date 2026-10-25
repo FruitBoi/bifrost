@@ -17,6 +17,7 @@ import PinBridgeService from './services/pinBridge/PinBridgeService';
 import IdentityClaimService from './services/identityClaim/IdentityClaimService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
+import BotAvatarService from './services/botAvatar/BotAvatarService';
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeClaudeRequestNoticeRepository } from './db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
@@ -518,6 +519,24 @@ const main = async () => {
     }
 
     claudeRequestNotifyService?.start();
+
+    // Daily bot avatar (issue #44): a random Fluxer emoji every day at
+    // botAvatar.hourUtc. The Fluxer client is read through the ref because
+    // it is replaced on restart.
+    if (botConfig.botAvatar.enabled) {
+        new BotAvatarService({
+            config: botConfig.botAvatar,
+            getFluxerClient: () => fluxerClientRef.current,
+            getDiscordClient: () => discordClient,
+        }).start();
+        logger.info(
+            `🖼️ Daily bot avatar scheduled for ${String(botConfig.botAvatar.hourUtc).padStart(2, '0')}:00 UTC`
+        );
+    } else {
+        logger.info(
+            'Config: daily bot avatar is disabled (botAvatar.enabled=false)'
+        );
+    }
 
     if (voice) {
         discordVoiceTransport = new voice.DiscordVoiceTransport(discordClient);

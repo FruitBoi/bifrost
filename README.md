@@ -28,6 +28,7 @@
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
 - File a GitHub issue for Claude straight from chat: `!b clauderequest make the bot meow louder` (see [Claude requests](#claude-requests))
 - See how many lines of code Claude has written for the bot: `!b lines` (see [Lines](#lines))
+- Changes its profile picture to a random emoji from the Fluxer server every day (see [Daily avatar](#daily-avatar))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
@@ -211,6 +212,18 @@ Voice links ship as migration `00006-voice-links`, which adds the `voice_links` 
 ## Cat chat
 
 Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. **Only Fluxer users get an answer**: a meow written on Discord is bridged like any other message but is not replied to. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so Discord still sees the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
+
+## Daily avatar
+
+Once a day, at an hour you choose (UTC), Bifröst changes its profile picture to a random custom emoji from its Fluxer server. It never picks the same emoji twice in a row. The same emoji is also set as the Discord bot's avatar, unless you turn that off. The avatar is not changed when the bot starts; the first change happens at the next scheduled hour. Only static emojis are picked by default, and animated ones can be allowed. A failure on one platform does not stop the other, and if no emojis are found, nothing changes. Turn the feature off with `botAvatar.enabled: false` in the [configuration file](#configuration-file).
+
+The options live under `botAvatar` in the configuration file:
+
+- **`enabled`** (default `true`): turns the daily change on or off.
+- **`hourUtc`** (default `0`): the UTC hour, 0 to 23, at which the avatar changes.
+- **`guildIds`** (default `[]`): the Fluxer guild IDs to pick emojis from. An empty list means every Fluxer guild the bot is in.
+- **`discord`** (default `true`): also set the Discord bot's avatar to the same emoji.
+- **`includeAnimated`** (default `false`): allow animated emojis to be picked as well as static ones.
 
 ## Fish trading
 

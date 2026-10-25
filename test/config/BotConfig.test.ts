@@ -141,6 +141,7 @@ describe('loadBotConfig parsing', () => {
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
+            botAvatar: DEFAULT_BOT_CONFIG.botAvatar,
         });
     });
 
@@ -173,6 +174,7 @@ describe('loadBotConfig parsing', () => {
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
+            botAvatar: DEFAULT_BOT_CONFIG.botAvatar,
         });
     });
 
@@ -410,6 +412,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'reactions',
             'pins',
             'typing',
+            'botAvatar',
         ]);
     });
 });
@@ -944,6 +947,75 @@ describe('typing', () => {
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('typing.enabled');
         expect(attempt).toThrow('boolean');
+    });
+});
+
+describe('botAvatar', () => {
+    it('defaults to a daily change at midnight UTC on both platforms, static emojis only', () => {
+        expect(DEFAULT_BOT_CONFIG.botAvatar).toEqual({
+            enabled: true,
+            hourUtc: 0,
+            guildIds: [],
+            discord: true,
+            includeAnimated: false,
+        });
+    });
+
+    it('merges a YAML section over the defaults', () => {
+        write(
+            'config.yml',
+            [
+                'botAvatar:',
+                '  hourUtc: 23',
+                '  guildIds: ["123", "456"]',
+                '  discord: false',
+                '  includeAnimated: true',
+            ].join('\n')
+        );
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config).toEqual({
+            ...DEFAULT_BOT_CONFIG,
+            botAvatar: {
+                enabled: true,
+                hourUtc: 23,
+                guildIds: ['123', '456'],
+                discord: false,
+                includeAnimated: true,
+            },
+        });
+    });
+
+    it.each([-1, 24, 1.5])('rejects hourUtc %j', (hourUtc) => {
+        const attempt = () => mergeBotConfig({ botAvatar: { hourUtc } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('botAvatar.hourUtc');
+    });
+
+    it('rejects a non-numeric hourUtc', () => {
+        const attempt = () => mergeBotConfig({ botAvatar: { hourUtc: '3' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('number');
+    });
+
+    it('rejects unquoted numeric guild IDs', () => {
+        const attempt = () =>
+            mergeBotConfig({ botAvatar: { guildIds: [123] } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('botAvatar.guildIds');
+    });
+
+    it('reports unknown keys inside the section', () => {
+        const { unknownKeys } = mergeBotConfig({
+            botAvatar: { hour: 3 },
+        });
+
+        expect(unknownKeys).toEqual(['botAvatar.hour']);
     });
 });
 

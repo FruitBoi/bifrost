@@ -209,6 +209,30 @@ export interface BotConfig {
          */
         enabled: boolean;
     };
+    /**
+     * Daily bot avatar (issue #44): once a day the bot's profile picture
+     * becomes a random custom emoji from its Fluxer servers, never the same
+     * one twice in a row. The avatar is not changed on startup, only at the
+     * next `hourUtc`. See `services/botAvatar/`.
+     */
+    botAvatar: {
+        /** Change the avatar every day. */
+        enabled: boolean;
+        /** UTC hour of day (whole number 0-23) at which the avatar changes. */
+        hourUtc: number;
+        /**
+         * Fluxer guild IDs whose custom emojis are picked from. Empty = every
+         * Fluxer guild the bot is in. IDs must be quoted strings.
+         */
+        guildIds: string[];
+        /** Also set the Discord bot's avatar to the same emoji. */
+        discord: boolean;
+        /**
+         * Allow animated emojis. Off by default: only static emojis are
+         * picked.
+         */
+        includeAnimated: boolean;
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -245,6 +269,13 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     reactions: { enabled: true },
     pins: { enabled: true },
     typing: { enabled: true },
+    botAvatar: {
+        enabled: true,
+        hourUtc: 0,
+        guildIds: [],
+        discord: true,
+        includeAnimated: false,
+    },
 };
 
 export const CONFIG_FILE_CANDIDATES = [
@@ -402,6 +433,7 @@ export function mergeBotConfig(
     ) as unknown as BotConfig;
     validateHistoryConfig(config.history);
     validateClaudeRequestsConfig(config.claudeRequests);
+    validateBotAvatarConfig(config.botAvatar);
 
     return {
         config,
@@ -451,6 +483,16 @@ function validateClaudeRequestsConfig(
     ) {
         throw new BotConfigError(
             `Config "claudeRequests.notifyPollMs" must be a whole number of at least 30000, got ${claudeRequests.notifyPollMs}`
+        );
+    }
+}
+
+/** `botAvatar.hourUtc` must be a whole hour of the day, 0 to 23. */
+function validateBotAvatarConfig(botAvatar: BotConfig['botAvatar']): void {
+    const { hourUtc } = botAvatar;
+    if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23) {
+        throw new BotConfigError(
+            `Config "botAvatar.hourUtc" must be a whole number from 0 to 23, got ${hourUtc}`
         );
     }
 }

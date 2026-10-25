@@ -217,3 +217,20 @@ typing:
     # bridged back. On Discord the bot requests the Guild Message Typing
     # gateway intent only while this is on; no extra permissions are needed.
     enabled: true
+
+botAvatar:
+    # Once a day, at the UTC hour set below, change the bot's profile picture to a
+    # random custom emoji from its Fluxer server(s), never the same one twice in a
+    # row. The avatar is not changed when the bot starts; the first change is at
+    # the next scheduled hour. Only static emojis are used unless includeAnimated
+    # is on.
+    enabled: true
+    # UTC hour (0-23) at which the avatar changes.
+    hourUtc: 0
+    # Fluxer guild IDs to pick emojis from. Empty ([]) means every Fluxer guild
+    # the bot is in. Quote IDs if you list them.
+    guildIds: []
+    # Also set the Discord bot's avatar to the same emoji.
+    discord: true
+    # Allow animated emojis to be picked as well as static ones.
+    includeAnimated: false
