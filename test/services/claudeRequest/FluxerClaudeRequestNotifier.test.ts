@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Client, EmbedBuilder, ErrorCodes, FluxerError } from '@fluxerjs/core';
+import {
+    Client,
+    EmbedBuilder,
+    ErrorCodes,
+    FluxerError,
+    Message,
+} from '@fluxerjs/core';
 import FluxerClaudeRequestNotifier from '../../../src/services/claudeRequest/FluxerClaudeRequestNotifier';
 import {
     ClaudeRequestNotifyError,
@@ -155,6 +161,54 @@ describe('FluxerClaudeRequestNotifier', () => {
         );
         send.mockRejectedValueOnce(cause);
         await expect(notifier.notify(request, 'completed')).rejects.toBe(cause);
+    });
+});
+
+describe('FluxerClaudeRequestNotifier relay hook', () => {
+    let send: ReturnType<typeof vi.fn>;
+    let relay: ReturnType<typeof vi.fn>;
+    let notifier: FluxerClaudeRequestNotifier;
+
+    beforeEach(() => {
+        send = vi.fn().mockResolvedValue({ id: 'notice-1' });
+        relay = vi.fn().mockResolvedValue(undefined);
+        notifier = new FluxerClaudeRequestNotifier(
+            { channels: { send } } as unknown as Client,
+            relay as (notice: Message) => Promise<void>
+        );
+    });
+
+    it('hands the sent notice to the relay hook', async () => {
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
+        expect(relay).toHaveBeenCalledTimes(1);
+        expect(relay).toHaveBeenCalledWith({ id: 'notice-1' });
+    });
+
+    it('relays the notice sent by the plain-message retry', async () => {
+        send.mockRejectedValueOnce(new FakeApiError(400, 'UNKNOWN_MESSAGE'));
+        send.mockResolvedValueOnce({ id: 'notice-2' });
+
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-2'
+        );
+        expect(relay).toHaveBeenCalledTimes(1);
+        expect(relay).toHaveBeenCalledWith({ id: 'notice-2' });
+    });
+
+    it('still resolves the ID when the relay hook rejects', async () => {
+        relay.mockRejectedValue(new Error('bridge down'));
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
+        expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call the relay hook when the send fails', async () => {
+        send.mockRejectedValue(new FakeApiError(403, 'MISSING_ACCESS'));
+        await notifier.notify(request, 'completed').catch((e) => e);
+        expect(relay).not.toHaveBeenCalled();
     });
 });
 

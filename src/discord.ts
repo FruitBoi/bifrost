@@ -3,6 +3,7 @@ import {
     EmbedBuilder,
     Events,
     GatewayIntentBits,
+    Message,
     Partials,
     TextChannel,
 } from 'discord.js';
@@ -358,6 +359,30 @@ const startDiscordClient = async ({
         }
     }
 
+    // Issue #40: `clauderequest` invocations, the bot's replies to them and
+    // the "done" notices are bridged like ordinary chat.
+    const bridgeClaudeRequestMessage = async (bridged: Message) => {
+        if (
+            !bridged.inGuild() ||
+            !(
+                bridged.channel instanceof TextChannel ||
+                bridged.channel.isThread()
+            )
+        )
+            return;
+        try {
+            await messageRelay.relayMessage(bridged);
+        } catch (error) {
+            logger.error(
+                '❌ Failed to bridge a Claude request message:',
+                error
+            );
+        }
+    };
+    const isClaudeRequestCommand = (command: string) =>
+        botConfig.claudeRequests.enabled &&
+        (CLAUDE_REQUEST_COMMAND_NAMES as readonly string[]).includes(command);
+
     // Replies to "Claude request implemented/closed" notices (issue #35).
     const claudeRequestReplyHandler =
         botConfig.claudeRequests.enabled && claudeRequestNotifyService
@@ -373,7 +398,8 @@ const startDiscordClient = async ({
             client,
             claudeRequestService,
             botConfig.roles.claudeRequest,
-            claudeRequestNotifyService
+            claudeRequestNotifyService,
+            bridgeClaudeRequestMessage
         );
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
@@ -409,7 +435,7 @@ const startDiscordClient = async ({
         );
         claudeRequestNotifyService?.setNotifier(
             'discord',
-            new DiscordClaudeRequestNotifier(client)
+            new DiscordClaudeRequestNotifier(client, bridgeClaudeRequestMessage)
         );
 
         if (botConfig.commands.slashCommands) {
@@ -758,6 +784,9 @@ const startDiscordClient = async ({
             command: string,
             args: string[]
         ) => {
+            if (isClaudeRequestCommand(command) && !message.author.bot) {
+                await bridgeClaudeRequestMessage(message);
+            }
             try {
                 await handler.handleCommand(message, command, ...args);
             } catch (error) {

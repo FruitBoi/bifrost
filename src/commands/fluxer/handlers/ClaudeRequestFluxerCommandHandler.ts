@@ -21,9 +21,30 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
         client: Client,
         private readonly claudeRequestService: ClaudeRequestService,
         private readonly allowedRoleIds: readonly string[],
-        private readonly claudeRequestNotifyService: ClaudeRequestNotifyService | null = null
+        private readonly claudeRequestNotifyService: ClaudeRequestNotifyService | null = null,
+        /**
+         * Called with every reply this handler sends, so it can be bridged to
+         * the linked channel on the other platform (issue #40).
+         */
+        private readonly relayReply:
+            | ((reply: Message) => Promise<void>)
+            | null = null
     ) {
         super(client);
+    }
+
+    /** Replies and hands the sent message to `relayReply`, never throwing from it. */
+    private async send(
+        message: Message,
+        options: Parameters<Message['reply']>[0]
+    ): Promise<void> {
+        const sent = await message.reply(options);
+        if (!sent || !this.relayReply) return;
+        try {
+            await this.relayReply(sent);
+        } catch (err: unknown) {
+            logger.error('❌ Failed to bridge a Claude request reply:', err);
+        }
     }
 
     private async reply(
@@ -31,7 +52,7 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
         description: string,
         color: number
     ): Promise<void> {
-        await message.reply({
+        await this.send(message, {
             embeds: [
                 new EmbedBuilder()
                     .setDescription(description)
@@ -99,7 +120,7 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
             args.join(' ')
         ).trim();
         if (!text) {
-            await message.reply(getFluxerCommandUsage('clauderequest'));
+            await this.send(message, getFluxerCommandUsage('clauderequest'));
             return;
         }
 
@@ -145,7 +166,10 @@ export default class ClaudeRequestFluxerCommandHandler extends FluxerCommandHand
             if (description) {
                 await this.reply(message, description, EmbedColors.Error);
             } else {
-                await message.reply(getFluxerCommandUsage('clauderequest'));
+                await this.send(
+                    message,
+                    getFluxerCommandUsage('clauderequest')
+                );
             }
         } catch (err: unknown) {
             logger.error('❌ Submitting a Claude request failed:', err);

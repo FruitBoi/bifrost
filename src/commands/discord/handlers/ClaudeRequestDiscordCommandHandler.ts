@@ -1,4 +1,4 @@
-import { Client, EmbedBuilder } from 'discord.js';
+import { Client, EmbedBuilder, Message, MessageReplyOptions } from 'discord.js';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -23,9 +23,30 @@ export default class ClaudeRequestDiscordCommandHandler extends DiscordCommandHa
         client: Client,
         private readonly claudeRequestService: ClaudeRequestService,
         private readonly allowedRoleIds: readonly string[],
-        private readonly claudeRequestNotifyService: ClaudeRequestNotifyService | null = null
+        private readonly claudeRequestNotifyService: ClaudeRequestNotifyService | null = null,
+        /**
+         * Called with every reply this handler sends, so it can be bridged to
+         * the linked channel on the other platform (issue #40).
+         */
+        private readonly relayReply:
+            | ((reply: Message) => Promise<void>)
+            | null = null
     ) {
         super(client);
+    }
+
+    /** Replies and hands the sent message to `relayReply`, never throwing from it. */
+    private async send(
+        message: DiscordCommandHandlerMessage,
+        options: MessageReplyOptions
+    ): Promise<void> {
+        const sent = await message.reply(options);
+        if (!sent || !this.relayReply) return;
+        try {
+            await this.relayReply(sent);
+        } catch (err: unknown) {
+            logger.error('❌ Failed to bridge a Claude request reply:', err);
+        }
     }
 
     private async replyEmbed(
@@ -33,7 +54,7 @@ export default class ClaudeRequestDiscordCommandHandler extends DiscordCommandHa
         description: string,
         color: number
     ) {
-        await message.reply({
+        await this.send(message, {
             embeds: [
                 new EmbedBuilder()
                     .setDescription(description)
@@ -102,7 +123,7 @@ export default class ClaudeRequestDiscordCommandHandler extends DiscordCommandHa
             args.join(' ')
         ).trim();
         if (!text) {
-            await message.reply(getDiscordCommandUsage('clauderequest'));
+            await this.send(message, getDiscordCommandUsage('clauderequest'));
             return;
         }
 
@@ -144,7 +165,11 @@ export default class ClaudeRequestDiscordCommandHandler extends DiscordCommandHa
                 result.detail
             );
             if (description) await this.replyError(message, description);
-            else await message.reply(getDiscordCommandUsage('clauderequest'));
+            else
+                await this.send(
+                    message,
+                    getDiscordCommandUsage('clauderequest')
+                );
         } catch (err: unknown) {
             logger.error('❌ Submitting a Claude request failed:', err);
             await this.replyError(

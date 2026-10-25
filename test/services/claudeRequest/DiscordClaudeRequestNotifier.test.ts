@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Client } from 'discord.js';
+import { Client, Message } from 'discord.js';
 import DiscordClaudeRequestNotifier from '../../../src/services/claudeRequest/DiscordClaudeRequestNotifier';
 import { ClaudeRequestNotifyError } from '../../../src/services/claudeRequest/ClaudeRequestNotifier';
 import { ClaudeRequest } from '../../../src/db/entities/ClaudeRequest';
@@ -35,9 +35,12 @@ function makeChannel(
     };
 }
 
-function makeNotifier(fetch: ReturnType<typeof vi.fn>) {
+function makeNotifier(
+    fetch: ReturnType<typeof vi.fn>,
+    relayNotice: ((notice: Message) => Promise<void>) | null = null
+) {
     const client = { channels: { fetch } } as unknown as Client;
-    return new DiscordClaudeRequestNotifier(client);
+    return new DiscordClaudeRequestNotifier(client, relayNotice);
 }
 
 /** A Discord REST error as a plain object (the notifier duck-types it). */
@@ -178,5 +181,50 @@ describe('DiscordClaudeRequestNotifier', () => {
         const err = await failure(notifier.notify(request, 'completed'));
 
         expect(err).toBe(network);
+    });
+
+    it('hands the sent notice to the relay hook', async () => {
+        const channel = makeChannel();
+        const relay = vi.fn().mockResolvedValue(undefined);
+        const notifier = makeNotifier(
+            vi.fn().mockResolvedValue(channel),
+            relay
+        );
+
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
+
+        expect(relay).toHaveBeenCalledTimes(1);
+        expect(relay).toHaveBeenCalledWith({ id: 'notice-1' });
+    });
+
+    it('still resolves the ID when the relay hook rejects', async () => {
+        const channel = makeChannel();
+        const relay = vi.fn().mockRejectedValue(new Error('bridge down'));
+        const notifier = makeNotifier(
+            vi.fn().mockResolvedValue(channel),
+            relay
+        );
+
+        await expect(notifier.notify(request, 'completed')).resolves.toBe(
+            'notice-1'
+        );
+        expect(channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call the relay hook when the send fails', async () => {
+        const channel = makeChannel({
+            send: vi.fn().mockRejectedValue(apiError(50013)),
+        });
+        const relay = vi.fn().mockResolvedValue(undefined);
+        const notifier = makeNotifier(
+            vi.fn().mockResolvedValue(channel),
+            relay
+        );
+
+        await failure(notifier.notify(request, 'completed'));
+
+        expect(relay).not.toHaveBeenCalled();
     });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Client } from 'discord.js';
+import { Client, Message } from 'discord.js';
 import { DiscordCommandHandlerMessage } from '../../../src/commands/discord/DiscordCommandHandler';
 import ClaudeRequestDiscordCommandHandler from '../../../src/commands/discord/handlers/ClaudeRequestDiscordCommandHandler';
 import ClaudeRequestService, {
@@ -236,5 +236,79 @@ describe('ClaudeRequestDiscordCommandHandler', () => {
         const { message, reply } = makeMessage();
         await handler(service).handleCommand(message, 'clauderequest', 'x');
         expect(description(reply).description).toContain('boom');
+    });
+
+    describe('relaying replies (issue #40)', () => {
+        const sent = { id: 'sent-1' };
+
+        function relayHandler(relayReply: (reply: Message) => Promise<void>) {
+            return new ClaudeRequestDiscordCommandHandler(
+                client,
+                submitMock.service,
+                [ALLOWED_ROLE],
+                notifyService,
+                relayReply
+            );
+        }
+
+        it('relays the success reply before tracking', async () => {
+            const relayReply = vi.fn().mockResolvedValue(undefined);
+            const { message, reply } = makeMessage();
+            reply.mockResolvedValue(sent);
+            await relayHandler(relayReply).handleCommand(
+                message,
+                'clauderequest',
+                'x'
+            );
+            expect(relayReply).toHaveBeenCalledTimes(1);
+            expect(relayReply).toHaveBeenCalledWith(sent);
+        });
+
+        it('relays failure replies', async () => {
+            const { service } = makeService({
+                ok: false,
+                reason: 'cooldown',
+                retryAfterMs: 1000,
+            });
+            const relayReply = vi.fn().mockResolvedValue(undefined);
+            const { message, reply } = makeMessage();
+            reply.mockResolvedValue(sent);
+            await new ClaudeRequestDiscordCommandHandler(
+                client,
+                service,
+                [ALLOWED_ROLE],
+                notifyService,
+                relayReply
+            ).handleCommand(message, 'clauderequest', 'x');
+            expect(relayReply).toHaveBeenCalledWith(sent);
+        });
+
+        it('relays the usage reply', async () => {
+            const relayReply = vi.fn().mockResolvedValue(undefined);
+            const { message, reply } = makeMessage({
+                content: '!b clauderequest   ',
+            });
+            reply.mockResolvedValue(sent);
+            await relayHandler(relayReply).handleCommand(
+                message,
+                'clauderequest'
+            );
+            expect(relayReply).toHaveBeenCalledWith(sent);
+        });
+
+        it('survives a failing relay', async () => {
+            const relayReply = vi.fn().mockRejectedValue(new Error('nope'));
+            const { message, reply } = makeMessage();
+            reply.mockResolvedValue(sent);
+            await expect(
+                relayHandler(relayReply).handleCommand(
+                    message,
+                    'clauderequest',
+                    'x'
+                )
+            ).resolves.toBeUndefined();
+            expect(relayReply).toHaveBeenCalledTimes(1);
+            expect(track).toHaveBeenCalledTimes(1);
+        });
     });
 });

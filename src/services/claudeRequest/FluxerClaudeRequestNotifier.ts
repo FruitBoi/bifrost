@@ -1,5 +1,6 @@
-import { Client, EmbedBuilder } from '@fluxerjs/core';
+import { Client, EmbedBuilder, Message } from '@fluxerjs/core';
 import { ClaudeRequest } from '../../db/entities/ClaudeRequest';
+import logger from '../../utils/logging/logger';
 import { isPermanentFluxerDeliveryError } from '../reminders/FluxerReminderDeliverer';
 import {
     buildClaudeRequestNotice,
@@ -36,9 +37,16 @@ function mayRetryWithoutReply(err: unknown): boolean {
  * replying to the invoking message when there is one, plus an embed linking
  * the issue. Fluxer has no `failIfNotExists`, so a reply that is rejected is
  * retried once as a plain message. Resolves with the notice's message ID.
+ * When a relay hook is given the notice is bridged to the linked channel
+ * through it (issue #40).
  */
 export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifier {
-    constructor(private readonly client: Client) {}
+    constructor(
+        private readonly client: Client,
+        private readonly relayNotice:
+            | ((notice: Message) => Promise<void>)
+            | null = null
+    ) {}
 
     async notify(
         request: ClaudeRequest,
@@ -57,30 +65,30 @@ export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifie
             allowedMentions: { parse: [], users: [request.userId] },
         };
 
+        let sent: Message | undefined;
         try {
+            let replied = false;
             if (request.messageId) {
                 try {
-                    const sent = await this.client.channels.send(
-                        request.channelId,
-                        {
-                            ...payload,
-                            replyTo: {
-                                channelId: request.channelId,
-                                messageId: request.messageId,
-                                guildId: request.guildId,
-                            },
-                        }
-                    );
-                    return sent?.id ?? null;
+                    sent = await this.client.channels.send(request.channelId, {
+                        ...payload,
+                        replyTo: {
+                            channelId: request.channelId,
+                            messageId: request.messageId,
+                            guildId: request.guildId,
+                        },
+                    });
+                    replied = true;
                 } catch (err) {
                     if (!mayRetryWithoutReply(err)) throw err;
                 }
             }
-            const sent = await this.client.channels.send(
-                request.channelId,
-                payload
-            );
-            return sent?.id ?? null;
+            if (!replied) {
+                sent = await this.client.channels.send(
+                    request.channelId,
+                    payload
+                );
+            }
         } catch (err) {
             if (isPermanentFluxerDeliveryError(err)) {
                 throw new ClaudeRequestNotifyError(
@@ -91,5 +99,17 @@ export default class FluxerClaudeRequestNotifier implements ClaudeRequestNotifie
             }
             throw err;
         }
+
+        if (sent && this.relayNotice) {
+            try {
+                await this.relayNotice(sent);
+            } catch (err) {
+                logger.error(
+                    '❌ Failed to bridge a Claude request notice:',
+                    err
+                );
+            }
+        }
+        return sent?.id ?? null;
     }
 }

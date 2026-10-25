@@ -403,6 +403,24 @@ const startFluxerClient = async ({
         }
     }
 
+    // Issue #40: `clauderequest` invocations, the bot's replies to them and
+    // the "done" notices are bridged like ordinary chat.
+    // Sent messages may lack a guild ID; the relay only bridges messages in
+    // linked channels anyway.
+    const bridgeClaudeRequestMessage = async (bridged: Message) => {
+        try {
+            await messageRelay.relayMessage(bridged);
+        } catch (error) {
+            logger.error(
+                '❌ Failed to bridge a Claude request message:',
+                error
+            );
+        }
+    };
+    const isClaudeRequestCommand = (command: string) =>
+        botConfig.claudeRequests.enabled &&
+        (CLAUDE_REQUEST_COMMAND_NAMES as readonly string[]).includes(command);
+
     // Replies to "Claude request implemented/closed" notices (issue #35).
     const claudeRequestReplyHandler =
         botConfig.claudeRequests.enabled && claudeRequestNotifyService
@@ -418,7 +436,8 @@ const startFluxerClient = async ({
             client,
             claudeRequestService,
             botConfig.roles.claudeRequest,
-            claudeRequestNotifyService
+            claudeRequestNotifyService,
+            bridgeClaudeRequestMessage
         );
         for (const name of CLAUDE_REQUEST_COMMAND_NAMES) {
             commandRegistry.registerCommand(name, claudeRequestHandler);
@@ -451,7 +470,7 @@ const startFluxerClient = async ({
         }
         claudeRequestNotifyService?.setNotifier(
             'fluxer',
-            new FluxerClaudeRequestNotifier(client)
+            new FluxerClaudeRequestNotifier(client, bridgeClaudeRequestMessage)
         );
     });
 
@@ -736,6 +755,13 @@ const startFluxerClient = async ({
             command: string,
             args: string[]
         ) => {
+            if (
+                isClaudeRequestCommand(command) &&
+                !message.author.bot &&
+                !message.webhookId
+            ) {
+                await bridgeClaudeRequestMessage(message);
+            }
             try {
                 await handler.handleCommand(message, command, ...args);
             } catch (error) {

@@ -1,5 +1,6 @@
-import { Client, EmbedBuilder } from 'discord.js';
+import { Client, EmbedBuilder, Message } from 'discord.js';
 import { ClaudeRequest } from '../../db/entities/ClaudeRequest';
+import logger from '../../utils/logging/logger';
 import {
     discordErrorCode,
     PERMANENT_FETCH_CODES,
@@ -37,10 +38,16 @@ function classifyError(
  * Tells the requester in their Discord channel that their Claude request was
  * closed: a ping of the requester (the only mention allowed to resolve),
  * replying to the invoking message when it still exists, plus an embed
- * linking the issue. Resolves with the notice's message ID.
+ * linking the issue. Resolves with the notice's message ID. When a relay hook
+ * is given the notice is bridged to the linked channel through it (issue #40).
  */
 export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifier {
-    constructor(private readonly client: Client) {}
+    constructor(
+        private readonly client: Client,
+        private readonly relayNotice:
+            | ((notice: Message) => Promise<void>)
+            | null = null
+    ) {}
 
     public async notify(
         request: ClaudeRequest,
@@ -70,8 +77,9 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
         }
 
         const notice = buildClaudeRequestNotice(request, outcome);
+        let sent;
         try {
-            const sent = await channel.send({
+            sent = await channel.send({
                 content: notice.content,
                 embeds: [
                     new EmbedBuilder()
@@ -91,7 +99,6 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
                       }
                     : {}),
             });
-            return sent?.id ?? null;
         } catch (err) {
             throw classifyError(
                 err,
@@ -99,5 +106,17 @@ export default class DiscordClaudeRequestNotifier implements ClaudeRequestNotifi
                 `Cannot post Claude request #${request.issueNumber} notice in channel ${request.channelId}`
             );
         }
+
+        if (sent && this.relayNotice) {
+            try {
+                await this.relayNotice(sent);
+            } catch (err) {
+                logger.error(
+                    '❌ Failed to bridge a Claude request notice:',
+                    err
+                );
+            }
+        }
+        return sent?.id ?? null;
     }
 }

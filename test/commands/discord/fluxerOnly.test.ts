@@ -63,6 +63,14 @@ describe('discordAllowedCommandNames', () => {
         expect(discordAllowedCommandNames(registry).size).toBe(0);
     });
 
+    it('runs clauderequest on Discord too', () => {
+        const registry = new CommandRegistry<DiscordCommandHandler>();
+        registry.registerCommand('clauderequest', new FakeHandler());
+        expect([...discordAllowedCommandNames(registry)]).toEqual([
+            'clauderequest',
+        ]);
+    });
+
     it('leaves the threads directory to Fluxer', () => {
         expect(DISCORD_ALLOWED_COMMANDS).not.toContain('directory');
         expect(getDiscordCommandInfo('directory')).toBeUndefined();
