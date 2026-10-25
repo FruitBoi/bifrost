@@ -137,6 +137,7 @@ describe('loadBotConfig parsing', () => {
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
+            instagram: DEFAULT_BOT_CONFIG.instagram,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
@@ -170,6 +171,7 @@ describe('loadBotConfig parsing', () => {
             clean: DEFAULT_BOT_CONFIG.clean,
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
+            instagram: DEFAULT_BOT_CONFIG.instagram,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
@@ -408,6 +410,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'clean',
             'history',
             'meow',
+            'instagram',
             'reminders',
             'reactions',
             'pins',
@@ -1071,5 +1074,67 @@ describe('claudeRequests', () => {
 
         expect(attempt).toThrow(BotConfigError);
         expect(attempt).toThrow('claudeRequests.label');
+    });
+});
+
+describe('instagram', () => {
+    it('has the documented defaults', () => {
+        expect(DEFAULT_BOT_CONFIG.instagram).toEqual({
+            enabled: true,
+            maxLinksPerMessage: 3,
+            maxSizeMb: 10,
+            maxDurationSeconds: 600,
+            timeoutSeconds: 180,
+        });
+    });
+
+    it('merges configured values over the defaults', () => {
+        const { config, unknownKeys } = mergeBotConfig({
+            instagram: { enabled: false, maxSizeMb: 24.5, timeoutSeconds: 60 },
+        });
+
+        expect(unknownKeys).toEqual([]);
+        expect(config.instagram).toEqual({
+            enabled: false,
+            maxLinksPerMessage: 3,
+            maxSizeMb: 24.5,
+            maxDurationSeconds: 600,
+            timeoutSeconds: 60,
+        });
+    });
+
+    it.each(['maxLinksPerMessage', 'maxDurationSeconds', 'timeoutSeconds'])(
+        'rejects a zero, negative or fractional %s',
+        (key) => {
+            for (const value of [0, -1, 1.5]) {
+                const attempt = () =>
+                    mergeBotConfig({ instagram: { [key]: value } });
+
+                expect(attempt).toThrow(BotConfigError);
+                expect(attempt).toThrow(`instagram.${key}`);
+            }
+        }
+    );
+
+    it.each([0, -5])('rejects maxSizeMb %j', (value) => {
+        const attempt = () =>
+            mergeBotConfig({ instagram: { maxSizeMb: value } });
+
+        expect(attempt).toThrow('instagram.maxSizeMb');
+    });
+
+    it('rejects wrongly typed values', () => {
+        expect(() =>
+            mergeBotConfig({ instagram: { maxSizeMb: '10' } })
+        ).toThrow('instagram.maxSizeMb');
+        expect(() => mergeBotConfig({ instagram: { enabled: 'yes' } })).toThrow(
+            'instagram.enabled'
+        );
+    });
+
+    it('reports unknown instagram keys', () => {
+        const { unknownKeys } = mergeBotConfig({ instagram: { size: 3 } });
+
+        expect(unknownKeys).toEqual(['instagram.size']);
     });
 });

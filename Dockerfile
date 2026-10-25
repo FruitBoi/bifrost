@@ -8,6 +8,12 @@ RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
+    ffmpeg \
+    curl \
+    ca-certificates \
+    && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+        -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./

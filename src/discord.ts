@@ -1,4 +1,5 @@
 import {
+    AttachmentBuilder,
     Client,
     EmbedBuilder,
     Events,
@@ -11,6 +12,11 @@ import { COMMAND_PREFIX, DELETE_INVOCATION, DISCORD_TOKEN } from './utils/env';
 import { EmbedColors } from './utils/embeds';
 import logger from './utils/logging/logger';
 import { isFluxerApiBlocked } from './utils/fluxerApiGuard';
+import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
+import {
+    findInstagramLinks,
+    type InstagramLink,
+} from './services/instagramVideo/instagramLinks';
 import CommandRegistry from './commands/CommandRegistry';
 import DiscordCommandHandler from './commands/discord/DiscordCommandHandler';
 import {
@@ -95,7 +101,7 @@ import ClaudeLinesService, {
     CLAUDE_LINES_COMMAND_NAMES,
 } from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
-import { BotConfig } from './config/BotConfig';
+import { BotConfig, instagramVideoOptions } from './config/BotConfig';
 
 const startDiscordClient = async ({
     linkService,
@@ -316,6 +322,10 @@ const startDiscordClient = async ({
     for (const name of EXPRESSIONS_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, expressionsHandler);
     }
+
+    const instagramVideoService = botConfig.instagram.enabled
+        ? new InstagramVideoService(instagramVideoOptions(botConfig))
+        : null;
 
     const remindersEnabled = botConfig.reminders.enabled;
     if (remindersEnabled) {
@@ -930,7 +940,63 @@ const startDiscordClient = async ({
         ) {
             await messageRelay.relayMessage(message);
         }
+
+        // Instagram videos (issue #45): reply with the video of each public
+        // Instagram post a person links, then bridge the reply. Not awaited:
+        // downloading and compressing can take a while.
+        if (
+            instagramVideoService &&
+            message.inGuild() &&
+            !message.author.bot &&
+            !message.webhookId &&
+            !isBotCommand &&
+            !isShortInvocation
+        ) {
+            const links = findInstagramLinks(
+                message.content,
+                botConfig.instagram.maxLinksPerMessage
+            );
+            if (links.length > 0) {
+                void replyWithInstagramVideos(
+                    instagramVideoService,
+                    message,
+                    links
+                );
+            }
+        }
     });
+
+    async function replyWithInstagramVideos(
+        service: InstagramVideoService,
+        message: Message<true>,
+        links: InstagramLink[]
+    ): Promise<void> {
+        for (const link of links) {
+            const video = await service.fetchVideo(link);
+            if (!video) continue;
+            try {
+                const reply = await message.reply({
+                    files: [
+                        new AttachmentBuilder(video.data, {
+                            name: video.name,
+                        }).setSpoiler(video.spoiler),
+                    ],
+                    allowedMentions: { repliedUser: false },
+                });
+                if (
+                    reply.channel instanceof TextChannel ||
+                    reply.channel.isThread()
+                ) {
+                    await messageRelay.relayMessage(reply);
+                }
+            } catch (error) {
+                logger.error(
+                    `❌ Failed to post the Instagram video for ${link.url}:`,
+                    error
+                );
+            }
+        }
+    }
 
     await client.login(DISCORD_TOKEN);
 

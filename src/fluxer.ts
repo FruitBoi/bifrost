@@ -4,6 +4,7 @@ import {
     EmbedBuilder,
     Events,
     Message,
+    MessageAttachmentFlags,
     PartialMessage,
     TextChannel,
 } from '@fluxerjs/core';
@@ -72,9 +73,14 @@ import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 import IdentityFluxerCommandHandler from './commands/fluxer/handlers/IdentityFluxerCommandHandler';
-import type { BotConfig } from './config/BotConfig';
+import { instagramVideoOptions, type BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
+import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
+import {
+    findInstagramLinks,
+    type InstagramLink,
+} from './services/instagramVideo/instagramLinks';
 import ReminderService from './services/reminders/ReminderService';
 import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
 import TimezoneFluxerCommandHandler from './commands/fluxer/handlers/TimezoneFluxerCommandHandler';
@@ -220,6 +226,9 @@ const startFluxerClient = async ({
         new ReplyLinkResolver(linkService)
     );
     const meowService = new MeowService();
+    const instagramVideoService = botConfig.instagram.enabled
+        ? new InstagramVideoService(instagramVideoOptions(botConfig))
+        : null;
     const messageRelay = new FluxerToDiscordMessageRelay({
         linkService,
         webhookService,
@@ -969,7 +978,65 @@ const startFluxerClient = async ({
                 logger.error('❌ Failed to meow back:', error);
             }
         }
+
+        // Instagram videos (issue #45): reply with the video of each public
+        // Instagram post a person links, then bridge the reply. Not awaited:
+        // downloading and compressing can take a while.
+        if (
+            instagramVideoService &&
+            message.guildId &&
+            !message.author.bot &&
+            !message.webhookId &&
+            !isBotCommand &&
+            !isShortInvocation
+        ) {
+            const links = findInstagramLinks(
+                message.content,
+                botConfig.instagram.maxLinksPerMessage
+            );
+            if (links.length > 0) {
+                void replyWithInstagramVideos(
+                    instagramVideoService,
+                    message,
+                    links
+                );
+            }
+        }
     });
+
+    async function replyWithInstagramVideos(
+        service: InstagramVideoService,
+        message: Message,
+        links: InstagramLink[]
+    ): Promise<void> {
+        for (const link of links) {
+            const video = await service.fetchVideo(link);
+            if (!video) continue;
+            try {
+                const reply = await message.reply(
+                    {
+                        files: [{ name: video.name, data: video.data }],
+                        attachments: [
+                            {
+                                id: 0,
+                                filename: video.name,
+                                flags: video.spoiler
+                                    ? MessageAttachmentFlags.IS_SPOILER
+                                    : undefined,
+                            },
+                        ],
+                    },
+                    { ping: false }
+                );
+                await messageRelay.relayMessage(reply);
+            } catch (error) {
+                logger.error(
+                    `❌ Failed to post the Instagram video for ${link.url}:`,
+                    error
+                );
+            }
+        }
+    }
 
     await client.login(FLUXER_TOKEN);
 

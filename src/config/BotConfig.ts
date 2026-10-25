@@ -161,6 +161,28 @@ export interface BotConfig {
          */
         enabled: boolean;
     };
+    instagram: {
+        /**
+         * Download public Instagram post, reel and tv links posted in bridged
+         * channels and threads (either platform) with yt-dlp and reply with
+         * the video attached, re-encoded with ffmpeg when too large. Gated,
+         * private and image-only posts are skipped silently. Needs `yt-dlp`
+         * and `ffmpeg` on PATH. See `services/instagramVideo/`.
+         */
+        enabled: boolean;
+        /** Links handled per message; further links are ignored. */
+        maxLinksPerMessage: number;
+        /**
+         * Largest video uploaded, in MiB (may be fractional). Bigger videos
+         * are compressed to fit. 10 is Discord's unboosted upload limit, so
+         * the bridged copy uploads there too.
+         */
+        maxSizeMb: number;
+        /** Videos longer than this many seconds are skipped. */
+        maxDurationSeconds: number;
+        /** Time limit in seconds for each yt-dlp or ffmpeg run. */
+        timeoutSeconds: number;
+    };
     reminders: {
         /**
          * Enable the YAGPDB-style `remindme` / `reminder` commands (issue #9).
@@ -265,6 +287,13 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         delayMs: 1000,
     },
     meow: { enabled: true },
+    instagram: {
+        enabled: true,
+        maxLinksPerMessage: 3,
+        maxSizeMb: 10,
+        maxDurationSeconds: 600,
+        timeoutSeconds: 180,
+    },
     reminders: { enabled: true, triggerPrefixes: ['?', '!'] },
     reactions: { enabled: true },
     pins: { enabled: true },
@@ -434,6 +463,7 @@ export function mergeBotConfig(
     validateHistoryConfig(config.history);
     validateClaudeRequestsConfig(config.claudeRequests);
     validateBotAvatarConfig(config.botAvatar);
+    validateInstagramConfig(config.instagram);
 
     return {
         config,
@@ -485,6 +515,47 @@ function validateClaudeRequestsConfig(
             `Config "claudeRequests.notifyPollMs" must be a whole number of at least 30000, got ${claudeRequests.notifyPollMs}`
         );
     }
+}
+
+/** Instagram counts and seconds are positive integers, the size a positive number. */
+function validateInstagramConfig(instagram: BotConfig['instagram']): void {
+    for (const key of [
+        'maxLinksPerMessage',
+        'maxDurationSeconds',
+        'timeoutSeconds',
+    ] as const) {
+        const value = instagram[key];
+        if (!Number.isInteger(value) || value <= 0) {
+            throw new BotConfigError(
+                `Config "instagram.${key}" must be a positive whole number, got ${value}`
+            );
+        }
+    }
+    const { maxSizeMb } = instagram;
+    if (!Number.isFinite(maxSizeMb) || maxSizeMb <= 0) {
+        throw new BotConfigError(
+            `Config "instagram.maxSizeMb" must be a positive number, got ${maxSizeMb}`
+        );
+    }
+}
+
+/**
+ * Options for `InstagramVideoService` from the `instagram` section. Two
+ * downloads run at once at most.
+ */
+export function instagramVideoOptions(config: BotConfig): {
+    maxBytes: number;
+    maxDurationSeconds: number;
+    timeoutMs: number;
+    maxConcurrent: number;
+} {
+    const { maxSizeMb, maxDurationSeconds, timeoutSeconds } = config.instagram;
+    return {
+        maxBytes: Math.floor(maxSizeMb * 1024 * 1024),
+        maxDurationSeconds,
+        timeoutMs: timeoutSeconds * 1000,
+        maxConcurrent: 2,
+    };
 }
 
 /** `botAvatar.hourUtc` must be a whole hour of the day, 0 to 23. */
