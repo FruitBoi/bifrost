@@ -1,4 +1,5 @@
 import type { WebhookAttachment } from './WebhookService';
+import { truncateKeepingSpoilers } from '../utils/spoilers';
 
 /** Upload limit for a whole webhook request in a guild without boosts (bytes). */
 export const DISCORD_DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
@@ -73,11 +74,11 @@ export function appendAttachmentLinks(
         const combined = `${content}\n${linksText}`;
         if (combined.length <= maxLength) return combined;
 
-        // Room left for the content once the links, the separating newline
-        // and the ellipsis are in.
-        const budget = maxLength - linksText.length - 2;
-        if (budget > 0) {
-            return `${content.slice(0, budget).trimEnd()}…\n${linksText}`;
+        // Room left for the content (ellipsis included) once the links and
+        // the separating newline are in. A spoiler cut in half is closed.
+        const budget = maxLength - linksText.length - 1;
+        if (budget > 1) {
+            return `${truncateKeepingSpoilers(content, budget)}\n${linksText}`;
         }
     }
 

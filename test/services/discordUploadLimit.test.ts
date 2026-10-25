@@ -47,20 +47,14 @@ describe('splitOversizedAttachments', () => {
 
     it('links a single oversized video', () => {
         const video = att('clip.mp4', 30 * MiB);
-        const { upload, linked } = splitOversizedAttachments(
-            [video],
-            10 * MiB
-        );
+        const { upload, linked } = splitOversizedAttachments([video], 10 * MiB);
         expect(upload).toEqual([]);
         expect(linked).toEqual([video]);
     });
 
     it('accepts a file exactly at the limit', () => {
         const exact = att('exact.bin', 10 * MiB);
-        const { upload, linked } = splitOversizedAttachments(
-            [exact],
-            10 * MiB
-        );
+        const { upload, linked } = splitOversizedAttachments([exact], 10 * MiB);
         expect(upload).toEqual([exact]);
         expect(linked).toEqual([]);
     });
@@ -145,6 +139,13 @@ describe('appendAttachmentLinks', () => {
         expect(result.length).toBeLessThanOrEqual(2000);
         expect(result.endsWith(`…\n${video.url}`)).toBe(true);
         expect(result.startsWith('xxx')).toBe(true);
+    });
+
+    it('closes a spoiler in the content when trimming cuts it', () => {
+        const content = `${'x'.repeat(10)} ||${'s'.repeat(2000)}||`;
+        const result = appendAttachmentLinks(content, [video]);
+        expect(result.length).toBeLessThanOrEqual(2000);
+        expect(result.endsWith(`…||\n${video.url}`)).toBe(true);
     });
 
     it('never exceeds maxLength, even with a custom limit', () => {

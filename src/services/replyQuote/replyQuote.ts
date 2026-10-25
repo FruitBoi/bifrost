@@ -7,9 +7,6 @@ export const MAX_CONTENT_LENGTH = 2000;
 /** Visible characters of the replied-to text kept in the quote line. */
 export const QUOTE_SNIPPET_LENGTH = 100;
 
-/** Stands in for spoilered text so a truncated quote cannot reveal it. */
-const SPOILER_PLACEHOLDER = '▒▒▒▒▒';
-
 /**
  * Tokens that must reach the client verbatim: escaping them would break
  * custom emoji (`<:a_b:1>`), timestamps and URLs, and cutting them in half
@@ -48,17 +45,15 @@ export function escapeMarkdown(text: string): string {
 }
 
 /**
- * Turns replied-to text into a short single-line snippet: spoilers are
- * hidden, whitespace (including newlines, which would end the subtext line)
- * is collapsed, it is cut to {@link QUOTE_SNIPPET_LENGTH} characters with an
- * ellipsis, and markdown is escaped so an unbalanced code span or spoiler
- * cannot swallow the message below it.
+ * Turns replied-to text into a short single-line snippet: whitespace
+ * (including newlines, which would end the subtext line) is collapsed, it is
+ * cut to {@link QUOTE_SNIPPET_LENGTH} visible characters with an ellipsis,
+ * and markdown is escaped so an unbalanced code span or spoiler cannot
+ * swallow the message below it. Spoilers stay spoilers: their markers are
+ * kept and always closed, even when the cut lands inside one.
  */
 export function formatQuoteSnippet(text: string): string {
-    const collapsed = text
-        .replace(/\|\|[\s\S]+?\|\|/g, SPOILER_PLACEHOLDER)
-        .replace(/\s+/g, ' ')
-        .trim();
+    const collapsed = text.replace(/\s+/g, ' ').trim();
 
     const parts: string[] = [];
     let remaining = QUOTE_SNIPPET_LENGTH;
@@ -72,24 +67,41 @@ export function formatQuoteSnippet(text: string): string {
         remaining -= chars.length;
         parts.push(escapeMarkdown(chars.join('')));
     };
+    const appendSegment = (segment: string) => {
+        const tokens = new RegExp(VERBATIM_TOKEN.source, 'g');
+        let last = 0;
+        let match: RegExpExecArray | null;
+        while ((match = tokens.exec(segment)) !== null) {
+            appendText(segment.slice(last, match.index));
+            if (truncated) return;
+            const token = match[0];
+            if (token.length > remaining) {
+                truncated = true;
+                return;
+            }
+            remaining -= token.length;
+            // `<url>` keeps the quoted link from unfurling a second preview.
+            parts.push(token.startsWith('http') ? `<${token}>` : token);
+            last = match.index + token.length;
+        }
+        appendText(segment.slice(last));
+    };
 
-    const tokens = new RegExp(VERBATIM_TOKEN.source, 'g');
+    const spoilers = /\|\|(.+?)\|\|/g;
     let last = 0;
     let match: RegExpExecArray | null;
-    while ((match = tokens.exec(collapsed)) !== null) {
-        appendText(collapsed.slice(last, match.index));
+    while ((match = spoilers.exec(collapsed)) !== null) {
+        appendSegment(collapsed.slice(last, match.index));
         if (truncated) break;
-        const token = match[0];
-        if (token.length > remaining) {
-            truncated = true;
-            break;
-        }
-        remaining -= token.length;
-        // `<url>` keeps the quoted link from unfurling a second preview.
-        parts.push(token.startsWith('http') ? `<${token}>` : token);
-        last = match.index + token.length;
+        const start = parts.length;
+        appendSegment(match[1]);
+        const inner = parts.splice(start).join('').trimEnd();
+        // A spoiler cut down to nothing is dropped rather than left empty.
+        if (inner.trim() !== '') parts.push(`||${inner}||`);
+        if (truncated) break;
+        last = match.index + match[0].length;
     }
-    if (!truncated) appendText(collapsed.slice(last));
+    if (!truncated) appendSegment(collapsed.slice(last));
 
     const snippet = parts.join('');
     return truncated ? `${snippet.trimEnd()}…` : snippet;

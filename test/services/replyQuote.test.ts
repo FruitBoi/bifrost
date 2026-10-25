@@ -155,9 +155,31 @@ describe('reply quote formatting', () => {
         );
     });
 
-    it('hides spoilers so truncation cannot reveal them', () => {
+    it('keeps spoilers tagged, escaping their text', () => {
         expect(formatQuoteSnippet('the killer is ||the butler||!')).toBe(
-            'the killer is ▒▒▒▒▒!'
+            'the killer is ||the butler||!'
+        );
+        expect(formatQuoteSnippet('||a *b*|| and ||c||')).toBe(
+            '||a \\*b\\*|| and ||c||'
+        );
+        // A lone marker is not a spoiler and stays escaped.
+        expect(formatQuoteSnippet('a || b')).toBe('a \\|\\| b');
+    });
+
+    it('closes a spoiler that the cut lands in', () => {
+        const snippet = formatQuoteSnippet(
+            `${'a'.repeat(95)} ||the butler did it||`
+        );
+        expect(snippet).toBe(`${'a'.repeat(95)} ||the||…`);
+        // Cut right before the spoiler: no empty spoiler is left behind.
+        expect(formatQuoteSnippet(`${'a'.repeat(100)}||secret||`)).toBe(
+            `${'a'.repeat(100)}…`
+        );
+    });
+
+    it('keeps emoji and links inside spoilers intact', () => {
+        expect(formatQuoteSnippet('||<:my_emoji:123> https://a.b/x_y||')).toBe(
+            '||<:my_emoji:123> <https://a.b/x_y>||'
         );
     });
 

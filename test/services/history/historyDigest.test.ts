@@ -104,6 +104,12 @@ describe('truncateText', () => {
         expect(truncateText('hello', 1)).toBe('…');
         expect(truncateText('hello', 0)).toBe('');
     });
+
+    it('closes a spoiler cut in half so it stays hidden', () => {
+        expect(truncateText('spoiler: ||the ending||', 16)).toBe(
+            'spoiler: ||th…||'
+        );
+    });
 });
 
 describe('packDigest', () => {

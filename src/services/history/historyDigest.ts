@@ -11,6 +11,7 @@ import {
     EMBEDS_PER_MESSAGE_MAX,
     embedCharCount,
 } from '../../utils/embeds';
+import { truncateKeepingSpoilers } from '../../utils/spoilers';
 import WebhookEmbed from '../WebhookEmbed';
 import { WebhookAttachment, WebhookMessageData } from '../WebhookService';
 
@@ -20,7 +21,6 @@ export const DIGEST_MAX_CHARS = 2000;
 export const DIGEST_MAX_FILES = 10;
 /** Entries in a post are separated by a blank line. */
 export const DIGEST_ENTRY_SEPARATOR = '\n\n';
-const ELLIPSIS = '…';
 
 /** One source message to pack: its bridged payload plus header data. */
 export interface DigestEntry {
@@ -91,11 +91,12 @@ export function formatDigestLine(
     );
 }
 
-/** `text` cut to at most `max` characters, ending with an ellipsis when cut. */
+/**
+ * `text` cut to at most `max` characters, ending with an ellipsis when cut.
+ * A spoiler cut in half is closed again so its text stays hidden.
+ */
 export function truncateText(text: string, max: number): string {
-    if (text.length <= max) return text;
-    if (max <= 0) return '';
-    return text.slice(0, max - 1) + ELLIPSIS;
+    return truncateKeepingSpoilers(text, max);
 }
 
 /** Characters the embed counts towards the per-message total. */
