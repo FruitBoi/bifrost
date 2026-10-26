@@ -255,6 +255,20 @@ export interface BotConfig {
          */
         includeAnimated: boolean;
     };
+    /**
+     * Deploy announcements (issue #47): when the bot starts on a new commit
+     * (`GIT_COMMIT`, set by the Docker build), it posts a summary of the
+     * commits deployed since the last announced one and the Claude-request
+     * issues they reference (claudeRequests.repo / label) in a Fluxer
+     * channel. A restart on the same commit posts nothing. See
+     * `services/deployAnnounce/`.
+     */
+    deployAnnounce: {
+        /** Post the deploy summary. */
+        enabled: boolean;
+        /** Fluxer channel ID the summary is posted in (a quoted string). */
+        channelId: string;
+    };
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
@@ -305,6 +319,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
         discord: true,
         includeAnimated: false,
     },
+    deployAnnounce: { enabled: true, channelId: '1561105750405689376' },
 };
 
 export const CONFIG_FILE_CANDIDATES = [
@@ -464,6 +479,7 @@ export function mergeBotConfig(
     validateClaudeRequestsConfig(config.claudeRequests);
     validateBotAvatarConfig(config.botAvatar);
     validateInstagramConfig(config.instagram);
+    validateDeployAnnounceConfig(config.deployAnnounce);
 
     return {
         config,
@@ -564,6 +580,18 @@ function validateBotAvatarConfig(botAvatar: BotConfig['botAvatar']): void {
     if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23) {
         throw new BotConfigError(
             `Config "botAvatar.hourUtc" must be a whole number from 0 to 23, got ${hourUtc}`
+        );
+    }
+}
+
+/** `deployAnnounce.channelId` must be a snowflake when announcements are on. */
+function validateDeployAnnounceConfig(
+    deployAnnounce: BotConfig['deployAnnounce']
+): void {
+    const { enabled, channelId } = deployAnnounce;
+    if (enabled && !/^\d+$/.test(channelId)) {
+        throw new BotConfigError(
+            `Config "deployAnnounce.channelId" must be a channel ID (digits, quoted), got "${channelId}"`
         );
     }
 }

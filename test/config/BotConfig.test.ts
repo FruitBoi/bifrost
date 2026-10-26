@@ -143,6 +143,7 @@ describe('loadBotConfig parsing', () => {
             pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
             botAvatar: DEFAULT_BOT_CONFIG.botAvatar,
+            deployAnnounce: DEFAULT_BOT_CONFIG.deployAnnounce,
         });
     });
 
@@ -177,6 +178,7 @@ describe('loadBotConfig parsing', () => {
             pins: DEFAULT_BOT_CONFIG.pins,
             typing: DEFAULT_BOT_CONFIG.typing,
             botAvatar: DEFAULT_BOT_CONFIG.botAvatar,
+            deployAnnounce: DEFAULT_BOT_CONFIG.deployAnnounce,
         });
     });
 
@@ -416,6 +418,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'pins',
             'typing',
             'botAvatar',
+            'deployAnnounce',
         ]);
     });
 });
@@ -1136,5 +1139,56 @@ describe('instagram', () => {
         const { unknownKeys } = mergeBotConfig({ instagram: { size: 3 } });
 
         expect(unknownKeys).toEqual(['instagram.size']);
+    });
+});
+
+describe('deployAnnounce', () => {
+    it('defaults to announcing deploys in the documented Fluxer channel', () => {
+        expect(DEFAULT_BOT_CONFIG.deployAnnounce).toEqual({
+            enabled: true,
+            channelId: '1561105750405689376',
+        });
+    });
+
+    it('merges a YAML section over the defaults', () => {
+        write(
+            'config.yml',
+            ['deployAnnounce:', '  channelId: "123456789"'].join('\n')
+        );
+
+        const { config, unknownKeys } = loadBotConfig({}, dir);
+
+        expect(unknownKeys).toEqual([]);
+        expect(config.deployAnnounce).toEqual({
+            enabled: true,
+            channelId: '123456789',
+        });
+    });
+
+    it('rejects an unquoted numeric channel ID', () => {
+        const attempt = () =>
+            mergeBotConfig({ deployAnnounce: { channelId: 123 } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('deployAnnounce.channelId');
+    });
+
+    it('rejects a channel ID that is not a snowflake while enabled', () => {
+        const attempt = () =>
+            mergeBotConfig({ deployAnnounce: { channelId: '#general' } });
+
+        expect(attempt).toThrow(BotConfigError);
+        expect(attempt).toThrow('deployAnnounce.channelId');
+    });
+
+    it('accepts any channel ID while disabled', () => {
+        const { config } = mergeBotConfig({
+            deployAnnounce: { enabled: false, channelId: '' },
+        });
+
+        expect(config.deployAnnounce).toEqual({
+            enabled: false,
+            channelId: '',
+        });
     });
 });

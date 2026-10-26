@@ -30,6 +30,7 @@
 - File a GitHub issue for Claude straight from chat: `!b clauderequest make the bot meow louder` (see [Claude requests](#claude-requests))
 - See how many lines of code Claude has written for the bot: `!b lines` (see [Lines](#lines))
 - Changes its profile picture to a random emoji from the Fluxer server every day (see [Daily avatar](#daily-avatar))
+- Celebrates every deploy with an emoji-packed summary of the new commits and the Claude requests they fix (see [Deploy announcements](#deploy-announcements))
 
 ¹ Emoji support is limited to custom emojis from the linked Discord server and standard Unicode emojis. Emojis from the servers must have matching names to be replaced correctly. `!b expressions` creates the matching-name emojis on Fluxer for you (see [Emoji and sticker transfer](#emoji-and-sticker-transfer)).
 
@@ -516,6 +517,12 @@ Filing an issue does not start any work by itself; see [CLAUDE.md](CLAUDE.md) fo
 
 It reads the history through the GitHub GraphQL API, so it needs `BF_GITHUB_TOKEN` as well (the GraphQL API does not allow anonymous requests); a fine-grained token also needs **Contents: Read** on the repository. Without a token the command replies that it is not configured.
 
+## Deploy announcements
+
+When the bot starts on a new commit, it posts a "Claude wins again" message in a Fluxer channel (`deployAnnounce.channelId`, `1561105750405689376` by default): the commits deployed since the last announced one, newest first, and the Claude requests they reference (issues in `claudeRequests.repo` with the `claudeRequests.label` label, found through `#123` references in the commit messages), all wrapped in plenty of emojis. A restart on the same commit posts nothing. The first deploy with this feature, a force-push or a rollback announce just the deployed commit. Long lists are cut to fit one message, and the message pings nobody. In a bridged channel it is relayed to the linked Discord channel like other bot messages.
+
+The deployed commit comes from `GIT_COMMIT`, which the Docker image build sets; outside Docker the bot uses `git rev-parse HEAD` of its checkout, and with neither nothing is announced. Development instances should set `deployAnnounce.enabled: false` (or another channel) so they do not post in the real one. The last announced commit is stored in the database (`bot_state` table, migration 00018). Commits and issues are read from the GitHub REST API, with `BF_GITHUB_TOKEN` if it is set (a public repository works without one, within GitHub's anonymous rate limit). If GitHub cannot be reached, a short message naming the commit is posted instead. `deployAnnounce.enabled: false` turns this off.
+
 ## Community
 
 Join out community Fluxer server for support, updates and to share your feedback: https://bifrost-bot.com/community/fluxer
@@ -586,6 +593,8 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
 | `pins.enabled` | `true` | Mirror pins and unpins of bridged messages onto the counterpart message. Needs **Pin Messages** on both platforms. `pins sync` works regardless. See [Pins](#pins). |
+| `deployAnnounce.enabled` | `true` | Post a summary of the deployed commits and the Claude requests they fix when the bot starts on a new commit. See [Deploy announcements](#deploy-announcements). |
+| `deployAnnounce.channelId` | `"1561105750405689376"` | Fluxer channel the deploy summary is posted in. Quote the ID. |
 | `typing.enabled` | `true` | Show the bot typing on the other platform while someone types in a bridged channel or thread. Needs **Send Messages** only; on Discord it requests the *Guild Message Typing* intent while on. See [Typing indicators](#typing-indicators). |
 
 Example `config.yml` that keeps the defaults except for enabling deletion mirroring:

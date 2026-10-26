@@ -111,6 +111,7 @@ import ClaudeLinesService, {
     CLAUDE_LINES_COMMAND_NAMES,
 } from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
+import type DeployAnnounceService from './services/deployAnnounce/DeployAnnounceService';
 
 const startFluxerClient = async ({
     linkService,
@@ -140,6 +141,7 @@ const startFluxerClient = async ({
     claudeRequestService,
     claudeRequestNotifyService,
     claudeLinesService,
+    deployAnnounceService,
     onClientCreated,
 }: {
     linkService: LinkService;
@@ -169,6 +171,7 @@ const startFluxerClient = async ({
     claudeRequestService: ClaudeRequestService;
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
+    deployAnnounceService: DeployAnnounceService | null;
     /**
      * Called with the freshly created client before any listener is attached
      * and before login. The voice bridge uses this to attach its transport,
@@ -514,6 +517,15 @@ const startFluxerClient = async ({
             'fluxer',
             new FluxerClaudeRequestNotifier(client, bridgeCommandMessage)
         );
+        // Deploy announcement (issue #47): posted once per process, on the
+        // first Ready, and bridged like the Claude request notices.
+        void deployAnnounceService?.announce(async (content) => {
+            const sent = await client.channels.send(
+                botConfig.deployAnnounce.channelId,
+                { content, allowedMentions: { parse: [] } }
+            );
+            await bridgeCommandMessage(sent);
+        });
     });
 
     client.on(Events.Error, (error) => {

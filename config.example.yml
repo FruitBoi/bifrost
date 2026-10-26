@@ -263,3 +263,14 @@ botAvatar:
     discord: true
     # Allow animated emojis to be picked as well as static ones.
     includeAnimated: false
+
+deployAnnounce:
+    # When the bot starts on a new commit (GIT_COMMIT, set by the Docker image
+    # build), post a "Claude wins again" summary of the commits deployed since
+    # the last announced one and the Claude requests they reference (issues in
+    # claudeRequests.repo with claudeRequests.label), with lots of emojis. A
+    # restart on the same commit posts nothing. Uses BF_GITHUB_TOKEN when set;
+    # a public repository also works without it.
+    enabled: true
+    # Fluxer channel the summary is posted in. Quote the ID.
+    channelId: "1561105750405689376"

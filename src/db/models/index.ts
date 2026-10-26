@@ -14,6 +14,7 @@ import { ThreadDirectoryModel } from './ThreadDirectoryModel';
 import { ThreadDirectoryEntryModel } from './ThreadDirectoryEntryModel';
 import { MessageCountModel } from './MessageCountModel';
 import { CommandRoleModel } from './CommandRoleModel';
+import { BotStateModel } from './BotStateModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -143,4 +144,6 @@ export {
     // No associations: command_roles rows are keyed by raw platform guild IDs,
     // independent of guild links (issue #43).
     CommandRoleModel,
+    // No associations: bot_state is a standalone key/value table (issue #47).
+    BotStateModel,
 };

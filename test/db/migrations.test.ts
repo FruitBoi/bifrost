@@ -20,10 +20,12 @@ import * as threadDirectories from '../../src/db/migrations/00014-thread-directo
 import * as threadDirectoryRoles from '../../src/db/migrations/00015-thread-directory-roles';
 import * as messageCounts from '../../src/db/migrations/00016-message-counts';
 import * as commandRoles from '../../src/db/migrations/00017-command-roles';
+import * as botState from '../../src/db/migrations/00018-bot-state';
 import {
     MessageLinkModel,
     ThreadDirectoryEntryModel,
 } from '../../src/db/models';
+import { SequelizeBotStateRepository } from '../../src/db/sequelizerepos/SequelizeBotStateRepository';
 import { SequelizeCategoryLinkRepository } from '../../src/db/sequelizerepos/SequelizeCategoryLinkRepository';
 import { SequelizeClaudeRequestRepository } from '../../src/db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeCommandRoleRepository } from '../../src/db/sequelizerepos/SequelizeCommandRoleRepository';
@@ -122,6 +124,11 @@ const umzug = new Umzug({
             name: '00017-command-roles.js',
             up: commandRoles.up,
             down: commandRoles.down,
+        },
+        {
+            name: '00018-bot-state.js',
+            up: botState.up,
+            down: botState.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -2243,5 +2250,47 @@ describe('migration 00017-command-roles', () => {
         await umzug.up();
         expect(await executed()).toContain('00017-command-roles.js');
         expect(await repo.list('fluxer', 'dg1', 'moderator')).toEqual([]);
+    });
+});
+
+describe('migration 00018-bot-state', () => {
+    it('adds bot_state, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00018-bot-state.js');
+        expect(await qi.tableExists('bot_state')).toBe(true);
+
+        const cols = await qi.describeTable('bot_state');
+        expect(cols.key).toMatchObject({ allowNull: false, primaryKey: true });
+        expect(cols.key.type).toMatch(/VARCHAR|TEXT|CHAR/i);
+        expect(cols.value).toMatchObject({ allowNull: false });
+        expect(cols.value.type).toMatch(/TEXT/i);
+        expect(cols.updatedAt).toMatchObject({ allowNull: false });
+        expect(cols.updatedAt.type).toMatch(/DATE/i);
+
+        const repo = new SequelizeBotStateRepository();
+        expect(await repo.get('deploy.lastCommit')).toBeNull();
+
+        await repo.set('deploy.lastCommit', 'abc123');
+        await repo.set('other', 'x');
+        expect(await repo.get('deploy.lastCommit')).toBe('abc123');
+
+        // Setting again overwrites in place, and keys are independent.
+        await repo.set('deploy.lastCommit', 'def456');
+        expect(await repo.get('deploy.lastCommit')).toBe('def456');
+        expect(await repo.get('other')).toBe('x');
+        expect(
+            await select<{ key: string }>('SELECT key FROM bot_state')
+        ).toHaveLength(2);
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00018-bot-state.js' });
+        expect(await executed()).not.toContain('00018-bot-state.js');
+        expect(await executed()).toContain('00017-command-roles.js');
+        expect(await qi.tableExists('bot_state')).toBe(false);
+        expect(await qi.tableExists('command_roles')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00018-bot-state.js');
+        expect(await repo.get('deploy.lastCommit')).toBeNull();
     });
 });

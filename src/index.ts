@@ -23,6 +23,8 @@ import BotAvatarService, {
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeClaudeRequestNoticeRepository } from './db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
+import DeployAnnounceService from './services/deployAnnounce/DeployAnnounceService';
+import { SequelizeBotStateRepository } from './db/sequelizerepos/SequelizeBotStateRepository';
 import startDiscordClient from './discord';
 import type { Client as FluxerClient } from '@fluxerjs/core';
 import startFluxerClient from './fluxer';
@@ -306,6 +308,24 @@ const main = async () => {
         repo: botConfig.claudeRequests.repo,
     });
 
+    // Deploy announcements (issue #47): on the first Fluxer Ready after
+    // starting on a new commit, summarise the deployed commits and the Claude
+    // requests they reference.
+    const deployAnnounceService = botConfig.deployAnnounce.enabled
+        ? new DeployAnnounceService({
+              repo: botConfig.claudeRequests.repo,
+              token: GITHUB_TOKEN,
+              commit: GIT_COMMIT,
+              label: botConfig.claudeRequests.label,
+              state: new SequelizeBotStateRepository(),
+          })
+        : null;
+    if (!botConfig.deployAnnounce.enabled) {
+        logger.info(
+            'Config: deploy announcements are disabled (deployAnnounce.enabled=false)'
+        );
+    }
+
     const FLUXER_DOWN_THRESHOLD = 5; // 5 × 30s = 2.5 min before restart
     const FLUXER_MAX_RESTARTS = 3; // restart up to N times, then long backoff
     const FLUXER_BACKOFF_MS = 20 * 60_000; // 20 min wait after exhausting restarts
@@ -397,6 +417,7 @@ const main = async () => {
         claudeRequestService,
         claudeRequestNotifyService,
         claudeLinesService,
+        deployAnnounceService,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
