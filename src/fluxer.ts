@@ -77,6 +77,7 @@ import { instagramVideoOptions, type BotConfig } from './config/BotConfig';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
 import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
+import { instagramEmbedFields } from './services/instagramVideo/instagramEmbed';
 import {
     findInstagramLinks,
     type InstagramLink,
@@ -991,9 +992,9 @@ const startFluxerClient = async ({
             }
         }
 
-        // Instagram videos (issue #45): reply with the video of each public
-        // Instagram post a person links, then bridge the reply. Not awaited:
-        // downloading and compressing can take a while.
+        // Instagram posts (issues #45, #48): reply with an Instagram card plus
+        // the media of each public post a person links, then bridge the reply.
+        // Not awaited: downloading can take a while.
         if (
             instagramVideoService &&
             message.guildId &&
@@ -1007,7 +1008,7 @@ const startFluxerClient = async ({
                 botConfig.instagram.maxLinksPerMessage
             );
             if (links.length > 0) {
-                void replyWithInstagramVideos(
+                void replyWithInstagramPosts(
                     instagramVideoService,
                     message,
                     links
@@ -1016,34 +1017,51 @@ const startFluxerClient = async ({
         }
     });
 
-    async function replyWithInstagramVideos(
+    async function replyWithInstagramPosts(
         service: InstagramVideoService,
         message: Message,
         links: InstagramLink[]
     ): Promise<void> {
         for (const link of links) {
-            const video = await service.fetchVideo(link);
-            if (!video) continue;
+            const post = await service.fetchPost(link);
+            if (!post) continue;
             try {
+                const fields = instagramEmbedFields(post);
+                const embed = new EmbedBuilder()
+                    .setURL(fields.url)
+                    .setTitle(fields.title)
+                    .setColor(fields.color)
+                    .setFooter({ text: fields.footer });
+                if (fields.description)
+                    embed.setDescription(fields.description);
+                if (fields.authorName) {
+                    embed.setAuthor({
+                        name: fields.authorName,
+                        url: fields.authorUrl,
+                        iconURL: fields.authorIconUrl,
+                    });
+                }
                 const reply = await message.reply(
                     {
-                        files: [{ name: video.name, data: video.data }],
-                        attachments: [
-                            {
-                                id: 0,
-                                filename: video.name,
-                                flags: video.spoiler
-                                    ? MessageAttachmentFlags.IS_SPOILER
-                                    : undefined,
-                            },
-                        ],
+                        embeds: [embed],
+                        files: post.files.map((file) => ({
+                            name: file.name,
+                            data: file.data,
+                        })),
+                        attachments: post.files.map((file, index) => ({
+                            id: index,
+                            filename: file.name,
+                            flags: post.spoiler
+                                ? MessageAttachmentFlags.IS_SPOILER
+                                : undefined,
+                        })),
                     },
                     { ping: false }
                 );
                 await messageRelay.relayMessage(reply);
             } catch (error) {
                 logger.error(
-                    `❌ Failed to post the Instagram video for ${link.url}:`,
+                    `❌ Failed to post the Instagram post for ${link.url}:`,
                     error
                 );
             }

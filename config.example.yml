@@ -176,22 +176,25 @@ meow:
     enabled: true
 
 instagram:
-    # Download public Instagram post, reel and tv links posted in bridged
-    # channels and threads (on Discord or Fluxer) with yt-dlp and reply with
-    # the video attached, re-encoded with ffmpeg when it is too large. The
-    # reply is bridged like any other message. Links in ||spoilers|| get a
-    # spoiler video; links in <...> and code spans are ignored. Image-only,
-    # private, login- or age-restricted posts are skipped silently. Needs
-    # `yt-dlp` and `ffmpeg` on PATH (the Docker image has them).
+    # Reply to public Instagram post, reel and tv links posted in bridged
+    # channels and threads (on Discord or Fluxer) with an Instagram card
+    # (author, caption, link) and the post's video or photos attached, taken
+    # from Instagram's public embed page. Videos are re-encoded with ffmpeg
+    # when too large; yt-dlp is the fallback when the embed page has no media.
+    # The reply is bridged like any other message. Links in ||spoilers|| get
+    # spoiler files; links in <...> and code spans are ignored. Private,
+    # login- or age-restricted posts are skipped silently. Needs `ffmpeg`
+    # (and `yt-dlp`) on PATH (the Docker image has them).
     enabled: true
     # Links handled per message; further links are ignored.
     maxLinksPerMessage: 3
-    # Largest video uploaded, in MiB; bigger ones are compressed. 10 is
-    # Discord's unboosted upload limit, so the bridged copy uploads too.
+    # Largest total upload per reply, in MiB; bigger videos are compressed
+    # and photos that don't fit are left out. 10 is Discord's unboosted
+    # upload limit, so the bridged copy uploads too.
     maxSizeMb: 10
     # Videos longer than this many seconds are skipped.
     maxDurationSeconds: 600
-    # Time limit in seconds for each yt-dlp or ffmpeg run.
+    # Time limit in seconds for each download, yt-dlp or ffmpeg run.
     timeoutSeconds: 180
 
 reminders:

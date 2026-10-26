@@ -163,24 +163,26 @@ export interface BotConfig {
     };
     instagram: {
         /**
-         * Download public Instagram post, reel and tv links posted in bridged
-         * channels and threads (either platform) with yt-dlp and reply with
-         * the video attached, re-encoded with ffmpeg when too large. Gated,
-         * private and image-only posts are skipped silently. Needs `yt-dlp`
-         * and `ffmpeg` on PATH. See `services/instagramVideo/`.
+         * Reply to public Instagram post, reel and tv links posted in bridged
+         * channels and threads (either platform) with an Instagram card and
+         * the post's video or photos attached, taken from Instagram's public
+         * embed page (yt-dlp as the fallback). Videos are re-encoded with
+         * ffmpeg when too large. Gated and private posts are skipped
+         * silently. See `services/instagramVideo/`.
          */
         enabled: boolean;
         /** Links handled per message; further links are ignored. */
         maxLinksPerMessage: number;
         /**
-         * Largest video uploaded, in MiB (may be fractional). Bigger videos
-         * are compressed to fit. 10 is Discord's unboosted upload limit, so
-         * the bridged copy uploads there too.
+         * Largest total upload per reply, in MiB (may be fractional). Bigger
+         * videos are compressed to fit; photos that don't fit are left out.
+         * 10 is Discord's unboosted upload limit, so the bridged copy uploads
+         * there too.
          */
         maxSizeMb: number;
         /** Videos longer than this many seconds are skipped. */
         maxDurationSeconds: number;
-        /** Time limit in seconds for each yt-dlp or ffmpeg run. */
+        /** Time limit in seconds for each download, yt-dlp or ffmpeg run. */
         timeoutSeconds: number;
     };
     reminders: {

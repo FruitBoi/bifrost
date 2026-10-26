@@ -20,7 +20,7 @@
 - Customizable bot prefix and settings
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
-- Downloads public Instagram post and reel links and replies with the video attached, on both platforms (see [Instagram videos](#instagram-videos))
+- Replies to public Instagram post and reel links with an Instagram card and the video or photos attached, on both platforms (see [Instagram posts](#instagram-posts))
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role. Members can link their own accounts with `!b iam`, which the other account must confirm (see [Identity mapping](#identity-mapping))
@@ -215,9 +215,9 @@ Voice links ship as migration `00006-voice-links`, which adds the `voice_links` 
 
 Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated with `!`, `~`, `:3` or a cat emoji as you like) and Bifröst answers with a cat noise of its own, matching the kind of noise, how stretched it was and the mood of the punctuation, so you can hold a little conversation with it. **Only Fluxer users get an answer**: a meow written on Discord is bridged like any other message but is not replied to. Only messages that consist entirely of cat noises count: an ordinary sentence that happens to contain "meow" is ignored, as are bots and bridged messages. In a linked channel the reply is bridged like any other message, so Discord still sees the exchange. Replies are limited to one per channel every 1.5 seconds. Turn the feature off with `meow.enabled: false` in the [configuration file](#configuration-file).
 
-## Instagram videos
+## Instagram posts
 
-When someone (not a bot or webhook) posts a message containing public Instagram post, reel or tv links in a bridged channel or thread, on Discord or Fluxer, Bifröst downloads the video with `yt-dlp`, re-encodes it with `ffmpeg` if it is larger than the upload limit, and replies to the message with the video attached (without pinging anyone). The reply is bridged to the other platform like any message, so both sides see the video. Links inside `||spoilers||` get a spoiler-tagged video; links in `<...>` (embed suppressed) and in code spans are ignored. Image-only, private, login- or age-restricted posts and videos longer than the limit are skipped silently: bypassing Instagram's access controls is out of scope. Needs `yt-dlp` and `ffmpeg` on `PATH` (the Docker image includes them); without them the feature logs a warning and does nothing. Tune or disable it under `instagram` in the [configuration file](#configuration-file).
+When someone (not a bot or webhook) posts a message containing public Instagram post, reel or tv links in a bridged channel or thread, on Discord or Fluxer, Bifröst replies to the message (without pinging anyone) with an Instagram card (author, caption and a link to the post) and the post's media attached: the video of a reel, the photo of an image post, or the photos and videos of a carousel (up to 10 files). The media comes from Instagram's public embed page, the same data Instagram hands to any website that embeds the post, and is downloaded straight from Instagram's CDN; videos larger than the upload limit are re-encoded with `ffmpeg`. When the embed page has nothing usable, Bifröst falls back to `yt-dlp` for the video. The reply is bridged to the other platform like any message, so both sides see the media. Links inside `||spoilers||` get spoiler-tagged files and a spoilered caption; links in `<...>` (embed suppressed) and in code spans are ignored. Private, login- or age-restricted posts and videos longer than the limit are skipped silently: no cookies or logins are used, and bypassing Instagram's access controls is out of scope. Video compression needs `ffmpeg` (and the fallback `yt-dlp`) on `PATH`; the Docker image includes both. Tune or disable it under `instagram` in the [configuration file](#configuration-file).
 
 ## Daily avatar
 
@@ -584,11 +584,11 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `history.maxCount` | `1000` | Largest count accepted as a number (`!b history 1000`); anything bigger needs `!b history all` plus `confirm`. |
 | `history.delayMs` | `1000` | Pause between two posts on the destination, in milliseconds; 1000 posts take about `1000 × delayMs`. Keep it at or above the default: both platforms rate-limit webhooks and Fluxer IP-bans bots that exceed its limits. |
 | `meow.enabled` | `true` | Answer Fluxer messages that are nothing but cat noises (`meow`, `mrrp`, `nya`, `purr`…) with a cat noise; Discord users are never answered. See [Cat chat](#cat-chat). |
-| `instagram.enabled` | `true` | Download public Instagram post and reel links and reply with the video attached. Needs `yt-dlp` and `ffmpeg`. See [Instagram videos](#instagram-videos). |
+| `instagram.enabled` | `true` | Reply to public Instagram post and reel links with an Instagram card and the media attached. Needs `ffmpeg` to compress videos (`yt-dlp` is the fallback). See [Instagram posts](#instagram-posts). |
 | `instagram.maxLinksPerMessage` | `3` | Links handled per message; further links are ignored. |
-| `instagram.maxSizeMb` | `10` | Largest video uploaded, in MiB; bigger videos are compressed to fit. 10 is Discord's unboosted upload limit. |
+| `instagram.maxSizeMb` | `10` | Largest total upload per reply, in MiB; bigger videos are compressed to fit and photos that don't fit are left out. 10 is Discord's unboosted upload limit. |
 | `instagram.maxDurationSeconds` | `600` | Videos longer than this are skipped. |
-| `instagram.timeoutSeconds` | `180` | Time limit for each `yt-dlp` or `ffmpeg` run. |
+| `instagram.timeoutSeconds` | `180` | Time limit for each download, `yt-dlp` or `ffmpeg` run. |
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` / `timezone` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
