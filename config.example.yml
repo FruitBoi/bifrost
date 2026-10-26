@@ -250,7 +250,9 @@ botAvatar:
     # random custom emoji from its Fluxer server(s), never the same one twice in a
     # row. The avatar is not changed when the bot starts; the first change is at
     # the next scheduled hour. Only static emojis are used unless includeAnimated
-    # is on.
+    # is on. Fluxer only lets the owner of the bot application change the bot's
+    # avatar, so the Fluxer side also needs BF_FLUXER_AVATAR_TOKEN (see
+    # .env.example and the README); without it only Discord changes.
     enabled: true
     # UTC hour (0-23) at which the avatar changes.
     hourUtc: 0

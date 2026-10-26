@@ -7,16 +7,22 @@
  * Fluxer guilds (every guild the bot is in when none are configured), static
  * ones only unless animated emojis are allowed, and never the one picked
  * last time when there is a choice. Its image is downloaded from the Fluxer
- * CDN and set as the avatar of the Fluxer bot (`PATCH /users/@me` with a
- * data URI) and, optionally, of the Discord bot. The two platforms are
- * updated independently: a failure on one is logged and does not stop the
- * other, and nothing is ever thrown out of the timer.
+ * CDN and set as the avatar of the Fluxer bot and, optionally, of the
+ * Discord bot. The two platforms are updated independently: a failure on one
+ * is logged and does not stop the other, and nothing is ever thrown out of
+ * the timer.
+ *
+ * Fluxer does not let a bot change its own profile: `PATCH /users/@me` and
+ * `PATCH /oauth2/applications/:id/bot` both answer a bot token with 403
+ * ACCESS_DENIED. The Fluxer avatar is therefore set through
+ * `PATCH /oauth2/applications/<application id>/bot` (a data URI) with the
+ * user token of the account that owns the bot application
+ * (`BF_FLUXER_AVATAR_TOKEN`). Without that token only Discord is updated.
  *
  * Nothing happens on startup (a restart would otherwise reshuffle the
  * avatar); the first change is at the next `hourUtc` boundary. Nothing is
  * stored either: the last pick is only remembered in memory.
  */
-import { Routes as FluxerRoutes } from '@fluxerjs/core';
 import logger from '../../utils/logging/logger';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,7 +49,14 @@ export interface AvatarFluxerClient {
         fetch(guildId: string): Promise<AvatarFluxerGuild>;
     };
     rest: {
-        patch(route: string, options: { body: unknown }): Promise<unknown>;
+        patch(
+            route: string,
+            options: {
+                body: unknown;
+                auth: false;
+                headers: Record<string, string>;
+            }
+        ): Promise<unknown>;
     };
 }
 
@@ -77,6 +90,14 @@ export interface BotAvatarServiceOptions {
     config: BotAvatarConfig;
     /** The current Fluxer client; it is replaced when the client restarts. */
     getFluxerClient: () => AvatarFluxerClient | null;
+    /**
+     * User token (session or OAuth2) of the account that owns the Fluxer bot
+     * application. Empty: the Fluxer avatar is not changed, since a bot
+     * token is not allowed to. A `Bearer ` prefix is kept as given.
+     */
+    fluxerOwnerToken?: string;
+    /** ID of the Fluxer bot application (the part of the bot token before the dot). */
+    fluxerApplicationId?: string;
     /** The Discord client, or null when only Fluxer should be updated. */
     getDiscordClient?: () => AvatarDiscordClient | null;
     /** Clock. Default `Date.now`. */
@@ -149,6 +170,15 @@ export function toDataUri(bytes: Buffer, mimeType: string): string {
     return `data:${mimeType};base64,${bytes.toString('base64')}`;
 }
 
+/** The Fluxer bot application ID: the part of a bot token before the first dot. */
+export function applicationIdFromBotToken(token: string): string {
+    const id = token
+        .trim()
+        .replace(/^Bot\s+/, '')
+        .split('.')[0];
+    return /^\d+$/.test(id) ? id : '';
+}
+
 /** Downloads with the global `fetch`; a non-2xx status is a failure. */
 const fetchImage: AvatarImageDownloader = async (url) => {
     const response = await fetch(url);
@@ -175,6 +205,8 @@ export default class BotAvatarService {
     private readonly config: BotAvatarConfig;
     private readonly getFluxerClient: () => AvatarFluxerClient | null;
     private readonly getDiscordClient: () => AvatarDiscordClient | null;
+    private readonly fluxerOwnerToken: string;
+    private readonly fluxerApplicationId: string;
     private readonly now: () => number;
     private readonly random: () => number;
     private readonly downloadImage: AvatarImageDownloader;
@@ -189,6 +221,8 @@ export default class BotAvatarService {
         this.config = options.config;
         this.getFluxerClient = options.getFluxerClient;
         this.getDiscordClient = options.getDiscordClient ?? (() => null);
+        this.fluxerOwnerToken = options.fluxerOwnerToken?.trim() ?? '';
+        this.fluxerApplicationId = options.fluxerApplicationId?.trim() ?? '';
         this.now = options.now ?? Date.now;
         this.random = options.random ?? Math.random;
         this.downloadImage = options.downloadImage ?? fetchImage;
@@ -198,6 +232,14 @@ export default class BotAvatarService {
     /** Schedules the first change at the next `hourUtc` boundary. */
     start(): void {
         if (this.nextAt !== null) return;
+        if (!this.canUpdateFluxer()) {
+            logger.warn(
+                '[BotAvatar] ⚠️ Fluxer does not let bots change their own avatar; set BF_FLUXER_AVATAR_TOKEN to a user token of the bot application owner to update it. ' +
+                    (this.config.discord
+                        ? 'Only the Discord avatar will change.'
+                        : 'Nothing will change until then.')
+            );
+        }
         this.schedule(nextRunAt(this.now(), this.config.hourUtc));
     }
 
@@ -205,6 +247,11 @@ export default class BotAvatarService {
         if (this.timer !== null) this.scheduler.clearTimeout(this.timer);
         this.timer = null;
         this.nextAt = null;
+    }
+
+    /** Whether the Fluxer avatar can be set (owner token and application ID known). */
+    canUpdateFluxer(): boolean {
+        return this.fluxerOwnerToken !== '' && this.fluxerApplicationId !== '';
     }
 
     /** When the next change is due (ms since the epoch), or null when stopped. */
@@ -272,6 +319,7 @@ export default class BotAvatarService {
             );
             return result;
         }
+        if (!this.canUpdateFluxer() && !this.config.discord) return result;
 
         const emojis = await this.collectEmojis(fluxer);
         const emoji = pickEmoji(emojis, this.lastEmojiId, this.random);
@@ -293,27 +341,38 @@ export default class BotAvatarService {
             );
             return {
                 ...result,
-                fluxer: 'failed',
+                fluxer: this.canUpdateFluxer() ? 'failed' : 'skipped',
                 discord: this.config.discord ? 'failed' : 'skipped',
             };
         }
         this.lastEmojiId = emoji.id;
         const mimeType = avatarMimeType(image, emoji.url);
 
-        try {
-            await fluxer.rest.patch(FluxerRoutes.currentUser(), {
-                body: { avatar: toDataUri(image.bytes, mimeType) },
-            });
-            result.fluxer = 'updated';
-            logger.info(
-                `[BotAvatar] 🖼️ Fluxer avatar set to :${emoji.name}: (${emoji.id})`
-            );
-        } catch (err) {
-            result.fluxer = 'failed';
-            logger.error(
-                '[BotAvatar] ❌ Could not set the Fluxer avatar:',
-                err
-            );
+        if (this.canUpdateFluxer()) {
+            try {
+                await fluxer.rest.patch(
+                    `/oauth2/applications/${this.fluxerApplicationId}/bot`,
+                    {
+                        body: { avatar: toDataUri(image.bytes, mimeType) },
+                        // The bot token is not allowed here; send the owner's.
+                        auth: false,
+                        headers: { Authorization: this.fluxerOwnerToken },
+                    }
+                );
+                result.fluxer = 'updated';
+                logger.info(
+                    `[BotAvatar] 🖼️ Fluxer avatar set to :${emoji.name}: (${emoji.id})`
+                );
+            } catch (err) {
+                result.fluxer = 'failed';
+                const status = (err as { statusCode?: unknown }).statusCode;
+                logger.error(
+                    status === 401 || status === 403
+                        ? '[BotAvatar] ❌ Could not set the Fluxer avatar: BF_FLUXER_AVATAR_TOKEN was rejected; it must be a valid user token of the account that owns the bot application:'
+                        : '[BotAvatar] ❌ Could not set the Fluxer avatar:',
+                    err
+                );
+            }
         }
 
         if (this.config.discord) {

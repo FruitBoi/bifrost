@@ -5,6 +5,7 @@ import BotAvatarService, {
     AvatarFluxerGuild,
     AvatarScheduler,
     BotAvatarConfig,
+    applicationIdFromBotToken,
     avatarMimeType,
     nextRunAt,
     pickEmoji,
@@ -16,6 +17,8 @@ vi.mock('../../../src/utils/logging/logger', () => ({
 }));
 
 const HOUR_MS = 60 * 60 * 1000;
+/** Owner token and application ID that let the service set the Fluxer avatar. */
+const OWNER = { fluxerOwnerToken: 'owner-token', fluxerApplicationId: '1234' };
 const DAY_MS = 24 * HOUR_MS;
 
 function emoji(id: string, animated = false): AvatarEmoji {
@@ -76,6 +79,20 @@ function manualScheduler() {
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const download = vi.fn(async () => ({ bytes: PNG, contentType: 'image/png' }));
+
+describe('applicationIdFromBotToken', () => {
+    it('takes the part before the first dot', () => {
+        expect(applicationIdFromBotToken('1477001234567890.secret.part')).toBe(
+            '1477001234567890'
+        );
+        expect(applicationIdFromBotToken('Bot 42.secret')).toBe('42');
+    });
+
+    it('is empty for a token without a numeric ID', () => {
+        expect(applicationIdFromBotToken('')).toBe('');
+        expect(applicationIdFromBotToken('not-a-bot-token')).toBe('');
+    });
+});
 
 describe('nextRunAt', () => {
     const day = Date.UTC(2026, 9, 24);
@@ -166,6 +183,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config(),
             getFluxerClient: () => client,
+            ...OWNER,
             getDiscordClient: () => ({ user: { setAvatar } }),
             random: () => 0.75,
             downloadImage: download,
@@ -179,8 +197,10 @@ describe('BotAvatarService.runOnce', () => {
             discord: 'updated',
         });
         expect(download).toHaveBeenCalledWith(emoji('2').url);
-        expect(patch).toHaveBeenCalledWith('/users/@me', {
+        expect(patch).toHaveBeenCalledWith('/oauth2/applications/1234/bot', {
             body: { avatar: `data:image/png;base64,${PNG.toString('base64')}` },
+            auth: false,
+            headers: { Authorization: 'owner-token' },
         });
         expect(setAvatar).toHaveBeenCalledWith(PNG);
     });
@@ -192,6 +212,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             random: () => 0,
             downloadImage: download,
         });
@@ -212,6 +233,7 @@ describe('BotAvatarService.runOnce', () => {
             new BotAvatarService({
                 config: config({ discord: false, includeAnimated }),
                 getFluxerClient: () => client,
+                ...OWNER,
                 random: () => 0.9999,
                 downloadImage: download,
             });
@@ -227,6 +249,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false, guildIds: ['g2', 'missing'] }),
             getFluxerClient: () => client,
+            ...OWNER,
             random: () => 0,
             downloadImage: download,
         });
@@ -246,6 +269,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             random: () => 0.9999,
             downloadImage: download,
         });
@@ -263,6 +287,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config(),
             getFluxerClient: () => client,
+            ...OWNER,
             getDiscordClient: () => ({ user: { setAvatar } }),
             downloadImage,
         });
@@ -281,6 +306,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config(),
             getFluxerClient: () => null,
+            ...OWNER,
             downloadImage: download,
         });
 
@@ -294,6 +320,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config(),
             getFluxerClient: () => client,
+            ...OWNER,
             getDiscordClient: () => ({ user: { setAvatar } }),
             downloadImage: download,
         });
@@ -313,6 +340,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config(),
             getFluxerClient: () => client,
+            ...OWNER,
             getDiscordClient: () => ({ user: { setAvatar } }),
             downloadImage: download,
         });
@@ -330,6 +358,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             getDiscordClient: () => ({ user: { setAvatar } }),
             downloadImage: download,
         });
@@ -343,6 +372,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: async () => {
                 throw new Error('HTTP 404');
             },
@@ -350,6 +380,59 @@ describe('BotAvatarService.runOnce', () => {
 
         expect((await service.runOnce()).fluxer).toBe('failed');
         expect(patch).not.toHaveBeenCalled();
+    });
+
+    it('only updates Discord without an owner token', async () => {
+        const { client, patch } = fluxerClient([guild('g1', [emoji('1')])]);
+        const setAvatar = vi.fn(async () => undefined);
+        const service = new BotAvatarService({
+            config: config(),
+            getFluxerClient: () => client,
+            getDiscordClient: () => ({ user: { setAvatar } }),
+            fluxerApplicationId: '1234',
+            downloadImage: download,
+        });
+
+        expect(service.canUpdateFluxer()).toBe(false);
+        const result = await service.runOnce();
+
+        expect(result.fluxer).toBe('skipped');
+        expect(result.discord).toBe('updated');
+        expect(patch).not.toHaveBeenCalled();
+    });
+
+    it('does nothing without an owner token when discord is off', async () => {
+        const { client, patch } = fluxerClient([guild('g1', [emoji('1')])]);
+        const downloadImage = vi.fn(download);
+        const service = new BotAvatarService({
+            config: config({ discord: false }),
+            getFluxerClient: () => client,
+            fluxerOwnerToken: 'owner-token',
+            downloadImage,
+        });
+
+        expect(await service.runOnce()).toEqual({
+            emoji: null,
+            fluxer: 'skipped',
+            discord: 'skipped',
+        });
+        expect(downloadImage).not.toHaveBeenCalled();
+        expect(patch).not.toHaveBeenCalled();
+    });
+
+    it('reports a rejected owner token as a Fluxer failure', async () => {
+        const { client, patch } = fluxerClient([guild('g1', [emoji('1')])]);
+        patch.mockRejectedValueOnce(
+            Object.assign(new Error('ACCESS_DENIED'), { statusCode: 403 })
+        );
+        const service = new BotAvatarService({
+            config: config({ discord: false }),
+            getFluxerClient: () => client,
+            ...OWNER,
+            downloadImage: download,
+        });
+
+        expect((await service.runOnce()).fluxer).toBe('failed');
     });
 
     it('does not throw when listing emojis fails', async () => {
@@ -363,6 +446,7 @@ describe('BotAvatarService.runOnce', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: download,
         });
 
@@ -380,6 +464,7 @@ describe('BotAvatarService scheduling', () => {
         const service = new BotAvatarService({
             config: config({ discord: false, hourUtc: 6 }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: download,
             now: () => now,
             scheduler,
@@ -408,6 +493,7 @@ describe('BotAvatarService scheduling', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: download,
             now: () => now,
             scheduler,
@@ -430,6 +516,7 @@ describe('BotAvatarService scheduling', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: download,
             now: () => now,
             scheduler,
@@ -449,6 +536,7 @@ describe('BotAvatarService scheduling', () => {
         const service = new BotAvatarService({
             config: config({ discord: false }),
             getFluxerClient: () => client,
+            ...OWNER,
             downloadImage: download,
             now: () => day - HOUR_MS,
             scheduler,

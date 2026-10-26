@@ -222,6 +222,8 @@ When someone (not a bot or webhook) posts a message containing public Instagram 
 
 Once a day, at an hour you choose (UTC), Bifröst changes its profile picture to a random custom emoji from its Fluxer server. It never picks the same emoji twice in a row. The same emoji is also set as the Discord bot's avatar, unless you turn that off. The avatar is not changed when the bot starts; the first change happens at the next scheduled hour. Only static emojis are picked by default, and animated ones can be allowed. A failure on one platform does not stop the other, and if no emojis are found, nothing changes. Turn the feature off with `botAvatar.enabled: false` in the [configuration file](#configuration-file).
 
+**Fluxer needs an owner token.** Fluxer does not let a bot change its own avatar: with the bot token it answers 403 `ACCESS_DENIED`. Only the account that owns the bot application may change it, so set `BF_FLUXER_AVATAR_TOKEN` (or `BF_FLUXER_AVATAR_TOKEN_FILE`) to a user token of that account. The bot sends this token only to Fluxer's bot profile endpoint (`PATCH /oauth2/applications/<application id>/bot`), and only to change the avatar. The application ID is taken from the bot token, or from `BF_FLUXER_APP_ID`. Anyone who has this token can act as that account, so keep it as secret as the bot token. Without it, the Fluxer avatar is left alone (a warning is logged at startup) and only the Discord avatar changes.
+
 The options live under `botAvatar` in the configuration file:
 
 - **`enabled`** (default `true`): turns the daily change on or off.

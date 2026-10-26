@@ -17,7 +17,9 @@ import PinBridgeService from './services/pinBridge/PinBridgeService';
 import IdentityClaimService from './services/identityClaim/IdentityClaimService';
 import ClaudeRequestService from './services/claudeRequest/ClaudeRequestService';
 import ClaudeRequestNotifyService from './services/claudeRequest/ClaudeRequestNotifyService';
-import BotAvatarService from './services/botAvatar/BotAvatarService';
+import BotAvatarService, {
+    applicationIdFromBotToken,
+} from './services/botAvatar/BotAvatarService';
 import { SequelizeClaudeRequestRepository } from './db/sequelizerepos/SequelizeClaudeRequestRepository';
 import { SequelizeClaudeRequestNoticeRepository } from './db/sequelizerepos/SequelizeClaudeRequestNoticeRepository';
 import ClaudeLinesService from './services/claudeLines/ClaudeLinesService';
@@ -53,6 +55,8 @@ import {
     DISCORD_HEALTH_URL,
     ENABLE_WEB_DASHBOARD,
     FLUXER_APP_ID,
+    FLUXER_AVATAR_TOKEN,
+    FLUXER_TOKEN,
     FLUXER_HEALTH_URL,
     GIT_COMMIT,
     METRICS_PORT,
@@ -551,6 +555,10 @@ const main = async () => {
             config: botConfig.botAvatar,
             getFluxerClient: () => fluxerClientRef.current,
             getDiscordClient: () => discordClient,
+            // Fluxer only lets the bot application's owner change its avatar.
+            fluxerOwnerToken: FLUXER_AVATAR_TOKEN,
+            fluxerApplicationId:
+                applicationIdFromBotToken(FLUXER_TOKEN) || FLUXER_APP_ID,
         }).start();
         logger.info(
             `🖼️ Daily bot avatar scheduled for ${String(botConfig.botAvatar.hourUtc).padStart(2, '0')}:00 UTC`
