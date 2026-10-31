@@ -11,6 +11,8 @@
 export const REMINDER_COMMAND_NAMES = [
     'remindme',
     'remind',
+    // Common typo of `remindme` (issue #49).
+    'remindmr',
     'reminder',
     'reminders',
     'creminders',

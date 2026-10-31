@@ -243,15 +243,15 @@ const commandList: Command[] = [
     {
         name: 'remindme',
         summary: 'Pings you with a message after a time or at a date and time.',
-        aliases: ['remind'],
+        aliases: ['remind', 'remindmr'],
         discord: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the aliases `remind` and `remindmr`.',
             usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
         },
         fluxer: {
             description:
-                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the alias `remind`.',
+                'Schedules a reminder in this channel (or in the channel given with `-channel`, as a mention, ID or link) that pings you after the given time, e.g. `remindme 1h30min are you still alive?`. Time units: s, m/min, h, d, w, mo, y; a bare number is minutes. The time can also be a date and/or time of day in your time zone: `remindme Oct 26 20:15 ...`, `26 Oct`, `2026-10-26 9am`, `Monday 7pm`, `next fri`, `tomorrow`, `tomorrow at 7pm`, `today 5pm`, `tonight`, or just `7pm` / `20:15` (the next time it comes round); a date without a time means 09:00. The first time you use a date or time you are asked for your time zone (see `timezone`). At most 10 years ahead; 25 reminders per user. Also triggered by `?remindme` / `!remindme` (`? Remindme` works too) and the aliases `remind` and `remindmr`.',
             usageArgs: ['[-channel <channel>]', '<time | date>', '<message>'],
         },
     },

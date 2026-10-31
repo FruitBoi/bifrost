@@ -405,7 +405,7 @@ const startFluxerClient = async ({
             fluxerEntityResolver,
             triggerPrefixes
         );
-        for (const name of ['remindme', 'remind']) {
+        for (const name of ['remindme', 'remind', 'remindmr']) {
             commandRegistry.registerCommand(name, remindMeHandler);
         }
         for (const name of [

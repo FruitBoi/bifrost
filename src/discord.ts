@@ -340,7 +340,7 @@ const startDiscordClient = async ({
             reminderTimezoneService,
             triggerPrefixes
         );
-        for (const name of ['remindme', 'remind']) {
+        for (const name of ['remindme', 'remind', 'remindmr']) {
             commandRegistry.registerCommand(name, remindMeHandler);
         }
         const reminderHandler = new ReminderDiscordCommandHandler(

@@ -69,6 +69,16 @@ describe('parseReminderTrigger', () => {
         });
     });
 
+    it('recognises the remindmr typo alias (issue #49)', () => {
+        expect(parseReminderTrigger('?remindmr 1h x', prefixes)).toEqual({
+            command: 'remindmr',
+            rawArgs: '1h x',
+        });
+        expect(parseReminderTrigger('? Remindmr 1h', prefixes)?.command).toBe(
+            'remindmr'
+        );
+    });
+
     it('recognises the timezone command and its alias (issue #27)', () => {
         expect(
             parseReminderTrigger('? Timezone Europe/London', prefixes)
