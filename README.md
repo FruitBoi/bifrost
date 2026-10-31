@@ -24,6 +24,7 @@
 - Replies on Fluxer to public Instagram post and reel links (including kkinstagram-style redirect links and links bridged from Discord) with an Instagram card and the video or photos attached (see [Instagram posts](#instagram-posts))
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
+- Copy a Discord server's role icons to the same-named Fluxer roles (see [Role icon transfer](#role-icon-transfer))
 - Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role. Members can link their own accounts with `!b iam`, which the other account must confirm (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` or `?remindme Monday 7pm call mum` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
@@ -51,7 +52,7 @@ On Discord every command is also available as a slash command `/<command>` (unde
 
 ### Fluxer-only commands
 
-By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`) `clauderequest` and `music` (also `play`, `p`), with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
+By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `roleicons`, `history`) the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`) `clauderequest` and `music` (also `play`, `p`), with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
 
 ### Automatic thread bridging
 
@@ -343,6 +344,19 @@ Custom emojis are bridged by **name**: in messages and in [reactions](#reactions
 
 Fluxer's defaults apply (a self-hosted instance may configure them differently): a server has **500 emoji** and **500 sticker** slots, and each image may be at most **512 KiB**. Items that do not fit, are too large, or whose content the instance blocks are listed as failed in the report, with Fluxer's error.
 
+## Role icon transfer
+
+Fluxer roles can show an icon next to their name, like Discord's role icons. `!b roleicons` copies the icon of every role of the linked Discord server onto the role with the **same name** in the linked Fluxer server. The copy goes one way only, **Discord → Fluxer**; no role is created, renamed or deleted.
+
+- `!b roleicons` — copies icons onto Fluxer roles that have none yet.
+- `!b roleicons overwrite` — also replaces icons Fluxer roles already have.
+
+`!b roleemotes` and `!b roleemojis` are aliases of `!b roleicons`. Like [`expressions`](#emoji-and-sticker-transfer), the command works on both platforms: run it on Discord inside the linked Discord server, or on Fluxer inside the linked Fluxer server; either way the Discord roles' icons are copied to the Fluxer server it is linked to. Running it needs the `Manage Roles` permission on the platform you use it on.
+
+- **Re-running is safe.** Without `overwrite`, a Fluxer role that already has an icon is skipped, so after adding icons on Discord you can run the command again to copy only the new ones.
+- **What is copied.** Both uploaded icons and Unicode emoji icons. Fluxer only accepts static PNG, JPEG, WebP or AVIF images of at most 256 KiB, between 32 and 1024 px; icons it would reject are listed as failed in the report.
+- **Bot permissions.** The bot needs `Manage Roles` on the Fluxer server, and its highest role must be above the roles it edits (Fluxer's role hierarchy). The bot's invite link does not request `Manage Roles`, so grant it to the bot on Fluxer yourself.
+
 ## Reminders
 
 Bifröst has a reminder command modelled on [YAGPDB's `remindme`](https://help.yagpdb.xyz/docs/core/all-commands/#remindme): tell it how long to wait (or the date and time) and what to say, and when the time is up it pings you in the channel you set it in. It works the same on Discord and on Fluxer.
@@ -592,7 +606,7 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `claudeRequests.notifyPollMs` | `120000` | How often (ms, at least 30000) tracked issues are checked for being closed. |
 | `commands.triggerPrefixes` | `["!", "/"]` | Prefixes that run any command without the bot prefix (`!help`, `/link 123`); `/` gives Fluxer typed slash commands. Only registered command names match. `!b help` always works; an empty list disables the shortcuts. |
 | `commands.slashCommands` | `true` | Register every command as a Discord slash command (`/link args:123`) on startup. Needs the `applications.commands` invite scope; Fluxer has no bot slash commands (use the `/` trigger prefix there). |
-| `commands.fluxerOnly` | `true` | Keep commands to Fluxer. Discord only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) and the YAGPDB ones (`remindme`, `reminder`, `timezone`, `clean`), aliases included; any other command there gets a teasing "come to Fluxer" reply. See [Fluxer-only commands](#fluxer-only-commands). |
+| `commands.fluxerOnly` | `true` | Keep commands to Fluxer. Discord only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `roleicons`, `history`) and the YAGPDB ones (`remindme`, `reminder`, `timezone`, `clean`), aliases included; any other command there gets a teasing "come to Fluxer" reply. See [Fluxer-only commands](#fluxer-only-commands). |
 | `clean.enabled` | `true` | Enable the `clean` command (aliases `clear`, `cl`) on both platforms. See [Clean](#clean). |
 | `clean.triggerPrefixes` | `["?", "!"]` | Prefixes that run `clean` without the bot prefix (`?clean 10`). `!b clean` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `history.enabled` | `true` | Enable the `history` command (alias `backfill`) on both platforms. See [History transfer](#history-transfer). |

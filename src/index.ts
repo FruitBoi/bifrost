@@ -47,6 +47,7 @@ import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
+import RoleIconTransferService from './services/roleIconTransfer/RoleIconTransferService';
 import ReminderService from './services/reminders/ReminderService';
 import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
 import {
@@ -182,6 +183,10 @@ const main = async () => {
         fluxerEntityResolver
     );
     const expressionTransferService = new ExpressionTransferService({
+        discordEntityResolver,
+        fluxerEntityResolver,
+    });
+    const roleIconTransferService = new RoleIconTransferService({
         discordEntityResolver,
         fluxerEntityResolver,
     });
@@ -444,6 +449,7 @@ const main = async () => {
         categorySyncService,
         threadMemberSyncService,
         expressionTransferService,
+        roleIconTransferService,
         metricsService,
         queueService,
         discordStatsService,
@@ -578,6 +584,7 @@ const main = async () => {
             threadSyncService,
             categorySyncService,
             expressionTransferService,
+            roleIconTransferService,
             metricsService,
             queueService,
             discordStatsService,

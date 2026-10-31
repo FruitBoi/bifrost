@@ -99,6 +99,9 @@ import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsFluxerCommandHandler from './commands/fluxer/handlers/ExpressionsFluxerCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
+import RoleIconsFluxerCommandHandler from './commands/fluxer/handlers/RoleIconsFluxerCommandHandler';
+import RoleIconTransferService from './services/roleIconTransfer/RoleIconTransferService';
+import { ROLE_ICONS_COMMAND_NAMES } from './services/roleIconTransfer/roleIconsCommand';
 import HistoryFluxerCommandHandler from './commands/fluxer/handlers/HistoryFluxerCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestFluxerCommandHandler from './commands/fluxer/handlers/ClaudeRequestFluxerCommandHandler';
@@ -129,6 +132,7 @@ const startFluxerClient = async ({
     categorySyncService,
     threadMemberSyncService,
     expressionTransferService,
+    roleIconTransferService,
     metricsService,
     queueService,
     discordStatsService,
@@ -160,6 +164,7 @@ const startFluxerClient = async ({
     categorySyncService: CategorySyncService;
     threadMemberSyncService: ThreadMemberSyncService;
     expressionTransferService: ExpressionTransferService;
+    roleIconTransferService: RoleIconTransferService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -380,6 +385,14 @@ const startFluxerClient = async ({
     );
     for (const name of EXPRESSIONS_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, expressionsHandler);
+    }
+    const roleIconsHandler = new RoleIconsFluxerCommandHandler(
+        client,
+        linkService,
+        roleIconTransferService
+    );
+    for (const name of ROLE_ICONS_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, roleIconsHandler);
     }
     commandRegistry.registerCommand(
         'autolink',

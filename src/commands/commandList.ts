@@ -241,6 +241,21 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'roleicons',
+        summary: 'Copies role icons to the Fluxer roles with the same name.',
+        aliases: ['roleemotes', 'roleemojis'],
+        discord: {
+            description:
+                "Copies the icons of this server's roles onto the roles with the same name in the linked Fluxer server. Fluxer roles that already have an icon are skipped; give `overwrite` to replace them. Fluxer only accepts static PNG, JPEG, WebP or AVIF icons of at most 256 KiB, so other icons are reported as failed. The bot needs the `Manage Roles` permission on Fluxer, with its highest role above the roles it edits. Aliases `roleemotes`, `roleemojis`. Requires the `Manage Roles` permission.",
+            usageArgs: ['[overwrite]'],
+        },
+        fluxer: {
+            description:
+                "Copies the icons of the linked Discord server's roles onto the roles with the same name in this server. Roles that already have an icon are skipped; give `overwrite` to replace them. Fluxer only accepts static PNG, JPEG, WebP or AVIF icons of at most 256 KiB, so other icons are reported as failed. The bot needs the `Manage Roles` permission here, with its highest role above the roles it edits. Aliases `roleemotes`, `roleemojis`. Requires the `Manage Roles` permission.",
+            usageArgs: ['[overwrite]'],
+        },
+    },
+    {
         name: 'remindme',
         summary: 'Pings you with a message after a time or at a date and time.',
         aliases: ['remind', 'remindmr'],

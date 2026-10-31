@@ -82,6 +82,9 @@ import { CLEAN_COMMAND_NAMES } from './services/clean/cleanArgs';
 import ExpressionsDiscordCommandHandler from './commands/discord/handlers/ExpressionsDiscordCommandHandler';
 import ExpressionTransferService from './services/expressionTransfer/ExpressionTransferService';
 import { EXPRESSIONS_COMMAND_NAMES } from './services/expressionTransfer/expressionsCommand';
+import RoleIconsDiscordCommandHandler from './commands/discord/handlers/RoleIconsDiscordCommandHandler';
+import RoleIconTransferService from './services/roleIconTransfer/RoleIconTransferService';
+import { ROLE_ICONS_COMMAND_NAMES } from './services/roleIconTransfer/roleIconsCommand';
 import HistoryDiscordCommandHandler from './commands/discord/handlers/HistoryDiscordCommandHandler';
 import HistoryTransferService from './services/history/HistoryTransferService';
 import ClaudeRequestDiscordCommandHandler from './commands/discord/handlers/ClaudeRequestDiscordCommandHandler';
@@ -110,6 +113,7 @@ const startDiscordClient = async ({
     threadSyncService,
     categorySyncService,
     expressionTransferService,
+    roleIconTransferService,
     metricsService,
     queueService,
     discordStatsService,
@@ -137,6 +141,7 @@ const startDiscordClient = async ({
     threadSyncService: ThreadSyncService;
     categorySyncService: CategorySyncService;
     expressionTransferService: ExpressionTransferService;
+    roleIconTransferService: RoleIconTransferService;
     metricsService?: MetricsService;
     queueService?: MessageQueueService;
     discordStatsService: DiscordStatsService;
@@ -329,6 +334,14 @@ const startDiscordClient = async ({
     );
     for (const name of EXPRESSIONS_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, expressionsHandler);
+    }
+    const roleIconsHandler = new RoleIconsDiscordCommandHandler(
+        client,
+        linkService,
+        roleIconTransferService
+    );
+    for (const name of ROLE_ICONS_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, roleIconsHandler);
     }
 
     const remindersEnabled = botConfig.reminders.enabled;

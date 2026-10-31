@@ -23,6 +23,7 @@ export const DISCORD_ALLOWED_COMMANDS: readonly string[] = [
     'category',
     'voice',
     'expressions',
+    'roleicons',
     'history',
     // Requested from the YAGPDB documentation.
     'remindme',
