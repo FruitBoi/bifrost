@@ -811,7 +811,17 @@ const startFluxerClient = async ({
             const link = await linkService.getChannelLinkByFluxerLocation(
                 message.channelId
             );
-            if (link && link.fluxerWebhookId === message.webhookId) return;
+            if (link && link.fluxerWebhookId === message.webhookId) {
+                // A message bridged from Discord: its Instagram links get
+                // the card and media here on Fluxer (issue #52); Discord
+                // keeps the plain link. A history transfer into this link
+                // replays old messages, so those are left alone.
+                const job = historyService.getJob(link.id);
+                if (!(job && job.sourcePlatform === 'discord')) {
+                    handleInstagramLinks(message);
+                }
+                return;
+            }
         }
 
         // Runs a command handler and, when configured, deletes the
@@ -1004,30 +1014,33 @@ const startFluxerClient = async ({
             }
         }
 
-        // Instagram posts (issues #45, #48): reply with an Instagram card plus
-        // the media of each public post a person links, then bridge the reply.
-        // Not awaited: downloading can take a while.
         if (
-            instagramVideoService &&
-            message.guildId &&
             !message.author.bot &&
             !message.webhookId &&
             !isBotCommand &&
             !isShortInvocation
         ) {
-            const links = findInstagramLinks(
-                message.content,
-                botConfig.instagram.maxLinksPerMessage
-            );
-            if (links.length > 0) {
-                void replyWithInstagramPosts(
-                    instagramVideoService,
-                    message,
-                    links
-                );
-            }
+            handleInstagramLinks(message);
         }
     });
+
+    /**
+     * Instagram posts (issues #45, #48, #52): replies to `message` with an
+     * Instagram card plus the media of each public post it links, for links
+     * people post on Fluxer and links bridged in from Discord alike. The
+     * reply stays on Fluxer; Discord only ever gets the link itself. Not
+     * awaited: downloading can take a while.
+     */
+    function handleInstagramLinks(message: Message): void {
+        if (!instagramVideoService || !message.guildId) return;
+        const links = findInstagramLinks(
+            message.content,
+            botConfig.instagram.maxLinksPerMessage
+        );
+        if (links.length > 0) {
+            void replyWithInstagramPosts(instagramVideoService, message, links);
+        }
+    }
 
     async function replyWithInstagramPosts(
         service: InstagramVideoService,
@@ -1053,7 +1066,7 @@ const startFluxerClient = async ({
                         iconURL: fields.authorIconUrl,
                     });
                 }
-                const reply = await message.reply(
+                await message.reply(
                     {
                         embeds: [embed],
                         files: post.files.map((file) => ({
@@ -1070,7 +1083,6 @@ const startFluxerClient = async ({
                     },
                     { ping: false }
                 );
-                await messageRelay.relayMessage(reply);
             } catch (error) {
                 logger.error(
                     `❌ Failed to post the Instagram post for ${link.url}:`,

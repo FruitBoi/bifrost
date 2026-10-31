@@ -1,5 +1,4 @@
 import {
-    AttachmentBuilder,
     Client,
     EmbedBuilder,
     Events,
@@ -12,12 +11,6 @@ import { COMMAND_PREFIX, DELETE_INVOCATION, DISCORD_TOKEN } from './utils/env';
 import { EmbedColors } from './utils/embeds';
 import logger from './utils/logging/logger';
 import { isFluxerApiBlocked } from './utils/fluxerApiGuard';
-import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
-import { instagramEmbedFields } from './services/instagramVideo/instagramEmbed';
-import {
-    findInstagramLinks,
-    type InstagramLink,
-} from './services/instagramVideo/instagramLinks';
 import CommandRegistry from './commands/CommandRegistry';
 import DiscordCommandHandler from './commands/discord/DiscordCommandHandler';
 import {
@@ -104,7 +97,7 @@ import ClaudeLinesService, {
     CLAUDE_LINES_COMMAND_NAMES,
 } from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
-import { BotConfig, instagramVideoOptions } from './config/BotConfig';
+import { BotConfig } from './config/BotConfig';
 
 const startDiscordClient = async ({
     linkService,
@@ -335,10 +328,6 @@ const startDiscordClient = async ({
     for (const name of EXPRESSIONS_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, expressionsHandler);
     }
-
-    const instagramVideoService = botConfig.instagram.enabled
-        ? new InstagramVideoService(instagramVideoOptions(botConfig))
-        : null;
 
     const remindersEnabled = botConfig.reminders.enabled;
     if (remindersEnabled) {
@@ -972,79 +961,7 @@ const startDiscordClient = async ({
         ) {
             await messageRelay.relayMessage(message);
         }
-
-        // Instagram posts (issues #45, #48): reply with an Instagram card plus
-        // the media of each public post a person links, then bridge the reply.
-        // Not awaited: downloading can take a while.
-        if (
-            instagramVideoService &&
-            message.inGuild() &&
-            !message.author.bot &&
-            !message.webhookId &&
-            !isBotCommand &&
-            !isShortInvocation
-        ) {
-            const links = findInstagramLinks(
-                message.content,
-                botConfig.instagram.maxLinksPerMessage
-            );
-            if (links.length > 0) {
-                void replyWithInstagramPosts(
-                    instagramVideoService,
-                    message,
-                    links
-                );
-            }
-        }
     });
-
-    async function replyWithInstagramPosts(
-        service: InstagramVideoService,
-        message: Message<true>,
-        links: InstagramLink[]
-    ): Promise<void> {
-        for (const link of links) {
-            const post = await service.fetchPost(link);
-            if (!post) continue;
-            try {
-                const fields = instagramEmbedFields(post);
-                const embed = new EmbedBuilder()
-                    .setURL(fields.url)
-                    .setTitle(fields.title)
-                    .setColor(fields.color)
-                    .setFooter({ text: fields.footer });
-                if (fields.description)
-                    embed.setDescription(fields.description);
-                if (fields.authorName) {
-                    embed.setAuthor({
-                        name: fields.authorName,
-                        url: fields.authorUrl,
-                        iconURL: fields.authorIconUrl,
-                    });
-                }
-                const reply = await message.reply({
-                    embeds: [embed],
-                    files: post.files.map((file) =>
-                        new AttachmentBuilder(file.data, {
-                            name: file.name,
-                        }).setSpoiler(post.spoiler)
-                    ),
-                    allowedMentions: { repliedUser: false, parse: [] },
-                });
-                if (
-                    reply.channel instanceof TextChannel ||
-                    reply.channel.isThread()
-                ) {
-                    await messageRelay.relayMessage(reply);
-                }
-            } catch (error) {
-                logger.error(
-                    `❌ Failed to post the Instagram post for ${link.url}:`,
-                    error
-                );
-            }
-        }
-    }
 
     await client.login(DISCORD_TOKEN);
 

@@ -24,6 +24,17 @@ describe('findInstagramLinks', () => {
         ['https://www.instagram.com/some.user_1/reel/ABC/', 'reel/ABC'],
         ['https://instagram.com/someuser/p/ABC', 'p/ABC'],
         ['HTTPS://WWW.INSTAGRAM.COM/REEL/AbC/', 'reel/AbC'],
+        // Embed-fixer redirect sites (issue #52).
+        ['https://www.kkinstagram.com/reel/ABC/', 'reel/ABC'],
+        ['https://kkinstagram.com/p/ABC/?igsh=x', 'p/ABC'],
+        ['https://www.ddinstagram.com/reel/ABC/', 'reel/ABC'],
+        ['https://d.ddinstagram.com/p/ABC/', 'p/ABC'],
+        ['https://g.ddinstagram.com/reel/ABC/', 'reel/ABC'],
+        ['https://vxinstagram.com/reels/ABC/', 'reel/ABC'],
+        ['https://uuinstagram.com/p/ABC/', 'p/ABC'],
+        ['https://eeinstagram.com/p/ABC/', 'p/ABC'],
+        ['https://www.instagramez.com/reel/ABC/', 'reel/ABC'],
+        ['https://kkinstagram.com/some.user/reel/ABC/', 'reel/ABC'],
     ])('canonicalises %s', (url, path) => {
         expect(urls(`look ${url} wow`)).toEqual([
             `https://www.instagram.com/${path}/`,
@@ -37,6 +48,9 @@ describe('findInstagramLinks', () => {
         'https://www.instagram.com/',
         'https://notinstagram.com/p/ABC/',
         'https://instagram.com.evil.example/p/ABC/',
+        'https://kkinstagram.com.evil.example/p/ABC/',
+        'https://xxkkinstagram.com/p/ABC/',
+        'https://kkinstagram.com/someuser/',
         'https://www.youtube.com/watch?v=abc',
         'instagram.com/p/ABC/',
         'xhttps://instagram.com/p/ABC/',

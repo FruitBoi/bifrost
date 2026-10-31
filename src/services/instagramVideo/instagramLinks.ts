@@ -3,8 +3,10 @@
  *
  * Only public post shapes are recognised: `/p/<code>`, `/reel/<code>`,
  * `/reels/<code>` and `/tv/<code>` on instagram.com (optionally `www.` or
- * `m.`), with or without a leading `/<username>/` segment. Profiles, stories,
- * explore pages and look-alike domains are ignored. Links the poster wrapped
+ * `m.`), with or without a leading `/<username>/` segment. The same paths on
+ * the embed-fixer redirect sites (kkinstagram, ddinstagram, vxinstagram, ...;
+ * issue #52) count too and are canonicalised to instagram.com. Profiles,
+ * stories, explore pages and other look-alike domains are ignored. Links the poster wrapped
  * in `<...>` (the "no preview" syntax on Discord and Fluxer) and links inside
  * inline code or code blocks are skipped too.
  */
@@ -24,7 +26,7 @@ export interface InstagramLink {
  * `||url||` and `<url>` leave their markup outside the match.
  */
 const INSTAGRAM_URL_RE =
-    /https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[A-Za-z0-9._]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]+)(?:[/?#][^\s<>|]*)?/gi;
+    /https?:\/\/(?:www\.|m\.|d\.|g\.)?(?:instagram|kkinstagram|ddinstagram|vxinstagram|uuinstagram|eeinstagram|instagramez)\.com\/(?:[A-Za-z0-9._]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]+)(?:[/?#][^\s<>|]*)?/gi;
 
 /** Code blocks first, then double- and single-backtick inline code. */
 const CODE_RE = /```[\s\S]*?```|``[\s\S]*?``|`[^`]*`/g;

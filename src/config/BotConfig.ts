@@ -163,10 +163,12 @@ export interface BotConfig {
     };
     instagram: {
         /**
-         * Reply to public Instagram post, reel and tv links posted in bridged
-         * channels and threads (either platform) with an Instagram card and
-         * the post's video or photos attached, taken from Instagram's public
-         * embed page (yt-dlp as the fallback). Videos are re-encoded with
+         * Reply on Fluxer to public Instagram post, reel and tv links
+         * (including kkinstagram-style redirect links) posted in bridged
+         * channels and threads, on Fluxer or bridged in from Discord, with an
+         * Instagram card and the post's video or photos attached, taken from
+         * Instagram's public embed page (yt-dlp as the fallback). The reply
+         * is not bridged; Discord keeps the plain link. Videos are re-encoded with
          * ffmpeg when too large. Gated and private posts are skipped
          * silently. See `services/instagramVideo/`.
          */
@@ -176,8 +178,7 @@ export interface BotConfig {
         /**
          * Largest total upload per reply, in MiB (may be fractional). Bigger
          * videos are compressed to fit; photos that don't fit are left out.
-         * 10 is Discord's unboosted upload limit, so the bridged copy uploads
-         * there too.
+         * Defaults to 10.
          */
         maxSizeMb: number;
         /** Videos longer than this many seconds are skipped. */
