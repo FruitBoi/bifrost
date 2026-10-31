@@ -184,6 +184,11 @@ export const FLUXER_CLIENT_SECRET = process.env.BF_FLUXER_CLIENT_SECRET || '';
 export const ENABLE_VOICE_BRIDGE = parseBool(
     process.env.BF_ENABLE_VOICE_BRIDGE
 );
+/** Music bot (`music` command); needs the voice stack, so it defaults to the bridge flag. */
+export const ENABLE_MUSIC =
+    process.env.BF_ENABLE_MUSIC === undefined
+        ? ENABLE_VOICE_BRIDGE
+        : parseBool(process.env.BF_ENABLE_MUSIC);
 export const VOICE_LEAVE_GRACE_MS = process.env.BF_VOICE_LEAVE_GRACE_MS
     ? Number(process.env.BF_VOICE_LEAVE_GRACE_MS)
     : 30000;

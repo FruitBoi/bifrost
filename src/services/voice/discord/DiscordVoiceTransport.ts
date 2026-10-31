@@ -99,6 +99,11 @@ export default class DiscordVoiceTransport
             .map((vs) => this.toParticipant(vs));
     }
 
+    userVoiceChannel(guildId: string, userId: string): string | null {
+        const guild = this.client.guilds.cache.get(guildId);
+        return guild?.voiceStates.cache.get(userId)?.channelId ?? null;
+    }
+
     async join(guildId: string, channelId: string): Promise<VoiceSession> {
         const guild =
             this.client.guilds.cache.get(guildId) ??

@@ -72,6 +72,10 @@ export class FakeVoiceTransport extends EventEmitter implements VoiceTransport {
             .map((s) => s.participant);
     }
 
+    userVoiceChannel(guildId: string, userId: string): string | null {
+        return this.states.get(guildId)?.get(userId)?.channelId ?? null;
+    }
+
     /**
      * Moves `participant` into `channelId` (or out of voice when null) and
      * emits the matching update everywhere.

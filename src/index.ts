@@ -53,6 +53,7 @@ import {
     DISCORD_APP_ID,
     DISABLE_MESSAGE_QUEUE,
     ENABLE_VOICE_BRIDGE,
+    ENABLE_MUSIC,
     VOICE_LEAVE_GRACE_MS,
     DISCORD_HEALTH_URL,
     ENABLE_WEB_DASHBOARD,
@@ -78,6 +79,7 @@ import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import type VoiceBridgeService from './services/voice/VoiceBridgeService';
 import type { VoiceTransport } from './services/voice/VoiceTransport';
+import type MusicService from './services/music/MusicService';
 
 const main = async () => {
     const {
@@ -335,26 +337,53 @@ const main = async () => {
     // The Fluxer transport must be created before the client logs in, and the
     // Fluxer client is re-created on restart, so the bridge is (re)started
     // from startVoiceBridge() every time both clients are up.
-    const voice = ENABLE_VOICE_BRIDGE
+    const voice =
+        ENABLE_VOICE_BRIDGE || ENABLE_MUSIC
+            ? {
+                  DiscordVoiceTransport: (
+                      await import('./services/voice/discord/DiscordVoiceTransport')
+                  ).default,
+                  FluxerVoiceTransport: (
+                      await import('./services/voice/fluxer/FluxerVoiceTransport')
+                  ).default,
+                  VoiceBridgeService: (
+                      await import('./services/voice/VoiceBridgeService')
+                  ).default,
+                  createOpusMixer: (await import('./services/voice/OpusMixer'))
+                      .createOpusMixer,
+              }
+            : null;
+    if (voice && ENABLE_VOICE_BRIDGE) {
+        logger.info('[VoiceBridge] 🔊 Voice bridging is enabled');
+    }
+    const music = ENABLE_MUSIC
         ? {
-              DiscordVoiceTransport: (
-                  await import('./services/voice/discord/DiscordVoiceTransport')
+              MusicService: (await import('./services/music/MusicService'))
+                  .default,
+              YtDlpResolver: (await import('./services/music/YtDlpResolver'))
+                  .default,
+              YtDlpTrackPlayer: (
+                  await import('./services/music/YtDlpTrackPlayer')
               ).default,
-              FluxerVoiceTransport: (
-                  await import('./services/voice/fluxer/FluxerVoiceTransport')
-              ).default,
-              VoiceBridgeService: (
-                  await import('./services/voice/VoiceBridgeService')
-              ).default,
-              createOpusMixer: (await import('./services/voice/OpusMixer'))
-                  .createOpusMixer,
           }
         : null;
-    if (voice) logger.info('[VoiceBridge] 🔊 Voice bridging is enabled');
+    if (music) logger.info('[Music] 🎵 Music is enabled');
 
     let discordVoiceTransport: VoiceTransport | null = null;
     let fluxerVoiceTransport: VoiceTransport | null = null;
     let voiceBridge: VoiceBridgeService | null = null;
+    const musicService: MusicService | null = music
+        ? new music.MusicService({
+              transports: {
+                  discord: () => discordVoiceTransport,
+                  fluxer: () => fluxerVoiceTransport,
+              },
+              bridge: () => voiceBridge,
+              resolver: new music.YtDlpResolver(),
+              player: new music.YtDlpTrackPlayer(),
+          })
+        : null;
+    const getMusic = () => musicService;
 
     const stopVoiceBridge = async () => {
         if (!voiceBridge) return;
@@ -367,8 +396,18 @@ const main = async () => {
         }
     };
 
+    const stopMusic = async () => {
+        if (!musicService) return;
+        try {
+            await musicService.stopAll();
+        } catch (err) {
+            logger.error('[Music] ❌ Error while stopping music:', err);
+        }
+    };
+
     const startVoiceBridge = async () => {
-        if (!voice || !discordVoiceTransport || !fluxerVoiceTransport) return;
+        if (!voice || !ENABLE_VOICE_BRIDGE) return;
+        if (!discordVoiceTransport || !fluxerVoiceTransport) return;
         await stopVoiceBridge();
         voiceBridge = new voice.VoiceBridgeService({
             linkService,
@@ -377,6 +416,10 @@ const main = async () => {
             createMixer: voice.createOpusMixer,
             metricsService,
             leaveGraceMs: VOICE_LEAVE_GRACE_MS,
+            beforeJoin: musicService
+                ? (platform, guildId, channelId) =>
+                      musicService.yieldToBridge(platform, guildId, channelId)
+                : undefined,
         });
         try {
             await voiceBridge.start();
@@ -418,6 +461,7 @@ const main = async () => {
         claudeRequestNotifyService,
         claudeLinesService,
         deployAnnounceService,
+        getMusic,
         onClientCreated: voice
             ? (client: FluxerClient) => {
                   fluxerVoiceTransport = new voice.FluxerVoiceTransport(client);
@@ -437,6 +481,7 @@ const main = async () => {
         );
         healthCheckService.resetFluxerDownCount();
         await stopVoiceBridge();
+        await stopMusic();
         try {
             fluxerClientRef.current?.destroy?.();
             // eslint-disable-next-line no-empty
@@ -549,6 +594,7 @@ const main = async () => {
             claudeRequestService,
             claudeRequestNotifyService,
             claudeLinesService,
+            getMusic,
         }),
         connectFluxer(),
     ]);

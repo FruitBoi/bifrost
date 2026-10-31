@@ -63,6 +63,8 @@ import ThreadSyncService from './services/threadSync/ThreadSyncService';
 import LinkProvisioner from './services/LinkProvisioner';
 import CategorySyncService from './services/categorySync/CategorySyncService';
 import CategoryDiscordCommandHandler from './commands/discord/handlers/CategoryDiscordCommandHandler';
+import MusicDiscordCommandHandler from './commands/discord/handlers/MusicDiscordCommandHandler';
+import type { MusicController } from './services/music/types';
 import VoiceDiscordCommandHandler from './commands/discord/handlers/VoiceDiscordCommandHandler';
 import RemindMeDiscordCommandHandler from './commands/discord/handlers/RemindMeDiscordCommandHandler';
 import ReminderDiscordCommandHandler from './commands/discord/handlers/ReminderDiscordCommandHandler';
@@ -130,6 +132,7 @@ const startDiscordClient = async ({
     claudeRequestNotifyService,
     claudeLinesService,
     botConfig,
+    getMusic,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
@@ -156,6 +159,8 @@ const startDiscordClient = async ({
     claudeRequestNotifyService: ClaudeRequestNotifyService | null;
     claudeLinesService: ClaudeLinesService;
     botConfig: BotConfig;
+    /** The music controller, or null while music is disabled or not ready. */
+    getMusic?: () => MusicController | null;
 }): Promise<Client> => {
     const client = new Client({
         intents: [
@@ -306,6 +311,13 @@ const startDiscordClient = async ({
         'voice',
         new VoiceDiscordCommandHandler(client, linkService, linkProvisioner)
     );
+    const musicHandler = new MusicDiscordCommandHandler(
+        client,
+        getMusic ?? (() => null)
+    );
+    for (const name of ['music', 'play', 'p']) {
+        commandRegistry.registerCommand(name, musicHandler);
+    }
     commandRegistry.registerCommand(
         'autolink',
         new AutolinkDiscordCommandHandler(

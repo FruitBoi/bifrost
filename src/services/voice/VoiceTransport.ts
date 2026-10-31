@@ -79,6 +79,11 @@ export interface VoiceTransport extends EventEmitter {
     botUserId(): string | null;
     /** Human participants in a channel, from cached voice states. */
     listParticipants(guildId: string, channelId: string): VoiceParticipant[];
+    /**
+     * Voice channel a user is currently in within a guild, from cached voice
+     * states, or null when they are not in voice there (or unknown).
+     */
+    userVoiceChannel(guildId: string, userId: string): string | null;
     /** Join a voice channel. Rejects if the bot lacks permission or is already elsewhere in that guild. */
     join(guildId: string, channelId: string): Promise<VoiceSession>;
 

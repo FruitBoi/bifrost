@@ -153,6 +153,13 @@ export default class FluxerVoiceTransport
         return result;
     }
 
+    userVoiceChannel(guildId: string, userId: string): string | null {
+        const cached = this.states.get(guildId)?.get(userId)?.channelId;
+        if (cached) return cached;
+        // Fall back to the voice manager's own cache, like listParticipants.
+        return this.voiceManager.getVoiceChannelId(guildId, userId);
+    }
+
     async join(guildId: string, channelId: string): Promise<VoiceSession> {
         const existing = this.voiceManager.getConnection(guildId);
         if (existing && existing.channel.id !== channelId) {

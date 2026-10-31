@@ -27,7 +27,32 @@ export interface VoiceBridgeServiceOptions {
     statsIntervalMs?: number;
     /** How long after going live a side with people but no audio is flagged. */
     silentSideWarnMs?: number;
+    /**
+     * Called (and awaited) right before the bridge joins a channel on either
+     * side, so whatever else holds a voice session in that guild on that
+     * platform (the music player) can get out of the way. Errors are logged
+     * and the join goes ahead anyway.
+     */
+    beforeJoin?: (
+        platform: VoicePlatform,
+        guildId: string,
+        channelId: string
+    ) => Promise<void> | void;
 }
+
+/**
+ * An extra audio source mixed into a live bridge (e.g. music), heard on
+ * both sides. See {@link VoiceBridgeService.injectSource}.
+ */
+export interface VoiceBridgeInjection {
+    /** Feeds one 20 ms Opus frame into both sides' mixers. No-op once detached. */
+    push(packet: OpusPacket): void;
+    /** Removes the source from both mixers. Idempotent; does not call `onDetached`. */
+    detach(): void;
+}
+
+/** Called when the bridge drops an injected source because it stopped being live. */
+export type InjectionDetachedListener = (reason: string) => void;
 
 /**
  * A bridge that is live. Both sides had at least one human when it joined;
@@ -55,6 +80,9 @@ const DEFAULT_STATS_INTERVAL_MS = 15_000;
 const DEFAULT_SILENT_SIDE_WARN_MS = 10_000;
 
 const BOTH_SIDES_EMPTY = 'both sides are empty';
+
+/** Mixer source ids of injected sources; never a valid user id. */
+const INJECTED_SOURCE_PREFIX = 'injected:';
 
 /**
  * idle (no entry in `bridges`) → joining → live → leaving → idle.
@@ -114,6 +142,8 @@ interface Bridge {
     silentSideTimer: NodeJS.Timeout | null;
     discord: BridgeSide | null;
     fluxer: BridgeSide | null;
+    /** Injected sources by mixer source id, each with its detach listener. */
+    injections: Map<string, InjectionDetachedListener>;
 }
 
 /**
@@ -143,6 +173,8 @@ export default class VoiceBridgeService implements VoiceLinkListener {
     private readonly joinRetryBackoffMs: number[];
     private readonly statsIntervalMs: number;
     private readonly silentSideWarnMs: number;
+    private readonly beforeJoin: VoiceBridgeServiceOptions['beforeJoin'];
+    private injectionCounter = 0;
 
     /** Every known voice link, kept current through onVoiceLinkChanged. */
     private readonly links = new Map<string, VoiceLink>();
@@ -179,6 +211,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             options.statsIntervalMs ?? DEFAULT_STATS_INTERVAL_MS;
         this.silentSideWarnMs =
             options.silentSideWarnMs ?? DEFAULT_SILENT_SIDE_WARN_MS;
+        this.beforeJoin = options.beforeJoin;
     }
 
     // ---------------------------------------------------------------------
@@ -259,17 +292,173 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         const live: LiveVoiceBridge[] = [];
         for (const bridge of this.bridges.values()) {
             if (bridge.state !== 'live') continue;
-            live.push({
-                voiceLinkId: bridge.link.id,
-                guildLinkId: bridge.link.guildLinkId,
-                discordChannelId: bridge.link.discordChannelId,
-                fluxerChannelId: bridge.link.fluxerChannelId,
-                since: bridge.since,
-                discordParticipants: bridge.discord?.participants.size ?? 0,
-                fluxerParticipants: bridge.fluxer?.participants.size ?? 0,
-            });
+            live.push(this.describeLive(bridge));
         }
         return { live };
+    }
+
+    private describeLive(bridge: Bridge): LiveVoiceBridge {
+        return {
+            voiceLinkId: bridge.link.id,
+            guildLinkId: bridge.link.guildLinkId,
+            discordChannelId: bridge.link.discordChannelId,
+            fluxerChannelId: bridge.link.fluxerChannelId,
+            since: bridge.since,
+            discordParticipants: bridge.discord?.participants.size ?? 0,
+            fluxerParticipants: bridge.fluxer?.participants.size ?? 0,
+        };
+    }
+
+    // ---------------------------------------------------------------------
+    // Hooks for other voice users (music)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Channel the bridge holds, is joining (or retrying) or is leaving in
+     * `guildId` on `platform`, or null when it does not occupy that guild.
+     * Anything else must not join voice there while this is non-null.
+     */
+    busyChannel(platform: VoicePlatform, guildId: string): string | null {
+        for (const bridge of this.bridges.values()) {
+            if (this.bridgeGuild(bridge, platform) !== guildId) continue;
+            return this.bridgeChannel(bridge, platform);
+        }
+        return null;
+    }
+
+    /** The live bridge sitting in `channelId` of `guildId` on `platform`, if any. */
+    liveBridgeFor(
+        platform: VoicePlatform,
+        guildId: string,
+        channelId: string
+    ): LiveVoiceBridge | null {
+        const bridge = this.findLive(platform, guildId, channelId);
+        return bridge ? this.describeLive(bridge) : null;
+    }
+
+    /**
+     * Adds an audio source to the live bridge in `channelId` that is mixed
+     * into BOTH directions, so people on either platform hear it. Returns
+     * null when no live bridge sits in that channel. `onDetached` is called
+     * once if the bridge stops being live (drop, leave, link removed) while
+     * the source is attached; the source is gone by then.
+     */
+    injectSource(
+        platform: VoicePlatform,
+        guildId: string,
+        channelId: string,
+        onDetached: InjectionDetachedListener
+    ): VoiceBridgeInjection | null {
+        const bridge = this.findLive(platform, guildId, channelId);
+        if (!bridge) return null;
+
+        const sourceId = `${INJECTED_SOURCE_PREFIX}${++this.injectionCounter}`;
+        bridge.injections.set(sourceId, onDetached);
+        logger.info(
+            `[VoiceBridge] 🎵 Injected source ${sourceId} into voice link ${bridge.link.id}`
+        );
+
+        return {
+            push: (packet: OpusPacket) => {
+                if (!bridge.injections.has(sourceId)) return;
+                for (const side of [bridge.discord, bridge.fluxer]) {
+                    if (!side) continue;
+                    try {
+                        side.mixer.push(sourceId, packet);
+                    } catch (err) {
+                        logger.error(
+                            `[VoiceBridge] ❌ Mixer rejected injected audio for voice link ${bridge.link.id}`,
+                            err
+                        );
+                    }
+                }
+            },
+            detach: () => {
+                if (!bridge.injections.delete(sourceId)) return;
+                this.removeInjectedSource(bridge, sourceId);
+                logger.info(
+                    `[VoiceBridge] 🎵 Detached injected source ${sourceId} from voice link ${bridge.link.id}`
+                );
+            },
+        };
+    }
+
+    private findLive(
+        platform: VoicePlatform,
+        guildId: string,
+        channelId: string
+    ): Bridge | null {
+        for (const bridge of this.bridges.values()) {
+            if (
+                bridge.state === 'live' &&
+                this.bridgeGuild(bridge, platform) === guildId &&
+                this.bridgeChannel(bridge, platform) === channelId
+            ) {
+                return bridge;
+            }
+        }
+        return null;
+    }
+
+    private bridgeGuild(bridge: Bridge, platform: VoicePlatform): string {
+        return platform === 'discord'
+            ? bridge.guildLink.discordGuildId
+            : bridge.guildLink.fluxerGuildId;
+    }
+
+    private bridgeChannel(bridge: Bridge, platform: VoicePlatform): string {
+        return platform === 'discord'
+            ? bridge.link.discordChannelId
+            : bridge.link.fluxerChannelId;
+    }
+
+    private removeInjectedSource(bridge: Bridge, sourceId: string) {
+        for (const side of [bridge.discord, bridge.fluxer]) {
+            if (!side) continue;
+            try {
+                side.mixer.removeSource(sourceId);
+            } catch (err) {
+                logger.error(
+                    `[VoiceBridge] ❌ Failed to remove injected source from voice link ${bridge.link.id}`,
+                    err
+                );
+            }
+        }
+    }
+
+    /** Drops every injected source of a bridge that stops being live. */
+    private dropInjections(bridge: Bridge, reason: string) {
+        if (bridge.injections.size === 0) return;
+        const injections = [...bridge.injections];
+        bridge.injections.clear();
+        for (const [sourceId, onDetached] of injections) {
+            this.removeInjectedSource(bridge, sourceId);
+            try {
+                onDetached(reason);
+            } catch (err) {
+                logger.error(
+                    `[VoiceBridge] ❌ Injected source listener threw for voice link ${bridge.link.id}`,
+                    err
+                );
+            }
+        }
+    }
+
+    /** Runs the `beforeJoin` hook; never throws. */
+    private async runBeforeJoin(
+        platform: VoicePlatform,
+        guildId: string,
+        channelId: string
+    ): Promise<void> {
+        if (!this.beforeJoin) return;
+        try {
+            await this.beforeJoin(platform, guildId, channelId);
+        } catch (err) {
+            logger.error(
+                `[VoiceBridge] ❌ beforeJoin hook failed for ${platform} channel ${channelId}`,
+                err
+            );
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -390,6 +579,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             silentSideTimer: null,
             discord: null,
             fluxer: null,
+            injections: new Map(),
         };
         this.bridges.set(link.id, bridge);
         await this.attemptJoin(bridge);
@@ -495,6 +685,15 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             `[VoiceBridge] 🔗 Joining voice link ${link.id}: Discord ${link.discordChannelId} + Fluxer ${link.fluxerChannelId}`
         );
 
+        if (this.beforeJoin) {
+            await this.runBeforeJoin(
+                'discord',
+                guildLink.discordGuildId,
+                link.discordChannelId
+            );
+            if (stale()) return;
+        }
+
         let discordSession: VoiceSession;
         try {
             discordSession = await this.discord.join(
@@ -515,6 +714,19 @@ export default class VoiceBridgeService implements VoiceLinkListener {
             discordClosedEarly = reason;
         };
         discordSession.on('closed', onEarlyClose);
+
+        if (this.beforeJoin) {
+            await this.runBeforeJoin(
+                'fluxer',
+                guildLink.fluxerGuildId,
+                link.fluxerChannelId
+            );
+            if (stale()) {
+                discordSession.off('closed', onEarlyClose);
+                await this.safeLeave(discordSession);
+                return;
+            }
+        }
 
         let fluxerSession: VoiceSession;
         try {
@@ -932,6 +1144,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
         bridge.generation++;
         this.clearTimers(bridge);
         this.updateLiveGauge();
+        this.dropInjections(bridge, `${platform} voice session closed`);
         await this.releaseSides(bridge);
 
         // Torn down (link removed, service stopped) while we were leaving.
@@ -972,6 +1185,7 @@ export default class VoiceBridgeService implements VoiceLinkListener {
                 `[VoiceBridge] 👋 Leaving voice link ${bridge.link.id}: ${reason}`
             );
         }
+        this.dropInjections(bridge, reason);
 
         await this.releaseSides(bridge);
 

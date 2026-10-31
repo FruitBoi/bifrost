@@ -50,7 +50,7 @@ On Discord every command is also available as a slash command `/<command>` (unde
 
 ### Fluxer-only commands
 
-By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`) and `clauderequest`, with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
+By default (`commands.fluxerOnly: true`) commands are a Fluxer thing. On Discord the bot only runs the moderator bridging commands (`link`, `unlink`, `autolink`, `list`, `threads`, `pins`, `category`, `voice`, `expressions`, `history`) the commands ported from YAGPDB (`remindme`, `reminder`, `timezone`, `clean`) `clauderequest` and `music` (also `play`, `p`), with all their aliases and short forms (`?remindme`, `?clean`). Any other command typed on Discord (`!b help`, `!fishtrade`, …) is answered with a random flirty, yandere or passive-aggressive reply such as "Come to Fluxer if you want to use me" or "Baka, I only listen to Fluxers", and only the allowed commands are registered as Discord slash commands. Set `commands.fluxerOnly: false` to run every command on Discord again.
 
 ### Automatic thread bridging
 
@@ -210,6 +210,17 @@ Fluxer currently runs voice on LiveKit and has announced it will replace it with
 ### Database migration
 
 Voice links ship as migration `00006-voice-links`, which adds the `voice_links` table (one row per pair of voice channels, with an `enabled` flag). It runs automatically on startup.
+
+## Music
+
+The bot can play audio from YouTube (or any other site [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports) into the voice channel you are in, like a music bot. It is switched on with `BF_ENABLE_MUSIC=true` (it defaults to the value of `BF_ENABLE_VOICE_BRIDGE`, since it uses the same voice stack) and needs `yt-dlp` and `ffmpeg` on the `PATH`; the Docker image installs both. Without it the command replies that music is disabled.
+
+- `!b music <YouTube URL | search words>` (aliases `play`, `p`) — queues a track and plays it in your voice channel. The reply says whether it is playing now or at which queue position.
+- `!b music skip` / `pause` / `resume` — control the current track.
+- `!b music stop` — clears the queue and leaves the voice channel.
+- `!b music queue` (or `np`, `list`, or just `!b music`) — shows what is playing with elapsed time, and the next tracks with who requested them.
+
+Anyone can use it, but you must be in the music's voice channel to control it. It also works as a Discord slash command and, even with `commands.fluxerOnly` on, on Discord. If your voice channel is part of a voice link, the music plays to both sides of the bridge. If the bot is already bridging a different channel in that server it refuses, since a bot can only be in one voice channel per server on each platform.
 
 ## Cat chat
 

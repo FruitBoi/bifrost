@@ -33,6 +33,8 @@ export const DISCORD_ALLOWED_COMMANDS: readonly string[] = [
     'clauderequest',
     // Per-server command roles (issue #43).
     'commandroles',
+    // Music bot: it plays into the voice channel the user is in.
+    'music',
 ];
 
 export const FLUXER_ONLY_REPLIES: readonly string[] = [

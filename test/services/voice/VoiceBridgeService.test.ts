@@ -5,7 +5,9 @@ import {
     LinkService,
     VoiceLinkListener,
 } from '../../../src/services/LinkService';
-import VoiceBridgeService from '../../../src/services/voice/VoiceBridgeService';
+import VoiceBridgeService, {
+    VoiceBridgeServiceOptions,
+} from '../../../src/services/voice/VoiceBridgeService';
 import logger from '../../../src/utils/logging/logger';
 import { guildLink, nextId } from '../../helpers/fakes';
 import { FakeVoiceTransport, createFakeMixer } from '../../helpers/voiceFakes';
@@ -61,6 +63,7 @@ function setup(
         joinRetryBackoffMs?: number[];
         statsIntervalMs?: number;
         silentSideWarnMs?: number;
+        beforeJoin?: VoiceBridgeServiceOptions['beforeJoin'];
     } = {}
 ) {
     const link = options.links?.[0] ?? makeVoiceLink();
@@ -77,6 +80,7 @@ function setup(
         joinRetryBackoffMs: options.joinRetryBackoffMs,
         statsIntervalMs: options.statsIntervalMs,
         silentSideWarnMs: options.silentSideWarnMs,
+        beforeJoin: options.beforeJoin,
     });
 
     /** Puts 'alice' in the Discord channel of the link. */
@@ -1084,5 +1088,151 @@ describe('status and stop', () => {
 
         await t.joinBoth();
         expect(t.discord.joinCalls).toHaveLength(1);
+    });
+});
+
+describe('hooks for other voice users', () => {
+    it('calls beforeJoin for each side before joining it', async () => {
+        const order: string[] = [];
+        const t = setup({
+            beforeJoin: async (platform, guildId, channelId) => {
+                order.push(`hook ${platform} ${guildId} ${channelId}`);
+                await flush();
+            },
+        });
+        const discordJoin = t.discord.join.bind(t.discord);
+        t.discord.join = async (g, c) => {
+            order.push('join discord');
+            return discordJoin(g, c);
+        };
+        const fluxerJoin = t.fluxer.join.bind(t.fluxer);
+        t.fluxer.join = async (g, c) => {
+            order.push('join fluxer');
+            return fluxerJoin(g, c);
+        };
+        await t.service.start();
+        await t.joinBoth();
+        await flush();
+        await flush();
+
+        expect(order).toEqual([
+            `hook discord ${DGUILD} dvoice`,
+            'join discord',
+            `hook fluxer ${FGUILD} fvoice`,
+            'join fluxer',
+        ]);
+        expect(t.service.status().live).toHaveLength(1);
+    });
+
+    it('joins anyway when beforeJoin throws', async () => {
+        const t = setup({
+            beforeJoin: () => {
+                throw new Error('boom');
+            },
+        });
+        const error = vi
+            .spyOn(logger, 'error')
+            .mockImplementation(() => logger);
+        await t.service.start();
+        await t.joinBoth();
+        await flush();
+        expect(t.service.status().live).toHaveLength(1);
+        expect(logged(error).some((m) => m.includes('beforeJoin'))).toBe(true);
+    });
+
+    it('reports the busy channel per platform and guild while joining and live', async () => {
+        const t = setup();
+        await t.service.start();
+        expect(t.service.busyChannel('discord', DGUILD)).toBeNull();
+
+        t.discord.setParticipant(DGUILD, 'dvoice', { userId: 'alice' });
+        t.fluxer.setParticipant(FGUILD, 'fvoice', { userId: 'fred' });
+        // Joining: the bridge entry exists before the joins resolve.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(t.service.busyChannel('discord', DGUILD)).toBe('dvoice');
+        expect(t.service.liveBridgeFor('discord', DGUILD, 'dvoice')).toBeNull();
+
+        await flush();
+        expect(t.service.busyChannel('discord', DGUILD)).toBe('dvoice');
+        expect(t.service.busyChannel('fluxer', FGUILD)).toBe('fvoice');
+        expect(t.service.busyChannel('discord', 'other-guild')).toBeNull();
+        expect(t.service.busyChannel('fluxer', DGUILD)).toBeNull();
+        expect(
+            t.service.liveBridgeFor('fluxer', FGUILD, 'fvoice')
+        ).toMatchObject({ voiceLinkId: t.link.id });
+        expect(t.service.liveBridgeFor('discord', DGUILD, 'other')).toBeNull();
+    });
+
+    it('mixes an injected source into both directions until detached', async () => {
+        const t = setup();
+        await t.service.start();
+        expect(
+            t.service.injectSource('discord', DGUILD, 'dvoice', () => undefined)
+        ).toBeNull();
+        await t.joinBoth();
+        const [toFluxer, toDiscord] = t.mixers;
+
+        const onDetached = vi.fn();
+        const injection = t.service.injectSource(
+            'discord',
+            DGUILD,
+            'dvoice',
+            onDetached
+        );
+        expect(injection).not.toBeNull();
+        injection!.push(pkt('music'));
+
+        const id = toFluxer.pushes[0].sourceId;
+        expect(id.startsWith('injected:')).toBe(true);
+        expect(toFluxer.pushes).toEqual([
+            { sourceId: id, packet: pkt('music') },
+        ]);
+        expect(toDiscord.pushes).toEqual([
+            { sourceId: id, packet: pkt('music') },
+        ]);
+
+        injection!.detach();
+        injection!.detach();
+        injection!.push(pkt('late'));
+        expect(toFluxer.removed).toEqual([id]);
+        expect(toDiscord.removed).toEqual([id]);
+        expect(toFluxer.pushes).toHaveLength(1);
+        expect(onDetached).not.toHaveBeenCalled();
+    });
+
+    it('notifies injected sources when the bridge stops being live', async () => {
+        const t = setup({ leaveGraceMs: 100 });
+        await t.service.start();
+        await t.joinBoth();
+
+        const onDetached = vi.fn();
+        const injection = t.service.injectSource(
+            'fluxer',
+            FGUILD,
+            'fvoice',
+            onDetached
+        );
+        t.fluxer.setParticipant(FGUILD, null, { userId: 'fred' });
+        await vi.advanceTimersByTimeAsync(100);
+        await flush();
+
+        expect(onDetached).toHaveBeenCalledTimes(1);
+        injection!.push(pkt('late'));
+        expect(
+            t.mixers[0].pushes.filter((p) => p.sourceId.startsWith('injected:'))
+        ).toEqual([]);
+    });
+
+    it('notifies injected sources when a session drops', async () => {
+        const t = setup();
+        await t.service.start();
+        await t.joinBoth();
+        const onDetached = vi.fn();
+        t.service.injectSource('discord', DGUILD, 'dvoice', onDetached);
+
+        t.discord.openSessions[0].simulateClose('network');
+        await flush();
+        expect(onDetached).toHaveBeenCalledWith('discord voice session closed');
     });
 });

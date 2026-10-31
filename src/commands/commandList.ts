@@ -181,6 +181,25 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'music',
+        summary: 'Plays YouTube videos (via yt-dlp) in your voice channel.',
+        aliases: ['play', 'p'],
+        discord: {
+            description:
+                "Music bot: `music <YouTube URL | search words>` queues a track (any URL yt-dlp supports works) and plays it in the voice channel you are in. `skip` skips the current track, `pause` / `resume` control playback, `stop` clears the queue and leaves, and `queue` (or `np` / `list`, or no arguments) shows what is playing and up next. Anyone can use it, but you must be in the music's voice channel to control it. If your channel is bridged, the music plays on both platforms; the bot refuses when it is bridging a different channel in this server.",
+            usageArgs: [
+                '<YouTube URL | search words> | skip | stop | pause | resume | queue',
+            ],
+        },
+        fluxer: {
+            description:
+                "Music bot: `music <YouTube URL | search words>` queues a track (any URL yt-dlp supports works) and plays it in the voice channel you are in. `skip` skips the current track, `pause` / `resume` control playback, `stop` clears the queue and leaves, and `queue` (or `np` / `list`, or no arguments) shows what is playing and up next. Anyone can use it, but you must be in the music's voice channel to control it. If your channel is bridged, the music plays on both platforms; the bot refuses when it is bridging a different channel in this server.",
+            usageArgs: [
+                '<YouTube URL | search words> | skip | stop | pause | resume | queue',
+            ],
+        },
+    },
+    {
         name: 'role',
         summary:
             'Maps a Fluxer member to a Discord user and copies their matching roles.',

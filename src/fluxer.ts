@@ -74,6 +74,8 @@ import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyn
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 import IdentityFluxerCommandHandler from './commands/fluxer/handlers/IdentityFluxerCommandHandler';
 import { instagramVideoOptions, type BotConfig } from './config/BotConfig';
+import MusicFluxerCommandHandler from './commands/fluxer/handlers/MusicFluxerCommandHandler';
+import type { MusicController } from './services/music/types';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
 import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
@@ -144,6 +146,7 @@ const startFluxerClient = async ({
     claudeLinesService,
     deployAnnounceService,
     onClientCreated,
+    getMusic,
 }: {
     linkService: LinkService;
     linkProvisioner: LinkProvisioner;
@@ -179,6 +182,8 @@ const startFluxerClient = async ({
      * which must see the gateway from READY onwards.
      */
     onClientCreated?: (client: Client) => void;
+    /** The music controller, or null while music is disabled or not ready. */
+    getMusic?: () => MusicController | null;
 }): Promise<Client> => {
     const clientOptions: ClientOptions = {
         intents: 0,
@@ -350,6 +355,13 @@ const startFluxerClient = async ({
         'voice',
         new VoiceFluxerCommandHandler(client, linkService, linkProvisioner)
     );
+    const musicHandler = new MusicFluxerCommandHandler(
+        client,
+        getMusic ?? (() => null)
+    );
+    for (const name of ['music', 'play', 'p']) {
+        commandRegistry.registerCommand(name, musicHandler);
+    }
     const identityHandler = new IdentityFluxerCommandHandler(
         client,
         linkService,
