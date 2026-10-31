@@ -74,17 +74,30 @@ import CategorySyncService from './services/categorySync/CategorySyncService';
 import ThreadMemberSyncService from './services/threadMemberSync/ThreadMemberSyncService';
 import CategoryFluxerCommandHandler from './commands/fluxer/handlers/CategoryFluxerCommandHandler';
 import IdentityFluxerCommandHandler from './commands/fluxer/handlers/IdentityFluxerCommandHandler';
-import { instagramVideoOptions, type BotConfig } from './config/BotConfig';
+import {
+    instagramVideoOptions,
+    twitterMediaOptions,
+    type BotConfig,
+} from './config/BotConfig';
 import MusicFluxerCommandHandler from './commands/fluxer/handlers/MusicFluxerCommandHandler';
 import type { MusicController } from './services/music/types';
 import VoiceFluxerCommandHandler from './commands/fluxer/handlers/VoiceFluxerCommandHandler';
 import MeowService from './services/meow/MeowService';
 import InstagramVideoService from './services/instagramVideo/InstagramVideoService';
-import { instagramEmbedFields } from './services/instagramVideo/instagramEmbed';
+import {
+    instagramEmbedFields,
+    type InstagramEmbedFields,
+} from './services/instagramVideo/instagramEmbed';
 import {
     findInstagramLinks,
     type InstagramLink,
 } from './services/instagramVideo/instagramLinks';
+import TwitterMediaService from './services/twitter/TwitterMediaService';
+import { twitterEmbedFields } from './services/twitter/twitterEmbed';
+import {
+    findTweetLinks,
+    type TweetLink,
+} from './services/twitter/twitterLinks';
 import ReminderService from './services/reminders/ReminderService';
 import ReminderTimezoneService from './services/reminders/ReminderTimezoneService';
 import TimezoneFluxerCommandHandler from './commands/fluxer/handlers/TimezoneFluxerCommandHandler';
@@ -244,6 +257,9 @@ const startFluxerClient = async ({
     const meowService = new MeowService();
     const instagramVideoService = botConfig.instagram.enabled
         ? new InstagramVideoService(instagramVideoOptions(botConfig))
+        : null;
+    const twitterMediaService = botConfig.twitter.enabled
+        ? new TwitterMediaService(twitterMediaOptions(botConfig))
         : null;
     const messageRelay = new FluxerToDiscordMessageRelay({
         linkService,
@@ -827,13 +843,14 @@ const startFluxerClient = async ({
                 message.channelId
             );
             if (link && link.fluxerWebhookId === message.webhookId) {
-                // A message bridged from Discord: its Instagram links get
-                // the card and media here on Fluxer (issue #52); Discord
-                // keeps the plain link. A history transfer into this link
-                // replays old messages, so those are left alone.
+                // A message bridged from Discord: its Instagram and tweet
+                // links get the card and media here on Fluxer (issues #52,
+                // #56); Discord keeps the plain link. A history transfer into
+                // this link replays old messages, so those are left alone.
                 const job = historyService.getJob(link.id);
                 if (!(job && job.sourcePlatform === 'discord')) {
                     handleInstagramLinks(message);
+                    handleTweetLinks(message);
                 }
                 return;
             }
@@ -1036,6 +1053,7 @@ const startFluxerClient = async ({
             !isShortInvocation
         ) {
             handleInstagramLinks(message);
+            handleTweetLinks(message);
         }
     });
 
@@ -1066,37 +1084,11 @@ const startFluxerClient = async ({
             const post = await service.fetchPost(link);
             if (!post) continue;
             try {
-                const fields = instagramEmbedFields(post);
-                const embed = new EmbedBuilder()
-                    .setURL(fields.url)
-                    .setTitle(fields.title)
-                    .setColor(fields.color)
-                    .setFooter({ text: fields.footer });
-                if (fields.description)
-                    embed.setDescription(fields.description);
-                if (fields.authorName) {
-                    embed.setAuthor({
-                        name: fields.authorName,
-                        url: fields.authorUrl,
-                        iconURL: fields.authorIconUrl,
-                    });
-                }
-                await message.reply(
-                    {
-                        embeds: [embed],
-                        files: post.files.map((file) => ({
-                            name: file.name,
-                            data: file.data,
-                        })),
-                        attachments: post.files.map((file, index) => ({
-                            id: index,
-                            filename: file.name,
-                            flags: post.spoiler
-                                ? MessageAttachmentFlags.IS_SPOILER
-                                : undefined,
-                        })),
-                    },
-                    { ping: false }
+                await replyWithMediaCard(
+                    message,
+                    instagramEmbedFields(post),
+                    post.files,
+                    post.spoiler
                 );
             } catch (error) {
                 logger.error(
@@ -1105,6 +1097,96 @@ const startFluxerClient = async ({
                 );
             }
         }
+    }
+
+    /**
+     * Tweets (issue #56): like {@link handleInstagramLinks}, for tweet links
+     * on twitter.com, x.com and embed-fixer aliases (fixvx.com, ...). With
+     * `twitter.discoverAliases`, tweet-shaped links on unknown sites count
+     * too once the service has checked them against Twitter's own data; sites
+     * it has confirmed are known from then on.
+     */
+    function handleTweetLinks(message: Message): void {
+        if (!twitterMediaService || !message.guildId) return;
+        const links = findTweetLinks(
+            message.content,
+            botConfig.twitter.maxLinksPerMessage,
+            {
+                extraHosts: twitterMediaService.discoveredHosts(),
+                includeUnknownHosts: botConfig.twitter.discoverAliases,
+            }
+        );
+        if (links.length > 0) {
+            void replyWithTweets(twitterMediaService, message, links);
+        }
+    }
+
+    async function replyWithTweets(
+        service: TwitterMediaService,
+        message: Message,
+        links: TweetLink[]
+    ): Promise<void> {
+        for (const link of links) {
+            const post = await service.fetchPost(link);
+            if (!post) continue;
+            try {
+                await replyWithMediaCard(
+                    message,
+                    twitterEmbedFields(post),
+                    post.files,
+                    post.spoiler
+                );
+            } catch (error) {
+                logger.error(
+                    `❌ Failed to post the tweet for ${link.url}:`,
+                    error
+                );
+            }
+        }
+    }
+
+    /** Replies to `message`, without pinging, with a card and the media files attached. */
+    async function replyWithMediaCard(
+        message: Message,
+        fields: InstagramEmbedFields,
+        files: ReadonlyArray<{ name: string; data: Buffer }>,
+        spoiler: boolean
+    ): Promise<void> {
+        const embed = new EmbedBuilder()
+            .setURL(fields.url)
+            .setTitle(fields.title)
+            .setColor(fields.color)
+            .setFooter({ text: fields.footer });
+        if (fields.description) embed.setDescription(fields.description);
+        if (fields.authorName) {
+            embed.setAuthor({
+                name: fields.authorName,
+                url: fields.authorUrl,
+                iconURL: fields.authorIconUrl,
+            });
+        }
+        if (files.length === 0) {
+            // A tweet without media still gets its card.
+            await message.reply({ embeds: [embed] }, { ping: false });
+            return;
+        }
+        await message.reply(
+            {
+                embeds: [embed],
+                files: files.map((file) => ({
+                    name: file.name,
+                    data: file.data,
+                })),
+                attachments: files.map((file, index) => ({
+                    id: index,
+                    filename: file.name,
+                    flags: spoiler
+                        ? MessageAttachmentFlags.IS_SPOILER
+                        : undefined,
+                })),
+            },
+            { ping: false }
+        );
     }
 
     await client.login(FLUXER_TOKEN);

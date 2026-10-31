@@ -198,6 +198,35 @@ instagram:
     # Time limit in seconds for each download, yt-dlp or ffmpeg run.
     timeoutSeconds: 180
 
+twitter:
+    # Reply on Fluxer to public tweet links (twitter.com, x.com and
+    # embed-fixer aliases such as fixvx.com, fixupx.com, fxtwitter.com or
+    # vxtwitter.com) posted in bridged channels and threads, on Fluxer or
+    # bridged in from Discord, with a tweet card (author, text, link) and the
+    # tweet's photos, videos or GIFs attached, taken from Twitter's public
+    # embed data. Videos are re-encoded with ffmpeg when too large; yt-dlp is
+    # the fallback. The reply stays on Fluxer; Discord keeps the plain link.
+    # Links in ||spoilers|| get spoiler files; links in <...> and code spans
+    # are ignored. Protected, deleted or age-restricted tweets are skipped
+    # silently. Needs `ffmpeg` (and `yt-dlp`) on PATH (the Docker image has
+    # them).
+    enabled: true
+    # Also handle links on sites that aren't known aliases but look like a
+    # tweet link (https://<site>/<user>/status/<id>): the link counts when
+    # Twitter's own data says that tweet is by that user, and the site is
+    # then remembered as an alias until restart. Only Twitter is contacted,
+    # never the unknown site.
+    discoverAliases: true
+    # Links handled per message; further links are ignored.
+    maxLinksPerMessage: 3
+    # Largest total upload per reply, in MiB; bigger videos are compressed
+    # and media that don't fit are left out.
+    maxSizeMb: 10
+    # Videos longer than this many seconds are skipped.
+    maxDurationSeconds: 600
+    # Time limit in seconds for each download, yt-dlp or ffmpeg run.
+    timeoutSeconds: 180
+
 reminders:
     # YAGPDB-style reminders: `remindme <time> <message>` pings you back in the
     # channel after the given time (at most 10 years ahead, 25 reminders per

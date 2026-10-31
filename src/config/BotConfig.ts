@@ -186,6 +186,36 @@ export interface BotConfig {
         /** Time limit in seconds for each download, yt-dlp or ffmpeg run. */
         timeoutSeconds: number;
     };
+    twitter: {
+        /**
+         * Reply on Fluxer to public tweet links (twitter.com, x.com and
+         * embed-fixer aliases such as fixvx.com or fxtwitter.com) posted in
+         * bridged channels and threads, on Fluxer or bridged in from Discord,
+         * with a tweet card and the tweet's photos or videos attached, taken
+         * from Twitter's public embed data (yt-dlp as the fallback). The
+         * reply is not bridged; Discord keeps the plain link. Videos are
+         * re-encoded with ffmpeg when too large. See `services/twitter/`.
+         */
+        enabled: boolean;
+        /**
+         * Also treat links on unknown sites shaped like a tweet link
+         * (`/<user>/status/<id>`) as tweets, once Twitter's own data confirms
+         * that tweet is by that user. Confirmed sites are remembered as
+         * aliases until restart. Only Twitter is contacted, never the site.
+         */
+        discoverAliases: boolean;
+        /** Links handled per message; further links are ignored. */
+        maxLinksPerMessage: number;
+        /**
+         * Largest total upload per reply, in MiB (may be fractional). Bigger
+         * videos are compressed to fit; media that don't fit are left out.
+         */
+        maxSizeMb: number;
+        /** Videos longer than this many seconds are skipped. */
+        maxDurationSeconds: number;
+        /** Time limit in seconds for each download, yt-dlp or ffmpeg run. */
+        timeoutSeconds: number;
+    };
     reminders: {
         /**
          * Enable the YAGPDB-style `remindme` / `reminder` commands (issue #9).
@@ -306,6 +336,14 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     meow: { enabled: true },
     instagram: {
         enabled: true,
+        maxLinksPerMessage: 3,
+        maxSizeMb: 10,
+        maxDurationSeconds: 600,
+        timeoutSeconds: 180,
+    },
+    twitter: {
+        enabled: true,
+        discoverAliases: true,
         maxLinksPerMessage: 3,
         maxSizeMb: 10,
         maxDurationSeconds: 600,
@@ -481,7 +519,8 @@ export function mergeBotConfig(
     validateHistoryConfig(config.history);
     validateClaudeRequestsConfig(config.claudeRequests);
     validateBotAvatarConfig(config.botAvatar);
-    validateInstagramConfig(config.instagram);
+    validateMediaConfig('instagram', config.instagram);
+    validateMediaConfig('twitter', config.twitter);
     validateDeployAnnounceConfig(config.deployAnnounce);
 
     return {
@@ -536,24 +575,30 @@ function validateClaudeRequestsConfig(
     }
 }
 
-/** Instagram counts and seconds are positive integers, the size a positive number. */
-function validateInstagramConfig(instagram: BotConfig['instagram']): void {
+/**
+ * Media re-hosting (`instagram`, `twitter`) counts and seconds are positive
+ * integers, the size a positive number.
+ */
+function validateMediaConfig(
+    section: 'instagram' | 'twitter',
+    media: BotConfig['instagram'] | BotConfig['twitter']
+): void {
     for (const key of [
         'maxLinksPerMessage',
         'maxDurationSeconds',
         'timeoutSeconds',
     ] as const) {
-        const value = instagram[key];
+        const value = media[key];
         if (!Number.isInteger(value) || value <= 0) {
             throw new BotConfigError(
-                `Config "instagram.${key}" must be a positive whole number, got ${value}`
+                `Config "${section}.${key}" must be a positive whole number, got ${value}`
             );
         }
     }
-    const { maxSizeMb } = instagram;
+    const { maxSizeMb } = media;
     if (!Number.isFinite(maxSizeMb) || maxSizeMb <= 0) {
         throw new BotConfigError(
-            `Config "instagram.maxSizeMb" must be a positive number, got ${maxSizeMb}`
+            `Config "${section}.maxSizeMb" must be a positive number, got ${maxSizeMb}`
         );
     }
 }
@@ -569,6 +614,25 @@ export function instagramVideoOptions(config: BotConfig): {
     maxConcurrent: number;
 } {
     const { maxSizeMb, maxDurationSeconds, timeoutSeconds } = config.instagram;
+    return {
+        maxBytes: Math.floor(maxSizeMb * 1024 * 1024),
+        maxDurationSeconds,
+        timeoutMs: timeoutSeconds * 1000,
+        maxConcurrent: 2,
+    };
+}
+
+/**
+ * Options for `TwitterMediaService` from the `twitter` section. Two
+ * downloads run at once at most.
+ */
+export function twitterMediaOptions(config: BotConfig): {
+    maxBytes: number;
+    maxDurationSeconds: number;
+    timeoutMs: number;
+    maxConcurrent: number;
+} {
+    const { maxSizeMb, maxDurationSeconds, timeoutSeconds } = config.twitter;
     return {
         maxBytes: Math.floor(maxSizeMb * 1024 * 1024),
         maxDurationSeconds,

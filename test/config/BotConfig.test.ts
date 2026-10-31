@@ -138,6 +138,7 @@ describe('loadBotConfig parsing', () => {
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
             instagram: DEFAULT_BOT_CONFIG.instagram,
+            twitter: DEFAULT_BOT_CONFIG.twitter,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
@@ -173,6 +174,7 @@ describe('loadBotConfig parsing', () => {
             history: DEFAULT_BOT_CONFIG.history,
             meow: DEFAULT_BOT_CONFIG.meow,
             instagram: DEFAULT_BOT_CONFIG.instagram,
+            twitter: DEFAULT_BOT_CONFIG.twitter,
             reminders: DEFAULT_BOT_CONFIG.reminders,
             reactions: DEFAULT_BOT_CONFIG.reactions,
             pins: DEFAULT_BOT_CONFIG.pins,
@@ -413,6 +415,7 @@ describe('DEFAULT_BOT_CONFIG', () => {
             'history',
             'meow',
             'instagram',
+            'twitter',
             'reminders',
             'reactions',
             'pins',
@@ -1139,6 +1142,60 @@ describe('instagram', () => {
         const { unknownKeys } = mergeBotConfig({ instagram: { size: 3 } });
 
         expect(unknownKeys).toEqual(['instagram.size']);
+    });
+});
+
+describe('twitter', () => {
+    it('has the documented defaults', () => {
+        expect(DEFAULT_BOT_CONFIG.twitter).toEqual({
+            enabled: true,
+            discoverAliases: true,
+            maxLinksPerMessage: 3,
+            maxSizeMb: 10,
+            maxDurationSeconds: 600,
+            timeoutSeconds: 180,
+        });
+    });
+
+    it('merges configured values over the defaults', () => {
+        const { config, unknownKeys } = mergeBotConfig({
+            twitter: { discoverAliases: false, maxSizeMb: 24.5 },
+        });
+
+        expect(unknownKeys).toEqual([]);
+        expect(config.twitter).toEqual({
+            enabled: true,
+            discoverAliases: false,
+            maxLinksPerMessage: 3,
+            maxSizeMb: 24.5,
+            maxDurationSeconds: 600,
+            timeoutSeconds: 180,
+        });
+    });
+
+    it.each(['maxLinksPerMessage', 'maxDurationSeconds', 'timeoutSeconds'])(
+        'rejects a zero, negative or fractional %s',
+        (key) => {
+            for (const value of [0, -1, 1.5]) {
+                const attempt = () =>
+                    mergeBotConfig({ twitter: { [key]: value } });
+
+                expect(attempt).toThrow(BotConfigError);
+                expect(attempt).toThrow(`twitter.${key}`);
+            }
+        }
+    );
+
+    it.each([0, -5])('rejects maxSizeMb %j', (value) => {
+        expect(() => mergeBotConfig({ twitter: { maxSizeMb: value } })).toThrow(
+            'twitter.maxSizeMb'
+        );
+    });
+
+    it('rejects a non-boolean discoverAliases', () => {
+        expect(() =>
+            mergeBotConfig({ twitter: { discoverAliases: 'yes' } })
+        ).toThrow('twitter.discoverAliases');
     });
 });
 

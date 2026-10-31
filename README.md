@@ -22,6 +22,7 @@
 - Bridge a Discord voice channel with a Fluxer voice channel (optional, see [Voice](#voice))
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 - Replies on Fluxer to public Instagram post and reel links (including kkinstagram-style redirect links and links bridged from Discord) with an Instagram card and the video or photos attached (see [Instagram posts](#instagram-posts))
+- Does the same for tweets: twitter.com and x.com links, embed-fixer aliases such as fixvx.com or fxtwitter.com, and tweet-shaped links on other alias sites it recognises by itself (see [Tweets](#tweets))
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Copy a Discord server's role icons to the same-named Fluxer roles (see [Role icon transfer](#role-icon-transfer))
@@ -231,6 +232,14 @@ Say `meow`, `mrrp`, `nyah` or `purr` on Fluxer (stretched, repeated or decorated
 ## Instagram posts
 
 When a message containing public Instagram post, reel or tv links lands in a bridged channel or thread on Fluxer, whether a person posted it on Fluxer or it was bridged in from Discord, Bifröst replies to it on Fluxer (without pinging anyone) with an Instagram card (author, caption and a link to the post) and the post's media attached: the video of a reel, the photo of an image post, or the photos and videos of a carousel (up to 10 files). The media comes from Instagram's public embed page, the same data Instagram hands to any website that embeds the post, and is downloaded straight from Instagram's CDN; videos larger than the upload limit are re-encoded with `ffmpeg`. When the embed page has nothing usable, Bifröst falls back to `yt-dlp` for the video. Links to embed-fixer redirect sites (`kkinstagram.com`, `ddinstagram.com`, `vxinstagram.com`, `uuinstagram.com`, `eeinstagram.com`, `instagramez.com`) are treated as the Instagram post they point to. The reply is not bridged: Discord shows the link itself (and its usual preview), Fluxer gets the uploaded media. Messages replayed by a history transfer are skipped, and bots' and other webhooks' messages posted on Fluxer are ignored. Links inside `||spoilers||` get spoiler-tagged files and a spoilered caption; links in `<...>` (embed suppressed) and in code spans are ignored. Private, login- or age-restricted posts and videos longer than the limit are skipped silently: no cookies or logins are used, and bypassing Instagram's access controls is out of scope. Video compression needs `ffmpeg` (and the fallback `yt-dlp`) on `PATH`; the Docker image includes both. Tune or disable it under `instagram` in the [configuration file](#configuration-file).
+
+## Tweets
+
+Tweet links work like [Instagram posts](#instagram-posts): when a message with public tweet links lands in a bridged channel or thread on Fluxer (posted there or bridged in from Discord), Bifröst replies on Fluxer, without pinging anyone, with a tweet card (author, text and a link to the tweet on x.com) and the tweet's photos, videos and GIFs attached (up to 4). The data comes from Twitter's public embed data, the same data embedded tweets on websites use, and the media is downloaded straight from Twitter's CDN; videos larger than the upload limit are re-encoded with `ffmpeg`, and `yt-dlp` is the fallback for the video when the embed data can't be loaded. A tweet without media gets just the card. Links on `twitter.com`, `x.com` and known embed-fixer and front-end sites (`fixvx.com`, `fixupx.com`, `fxtwitter.com`, `vxtwitter.com`, `xcancel.com`, `nitter.net` and others) are treated as the tweet they point to.
+
+Other alias sites are discovered on their own: a link on an unknown site shaped like a tweet link (`https://<site>/<user>/status/<id>`) counts when Twitter's data says tweet `<id>` really is by `<user>`, and the site is then remembered as an alias until the bot restarts. Only Twitter is asked; the unknown site itself is never contacted. Turn this off with `twitter.discoverAliases`.
+
+The reply is not bridged, history-transfer replays are skipped, and links in `||spoilers||`, `<...>` and code spans are handled as for Instagram. Protected, deleted and age-restricted tweets are skipped silently; no logins or cookies are used. Tune or disable it under `twitter` in the [configuration file](#configuration-file).
 
 ## Daily avatar
 
@@ -619,6 +628,12 @@ The bot can also read an **optional** configuration file once at startup. Nothin
 | `instagram.maxSizeMb` | `10` | Largest total upload per reply, in MiB; bigger videos are compressed to fit and photos that don't fit are left out. |
 | `instagram.maxDurationSeconds` | `600` | Videos longer than this are skipped. |
 | `instagram.timeoutSeconds` | `180` | Time limit for each download, `yt-dlp` or `ffmpeg` run. |
+| `twitter.enabled` | `true` | Reply on Fluxer to public tweet links (including fixvx-style aliases) with a tweet card and the media attached. Needs `ffmpeg` to compress videos (`yt-dlp` is the fallback). See [Tweets](#tweets). |
+| `twitter.discoverAliases` | `true` | Also accept tweet-shaped links on unknown sites once Twitter's data confirms the tweet's author; confirmed sites are remembered until restart. |
+| `twitter.maxLinksPerMessage` | `3` | Links handled per message; further links are ignored. |
+| `twitter.maxSizeMb` | `10` | Largest total upload per reply, in MiB; bigger videos are compressed to fit and media that don't fit are left out. |
+| `twitter.maxDurationSeconds` | `600` | Videos longer than this are skipped. |
+| `twitter.timeoutSeconds` | `180` | Time limit for each download, `yt-dlp` or `ffmpeg` run. |
 | `reminders.enabled` | `true` | Enable the `remindme` / `reminder` / `timezone` commands on both platforms. See [Reminders](#reminders). |
 | `reminders.triggerPrefixes` | `["?", "!"]` | Prefixes that run the reminder commands without the bot prefix (`?remindme 1h take a break`). `!b remindme` always works; an empty list disables the shortcuts. Drop `"!"` if other bots in your server use it. |
 | `reactions.enabled` | `true` | Mirror reactions on bridged messages onto the counterpart message, as one reaction from the bot per emoji. Needs **Add Reactions** on both platforms. See [Reactions](#reactions). |
