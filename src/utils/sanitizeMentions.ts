@@ -14,6 +14,12 @@ type MentionResolver = {
      * as real pings; see MentionBridgeService.roleMentionPlaceholder).
      */
     renderRoleMention?: (id: string) => string | null;
+    /**
+     * Optional: a verbatim replacement for a channel mention, used instead
+     * of `#name` when it returns a string (for bridged channels and threads,
+     * mentioned by their counterpart's ID; see ChannelLinkBridge).
+     */
+    renderChannelMention?: (id: string) => string | null;
 };
 
 export function sanitizeMentions(
@@ -43,6 +49,8 @@ export function sanitizeMentions(
 
         if (match.startsWith('<#')) {
             const id = match.replace(/[<#>]/g, '');
+            const rendered = resolver.renderChannelMention?.(id) ?? null;
+            if (rendered !== null) return rendered;
             const channelName = resolver.resolveChannel(id);
             return channelName ? `#${channelName}` : '#unknown-channel';
         }

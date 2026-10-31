@@ -106,12 +106,14 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         message: Message,
         renderUserMention?: (id: string) => string | null,
         renderRoleMention?: (id: string) => string | null,
-        content: string = message.content
+        content: string = message.content,
+        renderChannelMention?: (id: string) => string | null
     ): string {
         return breakMentions(
             sanitizeMentions(content, {
                 renderUserMention,
                 renderRoleMention,
+                renderChannelMention,
                 resolveUser: (id) => {
                     const user = message.client.users.get(id);
                     return user ? user.username : null;
@@ -190,7 +192,16 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         referenced: Message
     ): Promise<ReplyQuote> {
         // sanitizeContent breaks every mention, so the quote never pings.
-        const sanitized = this.sanitizeContent(referenced);
+        const bridged = await this.bridgeChannelLinks('fluxer', [
+            referenced.content,
+        ]);
+        const sanitized = this.sanitizeContent(
+            referenced,
+            undefined,
+            undefined,
+            bridged.texts[0],
+            bridged.renderChannelMention
+        );
         const url = await this.resolveReplyUrl('fluxer', {
             messageId: referenced.id ?? message.messageReference?.messageId,
             guildId:
@@ -232,6 +243,14 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         // Fluxer only reports an @everyone / @here ping when the author was
         // allowed to make it; sanitising breaks every other one.
         const pingsEveryone = message.mentionEveryone === true;
+        // Links to and mentions of bridged channels point at the Discord
+        // side; the forwarded snapshot's text is bridged alongside.
+        const snapshot = message.messageSnapshots?.[0];
+        const bridged = await this.bridgeChannelLinks('fluxer', [
+            message.content,
+            snapshot?.content ?? '',
+        ]);
+        const [ownContent, snapshotContent] = bridged.texts;
         const sanitizedContent = this.sanitizeContent(
             message,
             (id) => {
@@ -247,8 +266,9 @@ export default class FluxerMessageTransformer extends MessageTransformer<
                     : null;
             },
             pingsEveryone
-                ? MentionBridgeService.everyonePlaceholders(message.content)
-                : message.content
+                ? MentionBridgeService.everyonePlaceholders(ownContent)
+                : ownContent,
+            bridged.renderChannelMention
         );
         const emojiReplacedContent = this.replaceEmojis(
             sanitizedContent,
@@ -267,7 +287,6 @@ export default class FluxerMessageTransformer extends MessageTransformer<
         // A forward carries no content of its own: the forwarded text, files
         // and embeds live in its snapshot. Without this the webhook payload
         // is empty and Discord rejects it (50006).
-        const snapshot = message.messageSnapshots?.[0];
         if (snapshot) {
             attachments.push(
                 ...this.buildAttachments(
@@ -284,7 +303,8 @@ export default class FluxerMessageTransformer extends MessageTransformer<
                 message,
                 undefined,
                 undefined,
-                snapshot.content ?? ''
+                snapshotContent,
+                bridged.renderChannelMention
             );
             embeds.unshift(
                 new WebhookEmbed({

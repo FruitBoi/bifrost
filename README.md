@@ -310,6 +310,10 @@ User pings need an identity mapping; role pings need a role with the same name i
 - Editing a bridged message never pings anyone again.
 - Role ping bridging is on by default; turn it off with `roles.bridgeMentions: false` in the [configuration file](#configuration-file) to relay every role mention as plaintext.
 
+### Channel mentions and links
+
+A `<#channel>` mention of a bridged channel or thread is relayed as a mention of its counterpart on the other platform, so it stays clickable there. Links to a bridged channel or thread (`https://discord.com/channels/...` ↔ `https://fluxer.app/channels/...`) are rewritten the same way, and a message link points at the message's bridged copy when there is one. Mentions of channels that are not bridged are relayed as plaintext `#name`, and other links are left as they are. This applies to reply quotes and forwarded messages too.
+
 ### Database migration
 
 Identity mappings ship as migration `00008-user-links`, which adds the `user_links` table (one row per mapped account pair, unique per server link on both the Discord and the Fluxer side). It runs automatically on startup; rolling it back drops the table.

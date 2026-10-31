@@ -104,11 +104,13 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         message: Pick<DiscordMessage, 'content' | 'client' | 'guild'>,
         renderUserMention?: (id: string) => string | null,
         renderRoleMention?: (id: string) => string | null,
-        content: string = message.content
+        content: string = message.content,
+        renderChannelMention?: (id: string) => string | null
     ): string {
         return sanitizeMentions(content, {
             renderUserMention,
             renderRoleMention,
+            renderChannelMention,
             resolveUser: (id) => {
                 const user = message.client.users.cache.get(id);
                 return user ? user.username : null;
@@ -120,11 +122,10 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             },
             resolveChannel: (id) => {
                 const channel = message.client.channels.cache.get(id);
-                return channel
-                    ? channel instanceof TextChannel
-                        ? channel.name
-                        : channel.id
-                    : null;
+                if (!channel) return null;
+                return 'name' in channel && channel.name
+                    ? channel.name
+                    : channel.id;
             },
         });
     }
@@ -239,16 +240,25 @@ export default class DiscordMessageTransformer extends MessageTransformer<
      * Carries a forward's snapshot over: its files and embeds, plus an embed
      * quoting its text (or a bare label when it has none).
      */
-    private addForwardedMessage(
+    private async addForwardedMessage(
         message: DiscordMessage,
         snapshot: MessageSnapshot,
         attachments: WebhookAttachment[],
         embeds: WebhookEmbed[]
-    ): void {
+    ): Promise<void> {
         attachments.push(...this.buildAttachments(snapshot));
         embeds.push(...this.buildRichEmbeds(snapshot));
 
-        const content = this.sanitizeContent(snapshot);
+        const bridged = await this.bridgeChannelLinks('discord', [
+            snapshot.content ?? '',
+        ]);
+        const content = this.sanitizeContent(
+            snapshot,
+            undefined,
+            undefined,
+            bridged.texts[0],
+            bridged.renderChannelMention
+        );
         if (content && content.trim() !== '') {
             const author = snapshot.author;
             embeds.unshift(
@@ -284,13 +294,15 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         referencedMessage: DiscordMessage
     ): Promise<ReplyQuote> {
         // The quote may end up in the content, so it must never ping.
+        const bridged = await this.bridgeChannelLinks('discord', [
+            referencedMessage.content ?? '',
+        ]);
         const sanitized = this.sanitizeContent(
             referencedMessage,
             undefined,
             undefined,
-            MentionBridgeService.breakEveryoneMentions(
-                referencedMessage.content ?? ''
-            )
+            MentionBridgeService.breakEveryoneMentions(bridged.texts[0]),
+            bridged.renderChannelMention
         );
         const url = await this.resolveReplyUrl('discord', {
             messageId: referencedMessage.id ?? message.reference?.messageId,
@@ -448,10 +460,18 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             });
         }
         // '' when the text was nothing but the uploaded links.
-        const ownContent =
+        const strippedContent =
             linkedMedia.length > 0
                 ? stripLinkedMediaLinks(message.content, linkedMedia)
                 : message.content;
+        // Links to and mentions of bridged channels point at the Fluxer side.
+        const bridged = await this.bridgeChannelLinks(
+            'discord',
+            linkedMedia.length > 0
+                ? [strippedContent, message.content]
+                : [strippedContent]
+        );
+        const [ownContent, fullContent = ownContent] = bridged.texts;
 
         // Discord only reports an @everyone / @here ping when the author was
         // allowed to make it; any other one is broken so the copy cannot ping.
@@ -478,7 +498,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                     },
                     pingsEveryone
                         ? MentionBridgeService.everyonePlaceholders(content)
-                        : MentionBridgeService.breakEveryoneMentions(content)
+                        : MentionBridgeService.breakEveryoneMentions(content),
+                    bridged.renderChannelMention
                 ),
                 fluxerEmojis
             );
@@ -486,7 +507,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         // The content as it would be without uploading the links, for when
         // those uploads fail.
         const linkFallbackContent =
-            linkedMedia.length > 0 ? renderContent(message.content) : null;
+            linkedMedia.length > 0 ? renderContent(fullContent) : null;
 
         const messageContent = isPollPresent
             ? getPollMessage(
@@ -513,7 +534,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             if (message.flags.has(MessageFlags.HasSnapshot)) {
                 const snapshot = message.messageSnapshots.first();
                 if (snapshot) {
-                    this.addForwardedMessage(
+                    await this.addForwardedMessage(
                         message,
                         snapshot,
                         attachments,

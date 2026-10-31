@@ -40,6 +40,7 @@ import FluxerEntityResolver from './services/entityResolver/FluxerEntityResolver
 import DiscordEntityResolver from './services/entityResolver/DiscordEntityResolver';
 import DiscordMessageTransformer from './services/messageTransformer/DiscordMessageTransformer';
 import ReplyLinkResolver from './services/replyQuote/ReplyLinkResolver';
+import ChannelLinkBridge from './services/channelLinkBridge/ChannelLinkBridge';
 import MentionBridgeService from './services/mentionBridge/MentionBridgeService';
 import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
@@ -201,7 +202,8 @@ const startDiscordClient = async ({
             },
             bridgeRoleMentions: botConfig.roles.bridgeMentions,
         }),
-        new ReplyLinkResolver(linkService)
+        new ReplyLinkResolver(linkService),
+        new ChannelLinkBridge(linkService, new ReplyLinkResolver(linkService))
     );
     const messageRelay = new DiscordToFluxerMessageRelay({
         linkService,
