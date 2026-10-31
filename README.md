@@ -12,6 +12,7 @@
 - Support for messages, replies, attachments, emojis¹, stickers, embeds, join messages and polls
 - Bridged replies show the replied-to message as a short quote line above the text, like a native reply, and the author's name links to that message on the platform you're reading (its bridged copy, or the original if it was never bridged)
 - Fluxer files too big for a Discord upload (10 MB, or 50/100 MB in servers with boost level 2/3), such as long videos, are bridged as a link that Discord embeds as a playable video instead of failing
+- GIFs sent from Discord's GIF picker (Tenor, Giphy, Klipy links) and pasted Discord CDN gif/video links are uploaded to Fluxer as files instead of bridged as bare links; a lone GIF link is replaced by the file, and if the download fails the link is bridged as before
 - Bridge messages using webhooks
 - Bridge reactions: reacting to a bridged message adds the same emoji to its counterpart on the other platform (see [Reactions](#reactions))
 - Bridge pins: pinning or unpinning a bridged message does the same to its counterpart, and `!b pins sync` copies a channel's existing pins across (see [Pins](#pins))

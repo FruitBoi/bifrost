@@ -17,6 +17,36 @@ import { LinkService } from '../LinkService';
 import MessageTransformer from '../messageTransformer/MessageTransformer';
 import MetricsService from '../MetricsService';
 import ThreadSyncService from '../threadSync/ThreadSyncService';
+import { hasPendingGifLink } from '../linkedMedia/discordLinkedMedia';
+import { toLinkedMediaEmbed } from '../messageTransformer/DiscordMessageTransformer';
+
+type DiscordMessage = OmitPartialGroupDMChannel<Message<boolean>>;
+
+/** Wait between re-fetches of a message whose gif link has not unfurled. */
+const UNFURL_RETRY_DELAY_MS = 1000;
+/** Re-fetches before relaying the message as it is (~3s at most). */
+const UNFURL_MAX_TRIES = 3;
+/**
+ * Only messages this fresh are waited on: Discord unfurls within seconds,
+ * so an older one (history transfer, pins) will not gain its embed.
+ */
+const UNFURL_MAX_AGE_MS = 60_000;
+
+/**
+ * The payload with its media-link uploads dropped and the links put back in
+ * the content: what to send (or queue) when those downloads fail.
+ */
+export function withoutLinkedMedia(
+    payload: WebhookMessageData
+): WebhookMessageData {
+    const { linkFallbackContent, ...rest } = payload;
+    if (!payload.attachments?.some((a) => a.fromLink)) return rest;
+    return {
+        ...rest,
+        content: linkFallbackContent ?? payload.content,
+        attachments: payload.attachments.filter((a) => !a.fromLink),
+    };
+}
 
 /**
  * System messages emitted alongside thread creation, and "X pinned a
@@ -34,6 +64,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
 > {
     private readonly fluxerEntityResolver: FluxerEntityResolver;
     private readonly threadSyncService: ThreadSyncService;
+    private readonly unfurlRetryDelayMs: number;
 
     constructor({
         linkService,
@@ -44,6 +75,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         messageCountService,
         fluxerEntityResolver,
         threadSyncService,
+        unfurlRetryDelayMs = UNFURL_RETRY_DELAY_MS,
     }: {
         linkService: LinkService;
         webhookService: WebhookService;
@@ -56,6 +88,8 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         messageCountService?: MessageCountService;
         fluxerEntityResolver: FluxerEntityResolver;
         threadSyncService: ThreadSyncService;
+        /** Wait between re-fetches while a gif link is unfurling; tests pass 0. */
+        unfurlRetryDelayMs?: number;
     }) {
         super({
             linkService,
@@ -67,6 +101,49 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
         });
         this.fluxerEntityResolver = fluxerEntityResolver;
         this.threadSyncService = threadSyncService;
+        this.unfurlRetryDelayMs = unfurlRetryDelayMs;
+    }
+
+    protected sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private static hasPendingGif(message: DiscordMessage): boolean {
+        return hasPendingGifLink(
+            message.content ?? '',
+            (message.embeds ?? []).map(toLinkedMediaEmbed)
+        );
+    }
+
+    /**
+     * A GIF-picker link is usually posted before Discord unfurls it (the
+     * gifv embed arrives in a later update), and the media to upload comes
+     * from that embed. While a fresh message still has such a link pending,
+     * re-fetches it a few times; returns the freshest copy, or the original
+     * when fetching fails.
+     */
+    private async awaitGifUnfurl(
+        message: DiscordMessage
+    ): Promise<DiscordMessage> {
+        if (!DiscordToFluxerMessageRelay.hasPendingGif(message)) return message;
+        const age = Date.now() - (message.createdTimestamp ?? Date.now());
+        if (age > UNFURL_MAX_AGE_MS) return message;
+
+        let current = message;
+        for (let attempt = 1; attempt <= UNFURL_MAX_TRIES; attempt++) {
+            await this.sleep(this.unfurlRetryDelayMs);
+            try {
+                current = (await message.fetch(true)) as DiscordMessage;
+            } catch (error) {
+                logger.warn(
+                    `⚠️ Could not re-fetch message ${message.id} for its gif embed:`,
+                    error
+                );
+                return current;
+            }
+            if (!DiscordToFluxerMessageRelay.hasPendingGif(current)) break;
+        }
+        return current;
     }
 
     private async resolveLink(
@@ -95,16 +172,42 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 avatarURL: message.client.user?.avatarURL() || '',
             };
         }
+        const fresh = await this.awaitGifUnfurl(message);
         const fluxerEmojis = await this.fluxerEntityResolver.fetchEmojis(
             guildLink.fluxerGuildId
         );
         return this.getMessageTransformer().transformMessage(
-            message,
+            fresh,
             fluxerEmojis
         );
     }
 
+    /**
+     * Sends the payload; when that fails and it uploads media downloaded from
+     * links, retries once with the links instead (live relays, history
+     * transfers and pins alike). A Fluxer API block is not retried.
+     */
     public async sendPayload(
+        link: ChannelLink,
+        payload: WebhookMessageData
+    ): Promise<{ messageId: string }> {
+        try {
+            return await this.sendToFluxer(link, payload);
+        } catch (error) {
+            if (
+                !payload.attachments?.some((a) => a.fromLink) ||
+                isFluxerApiBlockError(error)
+            )
+                throw error;
+            logger.warn(
+                '⚠️ Uploading linked gif/video media to Fluxer failed, sending the links instead:',
+                error
+            );
+            return this.sendToFluxer(link, withoutLinkedMedia(payload));
+        }
+    }
+
+    private async sendToFluxer(
         link: ChannelLink,
         payload: WebhookMessageData
     ): Promise<{ messageId: string }> {
@@ -149,6 +252,8 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
 
         // Build payload before attempting send so it can be queued on failure
         const msg = await this.buildPayload(message, guildLink);
+        // Queued retries must never depend on downloading linked media.
+        const fallback = withoutLinkedMedia(msg);
 
         if (isFluxerApiBlocked()) {
             logger.debug(
@@ -158,7 +263,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg, sourceAuthorId, {
+                toSerializable(fallback, sourceAuthorId, {
                     uncounted: message.type === MessageType.UserJoin,
                 })
             );
@@ -196,7 +301,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
                 'discord_to_fluxer',
                 linkedChannel.id,
                 message.id,
-                toSerializable(msg, sourceAuthorId, {
+                toSerializable(fallback, sourceAuthorId, {
                     uncounted: message.type === MessageType.UserJoin,
                 })
             );

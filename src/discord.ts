@@ -721,8 +721,27 @@ const startDiscordClient = async ({
         });
     }
 
-    client.on(Events.MessageUpdate, async (_oldMessage, newMessage) => {
+    client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
         if (newMessage.webhookId) return;
+        // Discord's own link unfurls arrive as updates that only add
+        // non-rich embeds; re-relaying those changes nothing on Fluxer. (A
+        // real text edit is re-transformed with isEdit, which keeps gif/video
+        // links in the content rather than re-uploading them.)
+        const richEmbeds = (message: typeof newMessage) =>
+            JSON.stringify(
+                message.embeds
+                    .filter((e) => e.data.type === 'rich')
+                    .map((e) => e.data)
+            );
+        if (
+            !oldMessage.partial &&
+            oldMessage.content === newMessage.content &&
+            // Attachment objects are rebuilt on every update; compare ids.
+            [...oldMessage.attachments.keys()].join() ===
+                [...newMessage.attachments.keys()].join() &&
+            richEmbeds(oldMessage) === richEmbeds(newMessage)
+        )
+            return;
 
         const linkedMessage =
             await linkService.getMessageLinkByDiscordMessageId(newMessage.id);

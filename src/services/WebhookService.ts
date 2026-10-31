@@ -29,6 +29,11 @@ export type WebhookAttachment = {
     spoiler?: boolean;
     /** File size in bytes, when known; used to keep uploads within Discord's limit. */
     size?: number;
+    /**
+     * Media downloaded from a gif/video link in the content rather than a
+     * real upload; dropped (with the link put back) when the upload fails.
+     */
+    fromLink?: boolean;
 };
 
 export type WebhookMessageData = {
@@ -37,6 +42,12 @@ export type WebhookMessageData = {
     avatarURL: string;
     attachments?: WebhookAttachment[];
     embeds?: WebhookEmbed[];
+    /**
+     * The content with the media links kept, used instead of `content` when
+     * the `fromLink` attachments cannot be uploaded. Only set when there are
+     * such attachments.
+     */
+    linkFallbackContent?: string;
     /**
      * User ids that the relayed message must really ping. Content already
      * carries the matching `<@id>` mentions; this whitelists them for the

@@ -20,10 +20,33 @@ import MentionBridgeService, {
 import {
     applyReplyQuote,
     createReplyQuote,
+    prependReplyQuote,
     ReplyQuote,
 } from '../replyQuote/replyQuote';
+import {
+    findLinkedMedia,
+    LinkedMediaEmbed,
+    MAX_LINKED_MEDIA,
+    stripLinkedMediaLinks,
+} from '../linkedMedia/discordLinkedMedia';
 
 type DiscordMessage = OmitPartialGroupDMChannel<Message<boolean>>;
+
+/** Most files Fluxer accepts on one message. */
+const MAX_ATTACHMENTS = 10;
+
+/** The fields of a discord.js embed that linked-media detection reads. */
+export function toLinkedMediaEmbed(
+    embed: DiscordMessage['embeds'][number]
+): LinkedMediaEmbed {
+    return {
+        type: embed.data.type,
+        url: embed.url,
+        video: embed.video,
+        image: embed.image,
+        thumbnail: embed.thumbnail,
+    };
+}
 
 export default class DiscordMessageTransformer extends MessageTransformer<
     DiscordMessage,
@@ -292,6 +315,31 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         });
     }
 
+    /**
+     * The final content: mention placeholders restored, reply pings
+     * prepended, then the reply quote above it all. Without `embeds` (the
+     * link fallback) a quote that does not fit as a line is left out rather
+     * than added as an embed.
+     */
+    private composeContent(
+        rawContent: string,
+        mentionUserIds: string[],
+        replyQuote: ReplyQuote | null,
+        embeds: WebhookEmbed[] | null
+    ): string {
+        const restored =
+            MentionBridgeService.restoreMentionPlaceholders(rawContent);
+        const content =
+            mentionUserIds.length > 0
+                ? MentionBridgeService.applyMentions(restored, mentionUserIds)
+                : restored;
+        // Last, so the quote sits above reply pings and the text.
+        if (!replyQuote) return content;
+        return embeds
+            ? applyReplyQuote(content, replyQuote, embeds)
+            : (prependReplyQuote(content, replyQuote.line) ?? content);
+    }
+
     private buildResult(
         message: DiscordMessage,
         rawContent: string,
@@ -300,7 +348,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         allMentionUserIds: string[],
         allMentionRoleIds: string[],
         mentionEveryone: boolean,
-        replyQuote: ReplyQuote | null = null
+        replyQuote: ReplyQuote | null = null,
+        rawLinkFallbackContent: string | null = null
     ): WebhookMessageData {
         // Mapped direct mentions sit in the content as placeholders until now
         // so that sanitising could not touch them; reply pings are prepended.
@@ -308,24 +357,58 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         // mentions stay inline where they were written.
         const mentionUserIds = [...new Set(allMentionUserIds)];
         const mentionRoleIds = [...new Set(allMentionRoleIds)];
-        const restored =
-            MentionBridgeService.restoreMentionPlaceholders(rawContent);
-        let content =
-            mentionUserIds.length > 0
-                ? MentionBridgeService.applyMentions(restored, mentionUserIds)
-                : restored;
-        // Last, so the quote sits above reply pings and the text.
-        if (replyQuote) content = applyReplyQuote(content, replyQuote, embeds);
+        const content = this.composeContent(
+            rawContent,
+            mentionUserIds,
+            replyQuote,
+            embeds
+        );
+        const linkFallbackContent =
+            rawLinkFallbackContent !== null
+                ? this.composeContent(
+                      rawLinkFallbackContent,
+                      mentionUserIds,
+                      replyQuote,
+                      null
+                  )
+                : null;
         return {
             content,
             username: message.author.username,
             avatarURL: message.author.avatarURL() || '',
             attachments: attachments,
             embeds,
+            ...(linkFallbackContent !== null ? { linkFallbackContent } : {}),
             ...(mentionUserIds.length > 0 ? { mentionUserIds } : {}),
             ...(mentionRoleIds.length > 0 ? { mentionRoleIds } : {}),
             ...(mentionEveryone ? { mentionEveryone } : {}),
         };
+    }
+
+    /**
+     * Gif/video links in the message's own content (a GIF-picker link, or a
+     * direct Discord CDN media link, which expires) to upload as files, after
+     * the real attachments and within Fluxer's per-message file limit. Not
+     * for edits (the Fluxer copy's files cannot change), forwards or polls.
+     */
+    private findLinkedMediaAttachments(
+        message: DiscordMessage,
+        attachmentCount: number,
+        isPoll: boolean,
+        options: TransformOptions
+    ): ReturnType<typeof findLinkedMedia> {
+        if (options.isEdit || isPoll) return [];
+        if (message.flags.has(MessageFlags.HasSnapshot)) return [];
+        const room = Math.min(
+            MAX_LINKED_MEDIA,
+            MAX_ATTACHMENTS - attachmentCount
+        );
+        if (room <= 0 || !message.content) return [];
+        return findLinkedMedia(
+            message.content,
+            (message.embeds ?? []).map(toLinkedMediaEmbed),
+            room
+        ).slice(0, room);
     }
 
     public async transformMessage(
@@ -341,39 +424,69 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         const counterpartByRoleId = new Map(
             roleMentions.map((m) => [m.id, m.counterpartId])
         );
-        // Discord only reports an @everyone / @here ping when the author was
-        // allowed to make it; any other one is broken so the copy cannot ping.
-        const pingsEveryone = message.mentions.everyone;
-        const sanitizedContent = this.sanitizeContent(
-            message,
-            (id) => {
-                const counterpartId = counterpartByMentionId.get(id);
-                return counterpartId
-                    ? MentionBridgeService.mentionPlaceholder(counterpartId)
-                    : null;
-            },
-            (id) => {
-                const counterpartId = counterpartByRoleId.get(id);
-                return counterpartId
-                    ? MentionBridgeService.roleMentionPlaceholder(counterpartId)
-                    : null;
-            },
-            pingsEveryone
-                ? MentionBridgeService.everyonePlaceholders(message.content)
-                : MentionBridgeService.breakEveryoneMentions(message.content)
-        );
-        const emojiReplacedContent = this.replaceEmojis(
-            sanitizedContent,
-            fluxerEmojis
-        );
-
         const attachments = this.buildAttachments(message);
 
-        const isPollPresent =
+        const isPollPresent = !!(
             message.poll &&
             message.poll.question.text &&
             message.poll.answers.some((a) => a.text) &&
-            message.poll.expiresTimestamp;
+            message.poll.expiresTimestamp
+        );
+
+        const linkedMedia = this.findLinkedMediaAttachments(
+            message,
+            attachments.length,
+            isPollPresent,
+            options
+        );
+        for (const media of linkedMedia) {
+            attachments.push({
+                url: media.url,
+                name: media.name,
+                spoiler: media.spoiler,
+                fromLink: true,
+            });
+        }
+        // '' when the text was nothing but the uploaded links.
+        const ownContent =
+            linkedMedia.length > 0
+                ? stripLinkedMediaLinks(message.content, linkedMedia)
+                : message.content;
+
+        // Discord only reports an @everyone / @here ping when the author was
+        // allowed to make it; any other one is broken so the copy cannot ping.
+        const pingsEveryone = message.mentions.everyone;
+        const renderContent = (content: string): string =>
+            this.replaceEmojis(
+                this.sanitizeContent(
+                    message,
+                    (id) => {
+                        const counterpartId = counterpartByMentionId.get(id);
+                        return counterpartId
+                            ? MentionBridgeService.mentionPlaceholder(
+                                  counterpartId
+                              )
+                            : null;
+                    },
+                    (id) => {
+                        const counterpartId = counterpartByRoleId.get(id);
+                        return counterpartId
+                            ? MentionBridgeService.roleMentionPlaceholder(
+                                  counterpartId
+                              )
+                            : null;
+                    },
+                    pingsEveryone
+                        ? MentionBridgeService.everyonePlaceholders(content)
+                        : MentionBridgeService.breakEveryoneMentions(content)
+                ),
+                fluxerEmojis
+            );
+        const emojiReplacedContent = renderContent(ownContent);
+        // The content as it would be without uploading the links, for when
+        // those uploads fail.
+        const linkFallbackContent =
+            linkedMedia.length > 0 ? renderContent(message.content) : null;
 
         const messageContent = isPollPresent
             ? getPollMessage(
@@ -436,7 +549,8 @@ export default class DiscordMessageTransformer extends MessageTransformer<
             mentionUserIds,
             mentionRoleIds,
             mentionEveryone,
-            replyQuote
+            replyQuote,
+            linkFallbackContent
         );
     }
 }

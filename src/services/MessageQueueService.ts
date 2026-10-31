@@ -25,6 +25,7 @@ export type SerializableWebhookMessageData = {
     attachments?: WebhookAttachment[];
     embeds?: SerializableEmbed[];
     mentionUserIds?: string[];
+    linkFallbackContent?: string;
     /**
      * Author of the original message on the source platform (implied by the
      * entry's direction), so the link created on drain can be ping-resolved.
