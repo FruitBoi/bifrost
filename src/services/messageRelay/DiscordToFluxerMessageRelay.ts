@@ -200,7 +200,7 @@ export default class DiscordToFluxerMessageRelay extends MessageRelay<
             )
                 throw error;
             logger.warn(
-                '⚠️ Uploading linked gif/video media to Fluxer failed, sending the links instead:',
+                '⚠️ Uploading linked media to Fluxer failed, sending the links instead:',
                 error
             );
             return this.sendToFluxer(link, withoutLinkedMedia(payload));

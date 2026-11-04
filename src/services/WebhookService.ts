@@ -30,8 +30,9 @@ export type WebhookAttachment = {
     /** File size in bytes, when known; used to keep uploads within Discord's limit. */
     size?: number;
     /**
-     * Media downloaded from a gif/video link in the content rather than a
-     * real upload; dropped (with the link put back) when the upload fails.
+     * Media downloaded from a gif/video/attachment link in the content rather
+     * than a real upload; dropped (with the link put back) when the upload
+     * fails.
      */
     fromLink?: boolean;
 };

@@ -1,13 +1,15 @@
 /**
- * Finds GIFs and videos a Discord message only links to (issue #53), so the
- * bridge can download them and upload the file to Fluxer instead of relaying
- * a bare link.
+ * Finds GIFs, videos and Discord attachments a Discord message only links to
+ * (issues #53 and #57), so the bridge can download them and upload the file
+ * to Fluxer instead of relaying a bare link.
  *
  * Two shapes are recognised:
  * - Direct links to Discord's CDN (`cdn.discordapp.com`,
- *   `media.discordapp.net`) ending in `.gif`/`.mp4`/`.webm`/`.mov`. These
- *   expire, so relaying the link alone breaks after a while. Other hosts are
- *   never fetched without an embed vouching for them.
+ *   `media.discordapp.net`): any attachment file (`/attachments/...` or
+ *   `/ephemeral-attachments/...`, e.g. an image or a PDF; issue #57), and
+ *   other paths ending in `.gif`/`.mp4`/`.webm`/`.mov`. These expire and
+ *   Fluxer does not embed them, so relaying the link alone shows nothing
+ *   useful. Other hosts are never fetched without an embed vouching for them.
  * - Links Discord unfurled into a GIF or video embed: `gifv` embeds from the
  *   GIF picker (Tenor, Giphy, Klipy), `video` embeds whose video is a real
  *   file (not a YouTube-style player page) and `image` embeds of a `.gif`.
@@ -50,6 +52,10 @@ const DISCORD_CDN_HOSTS = new Set([
 const MEDIA_EXT_RE = /\.(gif|mp4|webm|mov)$/i;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov)$/i;
 const GIF_EXT_RE = /\.gif$/i;
+
+/** Paths of uploaded files on Discord's CDN: `/attachments/<channel>/<id>/<name>`. */
+const CDN_ATTACHMENT_PATH_RE =
+    /^\/(?:ephemeral-)?attachments\/\d+\/\d+\/[^/]+$/i;
 
 /**
  * Tenor's mp4 rendition: `media.tenor.com/<id>AAAPo/<slug>.mp4`. The last
@@ -295,21 +301,22 @@ function embedMedia(
     }
 }
 
-/** True for a direct media link on Discord's CDN. */
-function isDiscordCdnMedia(link: string): boolean {
+/** True for a direct attachment or media link on Discord's CDN. */
+function isDiscordCdnFile(link: string): boolean {
     const parsed = parseUrl(link);
     return (
         parsed !== null &&
         DISCORD_CDN_HOSTS.has(parsed.hostname.toLowerCase()) &&
-        MEDIA_EXT_RE.test(parsed.pathname)
+        (CDN_ATTACHMENT_PATH_RE.test(parsed.pathname) ||
+            MEDIA_EXT_RE.test(parsed.pathname))
     );
 }
 
 /**
- * GIFs and videos linked in `content` that can be downloaded and uploaded as
- * files, in content order, deduplicated by link, at most `maxItems`.
- * `embeds` are the message's embeds; a link only counts through an embed
- * whose `url` matches it, except direct Discord CDN media links.
+ * GIFs, videos and Discord CDN attachments linked in `content` that can be
+ * downloaded and uploaded as files, in content order, deduplicated by link,
+ * at most `maxItems`. `embeds` are the message's embeds; a link only counts
+ * through an embed whose `url` matches it, except direct Discord CDN links.
  */
 export function findLinkedMedia(
     content: string,
@@ -322,11 +329,12 @@ export function findLinkedMedia(
     for (const { link, spoiler } of contentLinks(content)) {
         if (media.length >= maxItems) break;
 
-        if (isDiscordCdnMedia(link)) {
+        if (isDiscordCdnFile(link)) {
+            // The file name as uploaded, so any file type keeps it.
             media.push({
                 link,
                 url: link,
-                name: fileName(link, link, 'video.mp4'),
+                name: lastSegment(link) || 'attachment',
                 spoiler,
             });
             continue;
@@ -348,7 +356,8 @@ export function findLinkedMedia(
 
 /**
  * `content` with nothing left when it is only the `media` links (plus
- * whitespace and spoiler bars), since Discord hides a lone GIF link too.
+ * whitespace and spoiler bars), since Discord hides a lone GIF or
+ * attachment link too.
  * Any other content is returned unchanged.
  */
 export function stripLinkedMediaLinks(

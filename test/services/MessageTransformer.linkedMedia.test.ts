@@ -148,4 +148,23 @@ describe('DiscordMessageTransformer linked gif/video media', () => {
         expect(result.content).toBe(TENOR_LINK);
         expect(result.linkFallbackContent).toBeUndefined();
     });
+
+    it('uploads a lone Discord CDN image link as a file (#57)', async () => {
+        const link =
+            'https://cdn.discordapp.com/attachments/1/2/screenshot.png?ex=6700&is=6600&hm=abc&';
+        const result = await new DiscordMessageTransformer().transformMessage(
+            fakeDiscordMessage({ content: link, embeds: [] }) as never
+        );
+
+        expect(result.attachments).toEqual([
+            {
+                url: link,
+                name: 'screenshot.png',
+                spoiler: false,
+                fromLink: true,
+            },
+        ]);
+        expect(result.content).toBe('');
+        expect(result.linkFallbackContent).toBe(link);
+    });
 });

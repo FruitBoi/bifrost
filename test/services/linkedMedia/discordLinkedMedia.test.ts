@@ -152,10 +152,38 @@ describe('findLinkedMedia', () => {
     it('only trusts Discord hosts for direct links', () => {
         expect(
             findLinkedMedia(
-                'https://cdn.discordapp.com.evil.example/a.mp4 https://example.com/b.mp4 https://cdn.discordapp.com/attachments/1/2/doc.pdf',
+                'https://cdn.discordapp.com.evil.example/attachments/1/2/a.png https://example.com/b.mp4 https://example.com/attachments/1/2/c.png',
                 []
             )
         ).toEqual([]);
+    });
+
+    it('uploads Discord CDN attachment links of any file type', () => {
+        const png =
+            'https://cdn.discordapp.com/attachments/1/2/image.png?ex=6700&is=6600&hm=abc123&';
+        expect(findLinkedMedia(png, [])).toEqual([
+            { link: png, url: png, name: 'image.png', spoiler: false },
+        ]);
+        const pdf = 'https://cdn.discordapp.com/attachments/1/2/doc.pdf';
+        expect(findLinkedMedia(`see ${pdf}`, [])[0]?.name).toBe('doc.pdf');
+        const proxied =
+            'https://media.discordapp.net/attachments/1/2/photo.JPG?width=400&height=300';
+        expect(findLinkedMedia(proxied, [])[0]?.name).toBe('photo.JPG');
+        const ephemeral =
+            'https://cdn.discordapp.com/ephemeral-attachments/1/2/notes';
+        expect(findLinkedMedia(ephemeral, [])[0]?.name).toBe('notes');
+    });
+
+    it('leaves other Discord CDN paths alone unless they are gif/video', () => {
+        expect(
+            findLinkedMedia(
+                'https://cdn.discordapp.com/emojis/123.png https://cdn.discordapp.com/avatars/1/abc.png https://cdn.discordapp.com/attachments/1/2/',
+                []
+            )
+        ).toEqual([]);
+        expect(
+            findLinkedMedia('https://cdn.discordapp.com/emojis/123.gif', [])
+        ).toHaveLength(1);
     });
 
     it('skips links wrapped in <...>', () => {
