@@ -552,9 +552,12 @@ const startFluxerClient = async ({
         // The Fluxer client is re-created on restart; registering the
         // deliverer on every Ready replaces the one bound to the old client.
         if (botConfig.reminders.enabled) {
+            // Delivered reminders are bridged to Discord, pinging the
+            // user's linked account (issue #59). The `remindme` invocations
+            // and the "Reminder set" replies stay on Fluxer.
             reminderService.setDeliverer(
                 'fluxer',
-                new FluxerReminderDeliverer(client)
+                new FluxerReminderDeliverer(client, bridgeCommandMessage)
             );
         }
         claudeRequestNotifyService?.setNotifier(

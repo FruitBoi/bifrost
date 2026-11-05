@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Client, EmbedBuilder, ErrorCodes, FluxerError } from '@fluxerjs/core';
+import {
+    Client,
+    EmbedBuilder,
+    ErrorCodes,
+    FluxerError,
+    Message,
+} from '@fluxerjs/core';
 import FluxerReminderDeliverer, {
     isPermanentFluxerDeliveryError,
+    withReminderGuild,
 } from '../../../src/services/reminders/FluxerReminderDeliverer';
 import { ReminderDeliveryError } from '../../../src/services/reminders/ReminderDeliverer';
 import { Reminder } from '../../../src/db/entities/Reminder';
@@ -109,6 +116,32 @@ describe('FluxerReminderDeliverer', () => {
         await expect(deliverer.deliver(reminder)).rejects.toBe(cause);
     });
 
+    it('hands the posted message to onDelivered, in the reminder guild', async () => {
+        send.mockResolvedValueOnce({ id: 'msg-1', guildId: null });
+        const onDelivered = vi.fn().mockResolvedValue(undefined);
+        const client = { channels: { send } } as unknown as Client;
+        await new FluxerReminderDeliverer(client, onDelivered).deliver(
+            reminder
+        );
+
+        expect(onDelivered).toHaveBeenCalledTimes(1);
+        const [sent] = onDelivered.mock.calls[0] as [
+            { id: string; guildId: string },
+        ];
+        expect(sent.id).toBe('msg-1');
+        expect(sent.guildId).toBe('guild-1');
+    });
+
+    it('does not call onDelivered when sending fails', async () => {
+        send.mockRejectedValueOnce(new Error('ECONNRESET'));
+        const onDelivered = vi.fn();
+        const client = { channels: { send } } as unknown as Client;
+        await expect(
+            new FluxerReminderDeliverer(client, onDelivered).deliver(reminder)
+        ).rejects.toThrow('ECONNRESET');
+        expect(onDelivered).not.toHaveBeenCalled();
+    });
+
     it.each([503, 429])('rethrows an HTTP %i unchanged', async (status) => {
         const cause = new FakeApiError(
             status,
@@ -134,5 +167,28 @@ describe('isPermanentFluxerDeliveryError', () => {
         ['nope', false],
     ])('classifies %o as permanent=%s', (err, expected) => {
         expect(isPermanentFluxerDeliveryError(err)).toBe(expected);
+    });
+});
+
+describe('withReminderGuild', () => {
+    it('keeps a message that already has a guild ID', () => {
+        const sent = {
+            id: 'msg-1',
+            guildId: 'other-guild',
+        } as unknown as Message;
+        expect(withReminderGuild(sent, reminder)).toBe(sent);
+    });
+
+    it("fills in the reminder's guild, keeping the message's other fields", () => {
+        const sent = {
+            id: 'msg-1',
+            guildId: null,
+            content: 'hi',
+        } as unknown as Message;
+        const result = withReminderGuild(sent, reminder);
+        expect(result.guildId).toBe('guild-1');
+        expect(result.id).toBe('msg-1');
+        expect(result.content).toBe('hi');
+        expect(sent.guildId).toBeNull();
     });
 });

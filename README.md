@@ -387,6 +387,8 @@ The short `?` and `!` forms work for every reminder command and alias below (`?r
 - `reminder delete -a` — deletes all of your reminders.
 - `timezone [zone | clear]` (alias `tz`) — shows your time zone and the current time there, sets it (`?timezone Europe/London`) or removes it (`?timezone clear`). Dates and times in `remindme` are read in this zone.
 
+When a reminder set on **Fluxer** goes off in a linked channel or thread, the reminder message is also bridged to Discord, and it pings your linked Discord account (if you have none, your name is shown as plain text). The `remindme` messages themselves and the bot's "Reminder set" replies are not bridged. Reminders set on Discord stay on Discord.
+
 ### Duration syntax
 
 The time is parsed like YAGPDB does it: a sequence of `<number><unit>` parts written together, such as `90`, `45s`, `10m`, `1h30min`, `1day3h`, `2w`, `1mo` or `1y`. Units are matched by their first letters:

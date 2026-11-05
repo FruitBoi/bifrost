@@ -1,4 +1,4 @@
-import { Client, EmbedBuilder } from '@fluxerjs/core';
+import { Client, EmbedBuilder, Message } from '@fluxerjs/core';
 import { Reminder } from '../../db/entities/Reminder';
 import { EmbedColors } from '../../utils/embeds';
 import { ReminderDeliverer, ReminderDeliveryError } from './ReminderDeliverer';
@@ -57,15 +57,34 @@ export function isPermanentFluxerDeliveryError(err: unknown): boolean {
 }
 
 /**
+ * The sent message as seen from the reminder's guild. A message returned by
+ * `channels.send` may lack `guild_id`, and without it the bridge cannot map
+ * the `<@user>` ping to the user's Discord account.
+ */
+export function withReminderGuild(sent: Message, reminder: Reminder): Message {
+    if (sent.guildId) return sent;
+    return Object.create(sent, {
+        guildId: { value: reminder.guildId, enumerable: true },
+    }) as Message;
+}
+
+/**
  * Posts due reminders into their Fluxer channel: a line pinging the user
  * (only that user may be mentioned) and an embed carrying the message.
+ * `onDelivered` gets the posted message (issue #59 bridges it to Discord,
+ * pinging the user's linked Discord account); it must not throw, since the
+ * reminder has been delivered by then.
  */
 export default class FluxerReminderDeliverer implements ReminderDeliverer {
-    constructor(private readonly client: Client) {}
+    constructor(
+        private readonly client: Client,
+        private readonly onDelivered?: (sent: Message) => Promise<void>
+    ) {}
 
     async deliver(reminder: Reminder): Promise<void> {
+        let sent: Message;
         try {
-            await this.client.channels.send(reminder.channelId, {
+            sent = await this.client.channels.send(reminder.channelId, {
                 content: `**Reminder** for <@${reminder.userId}>`,
                 embeds: [
                     new EmbedBuilder()
@@ -86,5 +105,6 @@ export default class FluxerReminderDeliverer implements ReminderDeliverer {
             }
             throw err;
         }
+        await this.onDelivered?.(withReminderGuild(sent, reminder));
     }
 }
