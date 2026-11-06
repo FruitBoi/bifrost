@@ -28,7 +28,7 @@ function makeChannel(
         isTextBased: () => overrides.isTextBased ?? true,
         isDMBased: () => overrides.isDMBased ?? false,
         isSendable: () => overrides.isSendable ?? true,
-        send: overrides.send ?? vi.fn().mockResolvedValue(undefined),
+        send: overrides.send ?? vi.fn().mockResolvedValue({ id: 'sent-1' }),
     };
 }
 
@@ -56,7 +56,8 @@ describe('DiscordReminderDeliverer', () => {
         const channel = makeChannel();
         const deliverer = makeDeliverer(vi.fn().mockResolvedValue(channel));
 
-        await deliverer.deliver(reminder);
+        // Resolves with the posted message's ID (remembered for snoozing).
+        await expect(deliverer.deliver(reminder)).resolves.toBe('sent-1');
 
         expect(channel.send).toHaveBeenCalledTimes(1);
         const payload = channel.send.mock.calls[0][0];

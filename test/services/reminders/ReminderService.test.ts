@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Reminder, ReminderPlatform } from '../../../src/db/entities/Reminder';
 import {
+    ReminderMessage,
+    ReminderMessageKind,
+} from '../../../src/db/entities/ReminderMessage';
+import { ReminderMessageRepository } from '../../../src/db/repositories/ReminderMessageRepository';
+import {
     CreateReminderData,
     ReminderRepository,
 } from '../../../src/db/repositories/ReminderRepository';
@@ -13,6 +18,7 @@ import ReminderService, {
     MAX_REMINDER_OFFSET_MS,
     MAX_REMINDERS_PER_USER,
     MIN_REMINDER_OFFSET_MS,
+    REMINDER_MESSAGE_RETENTION_MS,
 } from '../../../src/services/reminders/ReminderService';
 
 /** In-memory ReminderRepository with the same ordering as the table. */
@@ -95,17 +101,80 @@ class MemoryReminderRepository implements ReminderRepository {
     }
 }
 
+/** In-memory ReminderMessageRepository; array order is insertion order. */
+class MemoryReminderMessageRepository implements ReminderMessageRepository {
+    rows: ReminderMessage[] = [];
+    failSave = false;
+    failPrune = false;
+
+    async save(data: ReminderMessage) {
+        if (this.failSave) throw new Error('db down');
+        this.rows = this.rows.filter(
+            (r) =>
+                !(
+                    r.platform === data.platform &&
+                    r.messageId === data.messageId
+                )
+        );
+        this.rows.push({ ...data });
+    }
+    async findByMessage(platform: ReminderPlatform, messageId: string) {
+        const row = this.rows.find(
+            (r) => r.platform === platform && r.messageId === messageId
+        );
+        return row ? { ...row } : null;
+    }
+    async findLatest(
+        platform: ReminderPlatform,
+        userId: string,
+        guildId: string,
+        kind: ReminderMessageKind,
+        since: Date
+    ) {
+        let best: ReminderMessage | null = null;
+        for (const r of this.rows) {
+            if (
+                r.platform !== platform ||
+                r.userId !== userId ||
+                r.guildId !== guildId ||
+                r.kind !== kind ||
+                r.createdAt.getTime() < since.getTime()
+            ) {
+                continue;
+            }
+            // >= so a later insertion wins a createdAt tie.
+            if (!best || r.createdAt.getTime() >= best.createdAt.getTime()) {
+                best = r;
+            }
+        }
+        return best ? { ...best } : null;
+    }
+    async deleteOlderThan(before: Date) {
+        if (this.failPrune) throw new Error('db down');
+        const count = this.rows.length;
+        this.rows = this.rows.filter(
+            (r) => r.createdAt.getTime() >= before.getTime()
+        );
+        return count - this.rows.length;
+    }
+}
+
 /** A deliverer that records calls and fails the way it is told to. */
 class FakeDeliverer implements ReminderDeliverer {
     delivered: Reminder[] = [];
     failWith: unknown = null;
     /** When set, deliver() awaits this before finishing. */
     gate: Promise<void> | null = null;
+    /** ID deliver() resolves with; `posted-<reminder id>` by default. */
+    messageId: ((reminder: Reminder) => string | void) | null = null;
 
-    async deliver(reminder: Reminder): Promise<void> {
+    async deliver(reminder: Reminder): Promise<string | void> {
         if (this.gate) await this.gate;
         if (this.failWith) throw this.failWith;
         this.delivered.push(reminder);
+        return this.messageId
+            ? this.messageId(reminder)
+            : `posted-${reminder.id}`;
     }
 }
 
@@ -530,6 +599,188 @@ describe('ReminderService', () => {
             await service.deliverDue();
             expect(repo.findDueCalls).toBe(2);
             expect(discord.delivered.map((r) => r.id)).toEqual([1, 2]);
+        });
+    });
+
+    describe('reminder messages (snooze, issue #58)', () => {
+        let messages: MemoryReminderMessageRepository;
+        let clock: number;
+        let discord: FakeDeliverer;
+
+        beforeEach(() => {
+            messages = new MemoryReminderMessageRepository();
+            clock = NOW;
+            service = new ReminderService(repo, {
+                now: () => clock,
+                messageRepo: messages,
+            });
+            discord = new FakeDeliverer();
+            service.setDeliverer('discord', discord);
+        });
+
+        const record = (
+            overrides: Partial<Parameters<ReminderService['recordMessage']>[0]>
+        ) =>
+            service.recordMessage({
+                platform: 'discord',
+                messageId: 'm1',
+                kind: 'set',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'buy milk',
+                ...overrides,
+            });
+
+        it('records messages with the service clock and finds them by id', async () => {
+            await record({});
+            expect(await service.findMessage('discord', 'm1')).toEqual({
+                platform: 'discord',
+                messageId: 'm1',
+                kind: 'set',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'buy milk',
+                createdAt: new Date(NOW),
+            });
+            expect(await service.findMessage('fluxer', 'm1')).toBeNull();
+            expect(await service.findMessage('discord', 'm2')).toBeNull();
+        });
+
+        it('records the delivered message and still deletes the reminder', async () => {
+            await repo.create({
+                platform: 'discord',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'stretch',
+                dueAt: new Date(NOW - 1000),
+            });
+            await service.deliverDue();
+
+            expect(repo.rows).toEqual([]);
+            expect(await service.findMessage('discord', 'posted-1')).toEqual({
+                platform: 'discord',
+                messageId: 'posted-1',
+                kind: 'delivered',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'stretch',
+                createdAt: new Date(NOW),
+            });
+            expect(
+                await service.lastDelivered('discord', 'u1', 'g1')
+            ).toMatchObject({ messageId: 'posted-1', message: 'stretch' });
+        });
+
+        it('records nothing when the deliverer returns no id', async () => {
+            discord.messageId = () => undefined;
+            await repo.create({
+                platform: 'discord',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'm',
+                dueAt: new Date(NOW - 1000),
+            });
+            await service.deliverDue();
+            expect(repo.rows).toEqual([]);
+            expect(messages.rows).toEqual([]);
+        });
+
+        it('deletes the delivered reminder even when recording fails', async () => {
+            messages.failSave = true;
+            messages.failPrune = true;
+            await repo.create({
+                platform: 'discord',
+                userId: 'u1',
+                guildId: 'g1',
+                channelId: 'c1',
+                message: 'm',
+                dueAt: new Date(NOW - 1000),
+            });
+            await service.deliverDue();
+            expect(discord.delivered).toHaveLength(1);
+            expect(repo.rows).toEqual([]);
+        });
+
+        it('recordMessage never rejects', async () => {
+            messages.failSave = true;
+            await expect(record({})).resolves.toBeUndefined();
+            messages.failSave = false;
+            messages.failPrune = true;
+            await expect(record({})).resolves.toBeUndefined();
+            expect(messages.rows).toHaveLength(1);
+        });
+
+        it('lastDelivered picks the newest delivered row of the user in the guild', async () => {
+            await record({ messageId: 'd1', kind: 'delivered', message: 'a' });
+            clock += 1000;
+            await record({ messageId: 'd2', kind: 'delivered', message: 'b' });
+            // Same timestamp: the later insertion wins.
+            await record({ messageId: 'd3', kind: 'delivered', message: 'c' });
+            clock += 1000;
+            // Newer, but not counted: a "set" reply, another user, guild or
+            // platform.
+            await record({ messageId: 's1', kind: 'set' });
+            await record({ messageId: 'x1', kind: 'delivered', userId: 'u2' });
+            await record({ messageId: 'x2', kind: 'delivered', guildId: 'g2' });
+            await record({
+                messageId: 'x3',
+                kind: 'delivered',
+                platform: 'fluxer',
+            });
+
+            expect(
+                await service.lastDelivered('discord', 'u1', 'g1')
+            ).toMatchObject({ messageId: 'd3', message: 'c' });
+            expect(
+                await service.lastDelivered('fluxer', 'u1', 'g1')
+            ).toMatchObject({ messageId: 'x3' });
+            expect(
+                await service.lastDelivered('discord', 'u9', 'g1')
+            ).toBeNull();
+        });
+
+        it('forgets messages older than the retention window', async () => {
+            await record({ messageId: 'old', kind: 'delivered' });
+            clock += REMINDER_MESSAGE_RETENTION_MS;
+            // Exactly at the edge: still remembered.
+            expect(await service.findMessage('discord', 'old')).not.toBeNull();
+            expect(
+                await service.lastDelivered('discord', 'u1', 'g1')
+            ).toMatchObject({ messageId: 'old' });
+
+            clock += 1;
+            expect(await service.findMessage('discord', 'old')).toBeNull();
+            expect(
+                await service.lastDelivered('discord', 'u1', 'g1')
+            ).toBeNull();
+
+            // The next record prunes the expired row.
+            expect(messages.rows).toHaveLength(1);
+            await record({ messageId: 'new' });
+            expect(messages.rows.map((r) => r.messageId)).toEqual(['new']);
+        });
+
+        it('re-recording a message id replaces it', async () => {
+            await record({ messageId: 'm1', message: 'first' });
+            await record({ messageId: 'm1', message: 'second' });
+            expect(messages.rows).toHaveLength(1);
+            expect(await service.findMessage('discord', 'm1')).toMatchObject({
+                message: 'second',
+            });
+        });
+
+        it('is a no-op without a message repository', async () => {
+            service = new ReminderService(repo, { now: () => NOW });
+            await expect(record({})).resolves.toBeUndefined();
+            expect(await service.findMessage('discord', 'm1')).toBeNull();
+            expect(
+                await service.lastDelivered('discord', 'u1', 'g1')
+            ).toBeNull();
         });
     });
 

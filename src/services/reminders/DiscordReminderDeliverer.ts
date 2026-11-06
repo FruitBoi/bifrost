@@ -70,7 +70,8 @@ function classifyError(
 export default class DiscordReminderDeliverer implements ReminderDeliverer {
     constructor(private readonly client: Client) {}
 
-    public async deliver(reminder: Reminder): Promise<void> {
+    /** Resolves with the ID of the posted message. */
+    public async deliver(reminder: Reminder): Promise<string> {
         let channel;
         try {
             channel = await this.client.channels.fetch(reminder.channelId);
@@ -94,8 +95,9 @@ export default class DiscordReminderDeliverer implements ReminderDeliverer {
             );
         }
 
+        let sent;
         try {
-            await channel.send({
+            sent = await channel.send({
                 content: `**Reminder** for <@${reminder.userId}>`,
                 embeds: [
                     new EmbedBuilder()
@@ -113,5 +115,6 @@ export default class DiscordReminderDeliverer implements ReminderDeliverer {
                 `Cannot post reminder #${reminder.id} in channel ${reminder.channelId}`
             );
         }
+        return sent.id;
     }
 }

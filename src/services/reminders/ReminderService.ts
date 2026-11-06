@@ -10,9 +10,18 @@
  * the reminder is retried on a later tick until `maxAttempts` is reached.
  * Ticks never overlap, and a platform whose deliverer is not registered
  * (client not connected) is simply skipped until it is.
+ *
+ * For snoozing (issue #58) the service also remembers the bot's messages that
+ * belong to a reminder (the "Reminder set" reply and the delivered ping), so
+ * a reminder can be set again after its row has been deleted.
  */
 import { Reminder, ReminderPlatform } from '../../db/entities/Reminder';
+import {
+    RecordReminderMessageData,
+    ReminderMessage,
+} from '../../db/entities/ReminderMessage';
 import { ReminderRepository } from '../../db/repositories/ReminderRepository';
+import { ReminderMessageRepository } from '../../db/repositories/ReminderMessageRepository';
 import logger from '../../utils/logging/logger';
 import { ReminderDeliverer, ReminderDeliveryError } from './ReminderDeliverer';
 
@@ -24,6 +33,8 @@ export const MAX_REMINDER_OFFSET_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 export const MIN_REMINDER_OFFSET_MS = 1000;
 /** Longest reminder message accepted. */
 export const MAX_REMINDER_MESSAGE_LENGTH = 2000;
+/** How long the bot's reminder messages are remembered for snoozing (issue #58). */
+export const REMINDER_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface CreateReminderInput {
     platform: ReminderPlatform;
@@ -52,12 +63,19 @@ export interface ReminderServiceOptions {
     tickIntervalMs?: number;
     /** Failed deliveries after which a reminder is dropped. Default 5. */
     maxAttempts?: number;
+    /**
+     * Where the bot's reminder messages are remembered (issue #58). Without
+     * it, recordMessage does nothing and findMessage / lastDelivered return
+     * null.
+     */
+    messageRepo?: ReminderMessageRepository;
 }
 
 export default class ReminderService {
     private readonly now: () => number;
     private readonly tickIntervalMs: number;
     private readonly maxAttempts: number;
+    private readonly messageRepo: ReminderMessageRepository | null;
     private readonly deliverers = new Map<
         ReminderPlatform,
         ReminderDeliverer
@@ -72,6 +90,7 @@ export default class ReminderService {
         this.now = options.now ?? Date.now;
         this.tickIntervalMs = options.tickIntervalMs ?? 10_000;
         this.maxAttempts = options.maxAttempts ?? 5;
+        this.messageRepo = options.messageRepo ?? null;
     }
 
     /** Registers (or, with null, removes) the deliverer for a platform. */
@@ -163,6 +182,68 @@ export default class ReminderService {
     }
 
     /**
+     * Remembers one of the bot's messages that belongs to a reminder (the
+     * "Reminder set" reply or the delivered ping), stamped with the service's
+     * clock, and prunes rows older than {@link REMINDER_MESSAGE_RETENTION_MS}.
+     * Never rejects; problems are logged.
+     */
+    async recordMessage(data: RecordReminderMessageData): Promise<void> {
+        if (!this.messageRepo) return;
+        const now = this.now();
+        try {
+            await this.messageRepo.save({ ...data, createdAt: new Date(now) });
+        } catch (err) {
+            logger.warn(
+                `⚠️ Could not remember ${data.kind} reminder message ${data.messageId} on ${data.platform}:`,
+                err
+            );
+        }
+        try {
+            await this.messageRepo.deleteOlderThan(
+                new Date(now - REMINDER_MESSAGE_RETENTION_MS)
+            );
+        } catch (err) {
+            logger.warn('⚠️ Could not prune old reminder messages:', err);
+        }
+    }
+
+    /** The reminder behind one of the bot's messages, within retention. */
+    async findMessage(
+        platform: ReminderPlatform,
+        messageId: string
+    ): Promise<ReminderMessage | null> {
+        if (!this.messageRepo) return null;
+        const row = await this.messageRepo.findByMessage(platform, messageId);
+        if (!row || row.createdAt.getTime() < this.retentionCutoff()) {
+            return null;
+        }
+        return row;
+    }
+
+    /**
+     * The user's most recently delivered reminder in the guild (the last one
+     * that pinged them), within retention.
+     */
+    async lastDelivered(
+        platform: ReminderPlatform,
+        userId: string,
+        guildId: string
+    ): Promise<ReminderMessage | null> {
+        if (!this.messageRepo) return null;
+        return this.messageRepo.findLatest(
+            platform,
+            userId,
+            guildId,
+            'delivered',
+            new Date(this.retentionCutoff())
+        );
+    }
+
+    private retentionCutoff(): number {
+        return this.now() - REMINDER_MESSAGE_RETENTION_MS;
+    }
+
+    /**
      * One delivery tick: delivers every reminder that is due. Never rejects;
      * problems are logged. A tick that starts while another one is still
      * running returns immediately so a slow platform cannot cause double
@@ -189,11 +270,24 @@ export default class ReminderService {
         reminder: Reminder,
         deliverer: ReminderDeliverer
     ): Promise<void> {
+        let messageId: string | void;
         try {
-            await deliverer.deliver(reminder);
+            messageId = await deliverer.deliver(reminder);
         } catch (err) {
             await this.handleFailure(reminder, err);
             return;
+        }
+        if (messageId) {
+            // Never rejects, so the row below is deleted either way.
+            await this.recordMessage({
+                platform: reminder.platform,
+                messageId,
+                kind: 'delivered',
+                userId: reminder.userId,
+                guildId: reminder.guildId,
+                channelId: reminder.channelId,
+                message: reminder.message,
+            });
         }
         try {
             await this.repo.deleteById(reminder.id);

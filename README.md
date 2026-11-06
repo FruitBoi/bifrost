@@ -381,6 +381,7 @@ The short `?` and `!` forms work for every reminder command and alias below (`?r
 ### Commands
 
 - `remindme <time | date> <message>` (alias `remind`) — schedules a reminder in the current channel, after a duration (`?remindme 2h ...`) or at a date and time (`?remindme Oct 26 20:15 ...`, see [Dates and times](#dates-and-times)). Add `-channel <channel>` (a channel mention or ID, before the time or at the very end) to have it delivered in another text channel or thread of the same server instead; you need permission to view and send messages there. Example: `?remindme -channel #general 2d book the venue`.
+- `remindme snooze <time | date>` (alias `remindme again <time | date>`) — sets a reminder again, with the same message and in the same channel, after the new time (`?remindme snooze 10m`, `?remindme again tomorrow 9am`). Reply to the reminder when it goes off, or to the bot's "Reminder set" message, to pick which one; without a reply it snoozes the last reminder that went off for you in this server. Only the time follows `snooze`/`again` (a duration may contain spaces, `1h 30m`); you can only snooze your own reminders.
 - `reminder list` (alias `reminders`) — lists your reminders in this server with their IDs, a preview of the message and when they are due.
 - `reminder channel` (aliases `creminders`, `channelreminders`) — lists every reminder set for the current channel, by anyone. Requires **Manage Channels**.
 - `reminder delete <id>` (aliases `delreminder`, `rmreminder`) — deletes a reminder. You can always delete your own; deleting someone else's requires **Manage Channels** in the reminder's channel (or in the server, if that channel no longer exists).
@@ -437,7 +438,7 @@ If the bot was offline when a reminder came due, it is delivered shortly after t
 
 ### Database migration
 
-Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted), and `00012-user-timezones`, which adds the `user_timezones` table for the zones set with `timezone`. Both run automatically on startup.
+Reminders ship as migration `00009-reminders`, which adds the `reminders` table (one row per pending reminder; a row is removed once it is delivered or deleted), and `00012-user-timezones`, which adds the `user_timezones` table for the zones set with `timezone`, and `00019-reminder-messages`, which adds the `reminder_messages` table (the bot's "Reminder set" replies and delivered reminders, kept for 30 days so they can be snoozed). They run automatically on startup.
 
 ## Moderation
 

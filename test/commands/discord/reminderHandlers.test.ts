@@ -10,6 +10,7 @@ import ReminderTimezoneService from '../../../src/services/reminders/ReminderTim
 import TimezoneDiscordCommandHandler from '../../../src/commands/discord/handlers/TimezoneDiscordCommandHandler';
 import { UserTimezoneRepository } from '../../../src/db/repositories/UserTimezoneRepository';
 import { Reminder } from '../../../src/db/entities/Reminder';
+import { ReminderMessage } from '../../../src/db/entities/ReminderMessage';
 
 const TRIGGERS = ['?', '!'];
 const NOW = new Date('2026-10-20T12:00:00Z');
@@ -37,6 +38,25 @@ function makeService() {
         listForChannel: vi.fn().mockResolvedValue([]),
         delete: vi.fn().mockResolvedValue(true),
         deleteAllForUser: vi.fn().mockResolvedValue(0),
+        recordMessage: vi.fn().mockResolvedValue(undefined),
+        findMessage: vi.fn().mockResolvedValue(null),
+        lastDelivered: vi.fn().mockResolvedValue(null),
+    };
+}
+
+function makeReminderMessage(
+    overrides: Partial<ReminderMessage> = {}
+): ReminderMessage {
+    return {
+        platform: 'discord',
+        messageId: 'msg-1',
+        kind: 'delivered',
+        userId: 'author',
+        guildId: 'guild-1',
+        channelId: 'chan-1',
+        message: 'water the plants',
+        createdAt: NOW,
+        ...overrides,
     };
 }
 
@@ -100,6 +120,8 @@ interface FakeMessageOptions {
     /** Other members by id; the author is `member`. */
     members?: Record<string, ReturnType<typeof makeMember>>;
     channels?: Record<string, ReturnType<typeof makeChannel>>;
+    /** Id of the message this one replies to. */
+    replyTo?: string;
 }
 
 function makeMessage({
@@ -109,10 +131,12 @@ function makeMessage({
     member = makeMember([]),
     members = {},
     channels = {},
+    replyTo,
 }: FakeMessageOptions) {
-    const reply = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue({ id: 'reply-1' });
     const message = {
         content,
+        reference: replyTo ? { messageId: replyTo } : null,
         channelId: 'chan-1',
         guildId: inGuild ? 'guild-1' : null,
         inGuild: () => inGuild,
@@ -242,6 +266,7 @@ describe('RemindMeDiscordCommandHandler', () => {
             'stand-up'
         );
         expect(service.create).not.toHaveBeenCalled();
+        expect(service.recordMessage).not.toHaveBeenCalled();
         const text = replied(reply)[0];
         expect(text).toContain('I need your time zone');
         expect(text).toContain('`?timezone America/New_York`');
@@ -293,6 +318,15 @@ describe('RemindMeDiscordCommandHandler', () => {
         expect(text).toContain('Reminder **#12** set for');
         expect(text).toContain('20:15 (America/New_York)');
         expect(text).toContain(`<t:${dueAt.getTime() / 1000}:f>`);
+        expect(service.recordMessage).toHaveBeenCalledWith({
+            platform: 'discord',
+            messageId: 'reply-1',
+            kind: 'set',
+            userId: 'author',
+            guildId: 'guild-1',
+            channelId: 'chan-1',
+            message: 'water the plants',
+        });
     });
 
     it('checks the -channel permissions before keeping a date reminder pending', async () => {
@@ -344,6 +378,15 @@ describe('RemindMeDiscordCommandHandler', () => {
         );
         expect(text).not.toContain(' in <#');
         expect(text).toContain('`?reminders`');
+        expect(service.recordMessage).toHaveBeenCalledWith({
+            platform: 'discord',
+            messageId: 'reply-1',
+            kind: 'set',
+            userId: 'author',
+            guildId: 'guild-1',
+            channelId: 'chan-1',
+            message: 'water the plants',
+        });
     });
 
     it('reports the reminder limit', async () => {
@@ -353,6 +396,7 @@ describe('RemindMeDiscordCommandHandler', () => {
         expect(replied(reply)[0]).toBe(
             'You can have at most 25 reminders at a time. Delete some with `?reminder delete <id>`.'
         );
+        expect(service.recordMessage).not.toHaveBeenCalled();
     });
 
     it('requires View Channel and Send Messages in the target channel', async () => {
@@ -423,6 +467,192 @@ describe('RemindMeDiscordCommandHandler', () => {
             })
         );
         expect(replied(reply)[0]).toContain(' in <#200000000000000000>');
+    });
+});
+
+describe('RemindMeDiscordCommandHandler snooze (issue #58)', () => {
+    let service: ReturnType<typeof makeService>;
+    let timezones: ReminderTimezoneService;
+    let handler: RemindMeDiscordCommandHandler;
+
+    const build = (zones: Record<string, string> = {}) => {
+        timezones = makeTimezoneService(service, zones);
+        handler = new RemindMeDiscordCommandHandler(
+            client,
+            service as unknown as ReminderService,
+            timezones,
+            TRIGGERS
+        );
+    };
+
+    const run = async (content: string, replyTo?: string) => {
+        const { message, reply } = makeMessage({ content, replyTo });
+        const args = content.split(/\s+/).slice(1);
+        await handler.handleCommand(message, 'remindme', ...args);
+        return reply;
+    };
+
+    beforeEach(() => {
+        service = makeService();
+        build();
+    });
+
+    it.each(['delivered', 'set'] as const)(
+        'snoozes the replied-to %s message in its channel',
+        async (kind) => {
+            service.findMessage.mockResolvedValue(
+                makeReminderMessage({
+                    kind,
+                    messageId: 'bot-msg',
+                    channelId: 'chan-2',
+                    message: 'stretch',
+                })
+            );
+            service.create.mockResolvedValue({
+                ok: true,
+                reminder: makeReminder({
+                    id: 11,
+                    channelId: 'chan-2',
+                    message: 'stretch',
+                }),
+            });
+            const reply = await run('?remindme snooze 10m', 'bot-msg');
+            expect(service.findMessage).toHaveBeenCalledWith(
+                'discord',
+                'bot-msg'
+            );
+            expect(service.lastDelivered).not.toHaveBeenCalled();
+            expect(service.create).toHaveBeenCalledWith({
+                platform: 'discord',
+                userId: 'author',
+                guildId: 'guild-1',
+                channelId: 'chan-2',
+                message: 'stretch',
+                delayMs: 10 * 60 * 1000,
+            });
+            const text = replied(reply)[0];
+            expect(text).toContain('Set reminder **#11** in 10 minutes');
+            expect(text).toContain(' in <#chan-2>');
+            expect(service.recordMessage).toHaveBeenCalledWith({
+                platform: 'discord',
+                messageId: 'reply-1',
+                kind: 'set',
+                userId: 'author',
+                guildId: 'guild-1',
+                channelId: 'chan-2',
+                message: 'stretch',
+            });
+        }
+    );
+
+    it('falls back to the last delivered reminder without a reply', async () => {
+        service.lastDelivered.mockResolvedValue(makeReminderMessage());
+        service.create.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder({ id: 3 }),
+        });
+        const reply = await run('?remindme again 1h');
+        expect(service.findMessage).not.toHaveBeenCalled();
+        expect(service.lastDelivered).toHaveBeenCalledWith(
+            'discord',
+            'author',
+            'guild-1'
+        );
+        expect(service.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                channelId: 'chan-1',
+                message: 'water the plants',
+                delayMs: 60 * 60 * 1000,
+            })
+        );
+        const text = replied(reply)[0];
+        expect(text).toContain('Set reminder **#3**');
+        expect(text).not.toContain(' in <#');
+    });
+
+    it('falls back to the last delivered reminder when the reply is not a reminder', async () => {
+        service.lastDelivered.mockResolvedValue(makeReminderMessage());
+        service.create.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder(),
+        });
+        await run('?remindme snooze 5m', 'some-chat-message');
+        expect(service.findMessage).toHaveBeenCalledWith(
+            'discord',
+            'some-chat-message'
+        );
+        expect(service.lastDelivered).toHaveBeenCalled();
+        expect(service.create).toHaveBeenCalled();
+    });
+
+    it('says when there is nothing to snooze', async () => {
+        const reply = await run('?remindme snooze 10m');
+        expect(replied(reply)[0]).toContain('No reminder to snooze');
+        expect(replied(reply)[0]).toContain('`?remindme snooze <time>`');
+        expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses to snooze someone else's reminder", async () => {
+        service.findMessage.mockResolvedValue(
+            makeReminderMessage({ userId: 'other' })
+        );
+        const reply = await run('?remindme snooze 10m', 'bot-msg');
+        expect(replied(reply)).toEqual([
+            'You can only snooze your own reminders.',
+        ]);
+        expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it('explains text after the time', async () => {
+        const reply = await run('?remindme snooze 10m stretch');
+        expect(replied(reply)[0]).toContain('Snoozing only takes a time');
+        expect(service.lastDelivered).not.toHaveBeenCalled();
+        expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it('explains times it cannot read', async () => {
+        const reply = await run('?remindme snooze later');
+        expect(replied(reply)[0]).toBe(INVALID_DURATION_MESSAGE);
+        expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it('snoozes to a date in the stored time zone', async () => {
+        build({ 'discord:author': 'UTC' });
+        service.lastDelivered.mockResolvedValue(
+            makeReminderMessage({ message: 'bins' })
+        );
+        const dueAt = new Date('2026-10-21T09:00:00Z');
+        service.create.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder({ id: 4, dueAt, message: 'bins' }),
+        });
+        const reply = await run('?remindme again tomorrow 9am');
+        expect(service.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                message: 'bins',
+                delayMs: dueAt.getTime() - NOW.getTime(),
+            })
+        );
+        expect(replied(reply)[0]).toContain('Reminder **#4** set for');
+        expect(service.recordMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: 'set', message: 'bins' })
+        );
+    });
+
+    it('keeps a snoozed date reminder pending until the time zone is set', async () => {
+        service.lastDelivered.mockResolvedValue(
+            makeReminderMessage({ channelId: 'chan-2', message: 'bins' })
+        );
+        const reply = await run('?remindme snooze tomorrow');
+        expect(service.create).not.toHaveBeenCalled();
+        expect(replied(reply)[0]).toContain('I need your time zone');
+        expect(timezones.peekPending('discord', 'author')).toMatchObject({
+            guildId: 'guild-1',
+            channelId: 'chan-2',
+            originChannelId: 'chan-1',
+            message: 'bins',
+        });
+        expect(service.recordMessage).not.toHaveBeenCalled();
     });
 });
 

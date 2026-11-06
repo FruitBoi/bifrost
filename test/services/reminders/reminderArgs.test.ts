@@ -3,7 +3,9 @@ import {
     extractChannelId,
     parseDuration,
     parseReminderDeleteArgs,
+    parseReminderTime,
     parseRemindMeArgs,
+    parseSnoozeArgs,
 } from '../../../src/services/reminders/reminderArgs';
 
 const SECOND = 1000;
@@ -330,6 +332,118 @@ describe('parseRemindMeArgs with dates (issue #27)', () => {
                 reason: 'invalid_time',
             });
         }
+    });
+});
+
+describe('parseReminderTime (issue #58)', () => {
+    it('reads a duration from the first word', () => {
+        expect(parseReminderTime(['1h30m', 'stretch'])).toEqual({
+            when: { kind: 'duration', delayMs: 90 * MINUTE },
+            consumed: 1,
+        });
+    });
+
+    it('reads a multi-word date', () => {
+        expect(parseReminderTime(['Monday', '7pm', 'x'])).toMatchObject({
+            when: { kind: 'date', spec: { kind: 'weekday', weekday: 1 } },
+            consumed: 2,
+        });
+    });
+
+    it('prefers a date for a number followed by a meridiem', () => {
+        expect(parseReminderTime(['7', 'pm'])).toMatchObject({
+            when: { kind: 'date' },
+            consumed: 2,
+        });
+    });
+
+    it('returns null for no time', () => {
+        expect(parseReminderTime([])).toBeNull();
+        expect(parseReminderTime(['soon'])).toBeNull();
+    });
+});
+
+describe('parseSnoozeArgs (issue #58)', () => {
+    it.each(['1h stretch', 'remind me later', '', 'snoozed 10m'])(
+        'is not a snooze for %j',
+        (raw) => {
+            expect(parseSnoozeArgs(raw)).toEqual({ snooze: false });
+        }
+    );
+
+    it.each(['snooze 10m', 'again 10m', 'SNOOZE 10m', '  Again   10m  '])(
+        'parses a duration after %j',
+        (raw) => {
+            expect(parseSnoozeArgs(raw)).toEqual({
+                snooze: true,
+                ok: true,
+                when: { kind: 'duration', delayMs: 10 * MINUTE },
+            });
+        }
+    );
+
+    it('parses a date/time', () => {
+        expect(parseSnoozeArgs('snooze tomorrow 9am')).toEqual({
+            snooze: true,
+            ok: true,
+            when: {
+                kind: 'date',
+                spec: {
+                    kind: 'relativeDay',
+                    dayOffset: 1,
+                    hour: 9,
+                    minute: 0,
+                    hasTime: true,
+                },
+            },
+        });
+    });
+
+    it('reads a number followed by a meridiem as a time of day', () => {
+        expect(parseSnoozeArgs('again 7 pm')).toMatchObject({
+            ok: true,
+            when: { kind: 'date' },
+        });
+    });
+
+    it.each<[string, number]>([
+        ['snooze 1h 30m', 90 * MINUTE],
+        ['snooze 10 minutes', 10 * MINUTE],
+        ['again 2 d', 2 * DAY],
+    ])('accepts a duration split by spaces: %j', (raw, delayMs) => {
+        expect(parseSnoozeArgs(raw)).toEqual({
+            snooze: true,
+            ok: true,
+            when: { kind: 'duration', delayMs },
+        });
+    });
+
+    it('needs a time', () => {
+        expect(parseSnoozeArgs('snooze')).toEqual({
+            snooze: true,
+            ok: false,
+            reason: 'missing_time',
+        });
+    });
+
+    it('rejects a time it cannot read', () => {
+        expect(parseSnoozeArgs('again soon')).toEqual({
+            snooze: true,
+            ok: false,
+            reason: 'invalid_time',
+        });
+    });
+
+    it.each([
+        'snooze 1h stretch',
+        'again tomorrow please',
+        'snooze 10m -channel #x',
+    ])('rejects text after the time: %j', (raw) => {
+        expect(parseSnoozeArgs(raw)).toEqual({
+            snooze: true,
+            ok: false,
+            reason: 'unexpected_text',
+        });
     });
 });
 

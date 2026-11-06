@@ -14,6 +14,8 @@ import { stripReminderInvocation } from '../../reminderTrigger';
 import ReminderService from '../../../services/reminders/ReminderService';
 import ReminderTimezoneService from '../../../services/reminders/ReminderTimezoneService';
 import { ReminderDateSpec } from '../../../services/reminders/reminderDate';
+import { Reminder } from '../../../db/entities/Reminder';
+import { ReminderMessage } from '../../../db/entities/ReminderMessage';
 import {
     dateReminderConfirmation,
     INVALID_TIME_MESSAGE,
@@ -22,7 +24,13 @@ import {
 } from '../../timezoneCommand';
 import {
     extractChannelId,
+    NOT_YOUR_REMINDER_MESSAGE,
+    nothingToSnoozeMessage,
     parseRemindMeArgs,
+    parseSnoozeArgs,
+    ReminderWhen,
+    SNOOZE_ONLY_TIME_MESSAGE,
+    SnoozeArgs,
 } from '../../../services/reminders/reminderArgs';
 import {
     formatReminderDuration,
@@ -76,7 +84,9 @@ export function memberPermissionsIn(
  * prefixes (`?remindme ...`, `!remindme ...`). The time may also be a date
  * or time of day (`Oct 26 20:15`, `Monday 7pm`, `tomorrow`; issue #27),
  * read in the user's time zone; without one the reminder waits while the
- * user is asked to set it with `timezone`.
+ * user is asked to set it with `timezone`. `remindme snooze <time>` (or
+ * `again`) sets the replied-to reminder, or the last one that went off,
+ * again (issue #58).
  */
 export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -93,8 +103,8 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
         message: Message,
         description: string,
         color: number
-    ): Promise<void> {
-        await message.reply({
+    ): Promise<Message> {
+        return message.reply({
             embeds: [
                 new EmbedBuilder()
                     .setDescription(description)
@@ -159,6 +169,12 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
                 COMMAND_PREFIX,
                 ...this.triggerPrefixes,
             ]) ?? args.join(' ');
+        const snooze = parseSnoozeArgs(raw);
+        if (snooze.snooze) {
+            await this.snooze(message, message.guildId, snooze);
+            return;
+        }
+
         const parsed = parseRemindMeArgs(raw);
         if (!parsed.ok) {
             switch (parsed.reason) {
@@ -242,29 +258,49 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
             channelId = channel.id;
         }
 
+        await this.schedule(
+            message,
+            message.guildId,
+            channelId,
+            parsed.when,
+            parsed.message
+        );
+    }
+
+    /**
+     * Sets the reminder for `when`: a date in the user's time zone, or a
+     * delay from now. Shared by `remindme` and its snooze form (issue #58).
+     */
+    private async schedule(
+        message: Message,
+        guildId: string,
+        channelId: string,
+        when: ReminderWhen,
+        text: string
+    ): Promise<void> {
         const where =
             channelId === message.channelId ? '' : ` in <#${channelId}>`;
-        if (parsed.when.kind === 'date') {
+        if (when.kind === 'date') {
             await this.createDateReminder(
                 message,
-                message.guildId,
+                guildId,
                 channelId,
-                parsed.when.spec,
-                parsed.message,
+                when.spec,
+                text,
                 where
             );
             return;
         }
 
-        const { delayMs } = parsed.when;
+        const { delayMs } = when;
         let result;
         try {
             result = await this.reminderService.create({
                 platform: 'fluxer',
                 userId: message.author.id,
-                guildId: message.guildId,
+                guildId,
                 channelId,
-                message: parsed.message,
+                message: text,
                 delayMs,
             });
         } catch (err) {
@@ -295,10 +331,122 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
         logger.info(
             `⏰ Fluxer reminder #${reminder.id} set by ${message.author.id} in channel ${channelId} for ${reminder.dueAt.toISOString()}`
         );
-        await this.reply(
+        const sent = await this.reply(
             message,
             `Reminder **#${reminder.id}** set for ${formatReminderDuration(delayMs)} from now (${formatReminderTime(reminder.dueAt, 'fluxer')})${where}\nView your reminders with \`${p}reminders\``,
             EmbedColors.Success
+        );
+        await this.recordSet(sent, reminder);
+    }
+
+    /**
+     * Remembers a "Reminder set" reply so that replying to it with
+     * `remindme snooze <time>` sets the same reminder again (issue #58).
+     */
+    private async recordSet(sent: Message, reminder: Reminder): Promise<void> {
+        await this.reminderService.recordMessage({
+            platform: 'fluxer',
+            messageId: sent.id,
+            kind: 'set',
+            userId: reminder.userId,
+            guildId: reminder.guildId,
+            channelId: reminder.channelId,
+            message: reminder.message,
+        });
+    }
+
+    /**
+     * `remindme snooze|again <time>` (issue #58): sets the reminder the
+     * command replies to (its "Reminder set" reply or the delivered
+     * reminder) again at the new time, in the same channel and with the same
+     * text. Without such a reply, the user's last delivered reminder in this
+     * server is used.
+     */
+    private async snooze(
+        message: Message,
+        guildId: string,
+        args: Extract<SnoozeArgs, { snooze: true }>
+    ): Promise<void> {
+        if (!args.ok) {
+            switch (args.reason) {
+                case 'invalid_time':
+                    await this.replyUsage(message, INVALID_TIME_MESSAGE);
+                    return;
+                case 'unexpected_text':
+                    await this.replyUsage(message, SNOOZE_ONLY_TIME_MESSAGE);
+                    return;
+                default:
+                    await this.replyUsage(message);
+                    return;
+            }
+        }
+
+        let source: ReminderMessage | null;
+        try {
+            source = await this.findSnoozeSource(message, guildId);
+        } catch (err) {
+            logger.error(
+                `❌ Could not look up the Fluxer reminder to snooze for user ${message.author.id}:`,
+                err
+            );
+            await this.reply(
+                message,
+                `Could not find the reminder to snooze: ${(err as Error).message}`,
+                EmbedColors.Error
+            );
+            return;
+        }
+        if (source === null) {
+            await this.reply(
+                message,
+                nothingToSnoozeMessage(
+                    reminderHintPrefix(this.triggerPrefixes)
+                ),
+                EmbedColors.Error
+            );
+            return;
+        }
+        if (source.userId !== message.author.id) {
+            await this.reply(
+                message,
+                NOT_YOUR_REMINDER_MESSAGE,
+                EmbedColors.Error
+            );
+            return;
+        }
+
+        logger.info(
+            `😴 Fluxer reminder snoozed by ${message.author.id} (from ${source.kind} message ${source.messageId})`
+        );
+        await this.schedule(
+            message,
+            source.guildId,
+            source.channelId,
+            args.when,
+            source.message
+        );
+    }
+
+    /**
+     * The reminder message the command replies to, when it is one; else the
+     * user's last delivered reminder in this server (issue #58).
+     */
+    private async findSnoozeSource(
+        message: Message,
+        guildId: string
+    ): Promise<ReminderMessage | null> {
+        const repliedId = message.messageReference?.messageId;
+        if (repliedId) {
+            const replied = await this.reminderService.findMessage(
+                'fluxer',
+                repliedId
+            );
+            if (replied) return replied;
+        }
+        return this.reminderService.lastDelivered(
+            'fluxer',
+            message.author.id,
+            guildId
         );
     }
 
@@ -358,7 +506,7 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
             logger.info(
                 `⏰ Fluxer reminder #${result.reminder.id} set by ${userId} in channel ${channelId} for ${result.reminder.dueAt.toISOString()} (${zone})`
             );
-            await this.reply(
+            const sent = await this.reply(
                 message,
                 dateReminderConfirmation(
                     'fluxer',
@@ -370,6 +518,7 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
                 ),
                 EmbedColors.Success
             );
+            await this.recordSet(sent, result.reminder);
         } catch (err) {
             logger.error(
                 `❌ Could not create Fluxer date reminder for user ${userId}:`,

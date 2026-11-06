@@ -4,7 +4,9 @@
  * shapes (`remindme [-channel <ref>] <time> <message>`, `reminder delete
  * [id] [-a]`) mirror YAGPDB's `remindme` and `reminder delete`. Since
  * issue #27 the time may also be a date and/or time of day (`Oct 26 20:15`,
- * `Monday 7pm`, `tomorrow`), parsed by {@link parseReminderDate}.
+ * `Monday 7pm`, `tomorrow`), parsed by {@link parseReminderDate}. Since
+ * issue #58 `remindme snooze <time>` / `remindme again <time>` sets an
+ * existing reminder again ({@link parseSnoozeArgs}).
  */
 import { parseChannelRef } from '../../utils/channelRef';
 import { parseReminderDate, ReminderDateSpec } from './reminderDate';
@@ -111,6 +113,41 @@ export type RemindMeArgs =
               | 'missing_channel';
       };
 
+/**
+ * Reads the time at the start of `words` (shared by `remindme` and its
+ * snooze form, issue #58): a single duration token (`1h30m`, `90`) when the
+ * first word is one; otherwise a date/time of one or more words
+ * (`Oct 26 20:15`, `next Monday at 7pm`, `tomorrow`; see
+ * {@link parseReminderDate}). One exception: a bare number followed by a
+ * meridiem or a month (`7 pm`, `26 Oct`) is read as a date/time rather than
+ * as minutes. `consumed` is the number of words the time took; null when
+ * the words do not start with a time.
+ */
+export function parseReminderTime(
+    words: readonly string[]
+): { when: ReminderWhen; consumed: number } | null {
+    if (words.length === 0) return null;
+    const date = parseReminderDate(words);
+    const numberFirst = /^\d+$/.test(words[0]);
+    if (date !== null && numberFirst && date.consumed >= 2) {
+        return {
+            when: { kind: 'date', spec: date.spec },
+            consumed: date.consumed,
+        };
+    }
+    const delayMs = parseDuration(words[0]);
+    if (delayMs !== null) {
+        return { when: { kind: 'duration', delayMs }, consumed: 1 };
+    }
+    if (date !== null) {
+        return {
+            when: { kind: 'date', spec: date.spec },
+            consumed: date.consumed,
+        };
+    }
+    return null;
+}
+
 /** `-channel <ref>` as the first two tokens (ref missing when group 1 is). */
 const LEADING_CHANNEL_RE = /^-channel(?:\s+(\S+))?(?=\s|$)/i;
 /** `-channel <ref>` as the last two tokens (ref missing when group 1 is). */
@@ -123,11 +160,7 @@ const TRAILING_CHANNEL_RE = /(?:^|\s)-channel(?:\s+(\S+))?\s*$/i;
  * `channelRef` is returned verbatim (`<#123>`, `123` or a channel name); see
  * {@link extractChannelId}.
  *
- * The time is a single duration token (`1h30m`, `90`) when the first token
- * is one; otherwise a date/time of one or more tokens (`Oct 26 20:15`,
- * `next Monday at 7pm`, `tomorrow`; see {@link parseReminderDate}). One
- * exception: a bare number followed by a meridiem or a month (`7 pm`,
- * `26 Oct`) is read as a date/time rather than as minutes.
+ * The time is read by {@link parseReminderTime}.
  */
 export function parseRemindMeArgs(raw: string): RemindMeArgs {
     let text = raw.trim();
@@ -160,30 +193,106 @@ export function parseRemindMeArgs(raw: string): RemindMeArgs {
     }
     if (tokens.length === 0) return { ok: false, reason: 'missing_time' };
 
-    let when: ReminderWhen | null = null;
-    let consumed = 1;
-    const words = tokens.map((t) => t.text);
-    const date = parseReminderDate(words);
-    const numberFirst = /^\d+$/.test(words[0]);
-    if (date !== null && numberFirst && date.consumed >= 2) {
-        when = { kind: 'date', spec: date.spec };
-        consumed = date.consumed;
-    } else {
-        const delayMs = parseDuration(words[0]);
-        if (delayMs !== null) {
-            when = { kind: 'duration', delayMs };
-        } else if (date !== null) {
-            when = { kind: 'date', spec: date.spec };
-            consumed = date.consumed;
-        }
-    }
-    if (when === null) return { ok: false, reason: 'invalid_time' };
+    const time = parseReminderTime(tokens.map((t) => t.text));
+    if (time === null) return { ok: false, reason: 'invalid_time' };
+    const { when, consumed } = time;
 
     const message = text.slice(tokens[consumed - 1].end).trim();
     if (message === '') return { ok: false, reason: 'missing_message' };
 
     return { ok: true, when, message, channelRef };
 }
+
+export type SnoozeArgs =
+    | { snooze: false }
+    | { snooze: true; ok: true; when: ReminderWhen }
+    | {
+          snooze: true;
+          ok: false;
+          reason: 'missing_time' | 'invalid_time' | 'unexpected_text';
+      };
+
+/**
+ * A duration written over several words (`1h 30m`, `10 minutes`, `2 d`):
+ * each word is a duration of its own, or a bare number followed by a word
+ * that is only a unit. Null when any word does not fit, so `1h stretch` is
+ * not read as `1hstretch` (one hour, by the unit's prefix).
+ */
+function parseSpacedDuration(words: readonly string[]): number | null {
+    for (let i = 0; i < words.length; i++) {
+        if (parseDuration(words[i]) === null) return null;
+        const next = words[i + 1];
+        if (
+            /^\d+$/.test(words[i]) &&
+            next !== undefined &&
+            /^[a-z]+$/i.test(next) &&
+            parseDuration(`1${next}`) !== null
+        ) {
+            i++;
+        }
+    }
+    return parseDuration(words.join(''));
+}
+
+/** First word of the snooze form: `remindme snooze …` / `remindme again …`. */
+const SNOOZE_WORDS = new Set(['snooze', 'again']);
+
+/**
+ * Parses everything after `remindme` as the snooze form (issue #58):
+ * `snooze <time>` or `again <time>` (either word in any case) sets a
+ * reminder that already exists again, so only the time follows; the text,
+ * server and channel come from the reminder being snoozed. `{ snooze: false }`
+ * when the first word is neither, so the normal `remindme` parsing applies
+ * (a normal reminder must start with a time, so nothing valid is lost).
+ *
+ * The time is read like in `remindme` ({@link parseReminderTime}) and must
+ * be the whole rest of the text. As there is no message to tell it apart
+ * from, a duration may also be split by spaces (`1h 30m`, `10 minutes`).
+ * Any other trailing text is rejected (`unexpected_text`) rather than
+ * dropped, so `snooze 1h stretch` does not silently lose `stretch`, and
+ * `-channel` is not accepted: the reminder keeps its channel.
+ */
+export function parseSnoozeArgs(raw: string): SnoozeArgs {
+    const words = raw
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w.length > 0);
+    if (words.length === 0 || !SNOOZE_WORDS.has(words[0].toLowerCase())) {
+        return { snooze: false };
+    }
+
+    const rest = words.slice(1);
+    if (rest.length === 0) {
+        return { snooze: true, ok: false, reason: 'missing_time' };
+    }
+
+    const time = parseReminderTime(rest);
+    if (time !== null && time.consumed === rest.length) {
+        return { snooze: true, ok: true, when: time.when };
+    }
+    const delayMs = parseSpacedDuration(rest);
+    if (delayMs !== null) {
+        return { snooze: true, ok: true, when: { kind: 'duration', delayMs } };
+    }
+    return {
+        snooze: true,
+        ok: false,
+        reason: time === null ? 'invalid_time' : 'unexpected_text',
+    };
+}
+
+/** Reply when there is no reminder to snooze (issue #58). */
+export function nothingToSnoozeMessage(prefix: string): string {
+    return `No reminder to snooze: reply to a reminder message with \`${prefix}remindme snooze <time>\`, or wait until one goes off.`;
+}
+
+/** Reply when the reminder to snooze belongs to someone else (issue #58). */
+export const NOT_YOUR_REMINDER_MESSAGE =
+    'You can only snooze your own reminders.';
+
+/** Reply to text after the time in the snooze form (issue #58). */
+export const SNOOZE_ONLY_TIME_MESSAGE =
+    'Snoozing only takes a time, e.g. `snooze 10m` or `again tomorrow 9am`: the reminder keeps its text and channel.';
 
 /** `<#123>`, a bare `123` or a channel link → `'123'`; a name or anything else → null. */
 export function extractChannelId(ref: string): string | null {

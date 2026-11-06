@@ -25,12 +25,14 @@ export class ReminderDeliveryError extends Error {
  * Posts a due reminder into its channel on one platform. Implemented once per
  * platform (Discord and Fluxer) and registered on the ReminderService.
  *
- * Contract: resolve when the reminder message was posted; throw a
+ * Contract: resolve when the reminder message was posted, with the posted
+ * message's ID when known (the service remembers it for snoozing, issue
+ * #58); throw a
  * {@link ReminderDeliveryError} with `permanent: true` for failures that will
  * not go away (unknown channel, missing access, not a text channel); throw
  * anything else (or a non-permanent ReminderDeliveryError) for transient
  * failures such as network errors, which the service retries on a later tick.
  */
 export interface ReminderDeliverer {
-    deliver(reminder: Reminder): Promise<void>;
+    deliver(reminder: Reminder): Promise<string | void>;
 }

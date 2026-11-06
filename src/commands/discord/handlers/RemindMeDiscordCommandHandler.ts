@@ -2,6 +2,7 @@ import {
     Client,
     EmbedBuilder,
     GuildBasedChannel,
+    Message,
     PermissionFlagsBits,
 } from 'discord.js';
 import DiscordCommandHandler, {
@@ -19,13 +20,21 @@ import {
 } from '../../timezoneCommand';
 import {
     extractChannelId,
+    NOT_YOUR_REMINDER_MESSAGE,
+    nothingToSnoozeMessage,
     parseRemindMeArgs,
+    parseSnoozeArgs,
+    ReminderWhen,
+    SNOOZE_ONLY_TIME_MESSAGE,
+    SnoozeArgs,
 } from '../../../services/reminders/reminderArgs';
 import {
     formatReminderDuration,
     formatReminderTime,
 } from '../../../services/reminders/reminderFormat';
 import { ReminderDateSpec } from '../../../services/reminders/reminderDate';
+import { Reminder } from '../../../db/entities/Reminder';
+import { ReminderMessage } from '../../../db/entities/ReminderMessage';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import { EmbedColors } from '../../../utils/embeds';
 import logger from '../../../utils/logging/logger';
@@ -40,7 +49,9 @@ export const INVALID_DURATION_MESSAGE = INVALID_TIME_MESSAGE;
  * the short trigger prefixes (`?remindme ...`). The time may also be a date
  * or time of day (`Oct 26 20:15`, `Monday 7pm`, `tomorrow`; issue #27),
  * read in the user's time zone; without one the reminder waits while the
- * user is asked to set it with `timezone`.
+ * user is asked to set it with `timezone`. `remindme snooze <time>` (or
+ * `again`) sets the replied-to reminder, or the last one that went off,
+ * again (issue #58).
  */
 export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler {
     constructor(
@@ -61,8 +72,8 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
         message: DiscordCommandHandlerMessage,
         description: string,
         color: number
-    ) {
-        await message.reply({
+    ): Promise<Message> {
+        return message.reply({
             embeds: [
                 new EmbedBuilder()
                     .setDescription(description)
@@ -131,6 +142,12 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
                 COMMAND_PREFIX,
                 ...this.triggerPrefixes,
             ]) ?? args.join(' ');
+        const snooze = parseSnoozeArgs(raw);
+        if (snooze.snooze) {
+            await this.snooze(message, message.guildId, snooze);
+            return;
+        }
+
         const parsed = parseRemindMeArgs(raw);
         if (!parsed.ok) {
             switch (parsed.reason) {
@@ -205,44 +222,65 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
             channelId = channel.id;
         }
 
+        await this.schedule(
+            message,
+            message.guildId,
+            channelId,
+            parsed.when,
+            parsed.message
+        );
+    }
+
+    /**
+     * Sets the reminder for `when`: a date in the user's time zone, or a
+     * delay from now. Shared by `remindme` and its snooze form (issue #58).
+     */
+    private async schedule(
+        message: DiscordCommandHandlerMessage,
+        guildId: string,
+        channelId: string,
+        when: ReminderWhen,
+        text: string
+    ): Promise<void> {
         const where =
             channelId === message.channelId ? '' : ` in <#${channelId}>`;
-        if (parsed.when.kind === 'date') {
+        if (when.kind === 'date') {
             await this.createDateReminder(
                 message,
-                message.guildId,
+                guildId,
                 channelId,
-                parsed.when.spec,
-                parsed.message,
+                when.spec,
+                text,
                 where
             );
             return;
         }
 
-        const { delayMs } = parsed.when;
+        const { delayMs } = when;
         try {
             const result = await this.reminderService.create({
                 platform: 'discord',
                 userId: message.author.id,
-                guildId: message.guildId,
+                guildId,
                 channelId,
-                message: parsed.message,
+                message: text,
                 delayMs,
             });
             if (!result.ok) {
-                const text = this.failureMessage(result.reason);
-                if (text) await this.replyError(message, text);
+                const error = this.failureMessage(result.reason);
+                if (error) await this.replyError(message, error);
                 else await this.replyUsage(message);
                 return;
             }
 
             const { reminder } = result;
-            await this.replyEmbed(
+            const sent = await this.replyEmbed(
                 message,
                 `Set reminder **#${reminder.id}** in ${formatReminderDuration(delayMs)} from now (${formatReminderTime(reminder.dueAt, 'discord')})${where}\n` +
                     `View your reminders with \`${this.hintPrefix}reminders\``,
                 EmbedColors.Success
             );
+            await this.recordSet(sent, reminder);
         } catch (err: unknown) {
             await this.replyError(
                 message,
@@ -250,6 +288,109 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
             );
             logger.error('❌ Creating a Discord reminder failed:', err);
         }
+    }
+
+    /**
+     * Remembers a "Reminder set" reply so that replying to it with
+     * `remindme snooze <time>` sets the same reminder again (issue #58).
+     */
+    private async recordSet(sent: Message, reminder: Reminder): Promise<void> {
+        await this.reminderService.recordMessage({
+            platform: 'discord',
+            messageId: sent.id,
+            kind: 'set',
+            userId: reminder.userId,
+            guildId: reminder.guildId,
+            channelId: reminder.channelId,
+            message: reminder.message,
+        });
+    }
+
+    /**
+     * `remindme snooze|again <time>` (issue #58): sets the reminder the
+     * command replies to (its "Reminder set" reply or the delivered
+     * reminder) again at the new time, in the same channel and with the same
+     * text. Without such a reply, the user's last delivered reminder in this
+     * server is used.
+     */
+    private async snooze(
+        message: DiscordCommandHandlerMessage,
+        guildId: string,
+        args: Extract<SnoozeArgs, { snooze: true }>
+    ): Promise<void> {
+        if (!args.ok) {
+            switch (args.reason) {
+                case 'invalid_time':
+                    await this.replyUsage(message, INVALID_DURATION_MESSAGE);
+                    return;
+                case 'unexpected_text':
+                    await this.replyUsage(message, SNOOZE_ONLY_TIME_MESSAGE);
+                    return;
+                default:
+                    await this.replyUsage(message);
+                    return;
+            }
+        }
+
+        let source: ReminderMessage | null;
+        try {
+            source = await this.findSnoozeSource(message, guildId);
+        } catch (err: unknown) {
+            logger.error(
+                '❌ Looking up a Discord reminder to snooze failed:',
+                err
+            );
+            await this.replyError(
+                message,
+                `Failed to find the reminder to snooze: ${(err as Error).message}`
+            );
+            return;
+        }
+        if (source === null) {
+            await this.replyError(
+                message,
+                nothingToSnoozeMessage(this.hintPrefix)
+            );
+            return;
+        }
+        if (source.userId !== message.author.id) {
+            await this.replyError(message, NOT_YOUR_REMINDER_MESSAGE);
+            return;
+        }
+
+        logger.info(
+            `😴 Discord reminder snoozed by ${message.author.id} (from ${source.kind} message ${source.messageId})`
+        );
+        await this.schedule(
+            message,
+            source.guildId,
+            source.channelId,
+            args.when,
+            source.message
+        );
+    }
+
+    /**
+     * The reminder message the command replies to, when it is one; else the
+     * user's last delivered reminder in this server (issue #58).
+     */
+    private async findSnoozeSource(
+        message: DiscordCommandHandlerMessage,
+        guildId: string
+    ): Promise<ReminderMessage | null> {
+        const repliedId = message.reference?.messageId;
+        if (repliedId) {
+            const replied = await this.reminderService.findMessage(
+                'discord',
+                repliedId
+            );
+            if (replied) return replied;
+        }
+        return this.reminderService.lastDelivered(
+            'discord',
+            message.author.id,
+            guildId
+        );
     }
 
     /**
@@ -304,7 +445,7 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
                 }
                 return;
             }
-            await this.replyEmbed(
+            const sent = await this.replyEmbed(
                 message,
                 dateReminderConfirmation(
                     'discord',
@@ -316,6 +457,7 @@ export default class RemindMeDiscordCommandHandler extends DiscordCommandHandler
                 ),
                 EmbedColors.Success
             );
+            await this.recordSet(sent, result.reminder);
         } catch (err: unknown) {
             await this.replyError(
                 message,

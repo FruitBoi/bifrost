@@ -21,6 +21,7 @@ import * as threadDirectoryRoles from '../../src/db/migrations/00015-thread-dire
 import * as messageCounts from '../../src/db/migrations/00016-message-counts';
 import * as commandRoles from '../../src/db/migrations/00017-command-roles';
 import * as botState from '../../src/db/migrations/00018-bot-state';
+import * as reminderMessages from '../../src/db/migrations/00019-reminder-messages';
 import {
     MessageLinkModel,
     ThreadDirectoryEntryModel,
@@ -35,6 +36,7 @@ import { SequelizeHistoryMessageRepository } from '../../src/db/sequelizerepos/S
 import { SequelizeMessageCountRepository } from '../../src/db/sequelizerepos/SequelizeMessageCountRepository';
 import { SequelizeMessageLinkRepository } from '../../src/db/sequelizerepos/SequelizeMessageLinkRepository';
 import { SequelizeReminderRepository } from '../../src/db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeReminderMessageRepository } from '../../src/db/sequelizerepos/SequelizeReminderMessageRepository';
 import { SequelizeThreadDirectoryRepository } from '../../src/db/sequelizerepos/SequelizeThreadDirectoryRepository';
 import { SequelizeUserTimezoneRepository } from '../../src/db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeUserLinkRepository } from '../../src/db/sequelizerepos/SequelizeUserLinkRepository';
@@ -129,6 +131,11 @@ const umzug = new Umzug({
             name: '00018-bot-state.js',
             up: botState.up,
             down: botState.down,
+        },
+        {
+            name: '00019-reminder-messages.js',
+            up: reminderMessages.up,
+            down: reminderMessages.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -2292,5 +2299,132 @@ describe('migration 00018-bot-state', () => {
         await umzug.up();
         expect(await executed()).toContain('00018-bot-state.js');
         expect(await repo.get('deploy.lastCommit')).toBeNull();
+    });
+});
+
+describe('migration 00019-reminder-messages', () => {
+    it('adds reminder_messages with its indexes, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00019-reminder-messages.js');
+        expect(await qi.tableExists('reminder_messages')).toBe(true);
+
+        const cols = await qi.describeTable('reminder_messages');
+        expect(cols.id).toMatchObject({ primaryKey: true });
+        for (const name of [
+            'platform',
+            'messageId',
+            'kind',
+            'userId',
+            'guildId',
+            'channelId',
+        ]) {
+            expect(cols[name]).toMatchObject({ allowNull: false });
+            expect(cols[name].type).toMatch(/VARCHAR|TEXT|CHAR/i);
+        }
+        expect(cols.message.type).toMatch(/TEXT/i);
+        expect(cols.createdAt).toMatchObject({ allowNull: false });
+        expect(cols).not.toHaveProperty('updatedAt');
+
+        const indexes = await showIndexes('reminder_messages');
+        const byName = (name: string) => indexes.find((i) => i.name === name);
+        expect(byName('reminder_messages_platform_message')).toMatchObject({
+            unique: true,
+            fields: [{ attribute: 'platform' }, { attribute: 'messageId' }],
+        });
+        expect(
+            byName('reminder_messages_platform_user_guild_kind_created')
+        ).toMatchObject({
+            unique: false,
+            fields: [
+                { attribute: 'platform' },
+                { attribute: 'userId' },
+                { attribute: 'guildId' },
+                { attribute: 'kind' },
+                { attribute: 'createdAt' },
+            ],
+        });
+        expect(byName('reminder_messages_created_at')).toMatchObject({
+            unique: false,
+            fields: [{ attribute: 'createdAt' }],
+        });
+
+        const repo = new SequelizeReminderMessageRepository();
+        const t0 = new Date('2026-10-20T12:00:00.000Z');
+        const at = (ms: number) => new Date(t0.getTime() + ms);
+        // Snowflakes stay exact strings (too big for a JS number).
+        const big = '1234567890123456789';
+        const row = (
+            messageId: string,
+            createdAt: Date,
+            overrides: Record<string, string> = {}
+        ) => ({
+            platform: 'discord' as const,
+            messageId,
+            kind: 'delivered' as const,
+            userId: 'u1',
+            guildId: 'g1',
+            channelId: 'c1',
+            message: `text ${messageId}`,
+            createdAt,
+            ...overrides,
+        });
+
+        expect(await repo.findByMessage('discord', big)).toBeNull();
+        await repo.save({ ...row(big, t0), kind: 'set' });
+        const found = await repo.findByMessage('discord', big);
+        expect(found).toEqual({ ...row(big, t0), kind: 'set' });
+        expect(found!.createdAt).toBeInstanceOf(Date);
+        expect(await repo.findByMessage('fluxer', big)).toBeNull();
+
+        // Saving the same platform + messageId again replaces the row.
+        await repo.save(row(big, at(1), { message: 'replaced' }));
+        expect(await repo.findByMessage('discord', big)).toMatchObject({
+            kind: 'delivered',
+            message: 'replaced',
+            createdAt: at(1),
+        });
+        // The same message ID on the other platform is a different row.
+        await repo.save(row(big, at(1), { platform: 'fluxer' }));
+        expect(
+            await select<{ id: number }>('SELECT id FROM reminder_messages')
+        ).toHaveLength(2);
+
+        // findLatest: newest createdAt, later insertion wins a tie, filtered
+        // by user, guild, kind and the since bound.
+        await repo.save(row('d1', at(10)));
+        await repo.save(row('d2', at(20)));
+        await repo.save(row('d3', at(20)));
+        await repo.save(row('s1', at(30), { kind: 'set' }));
+        await repo.save(row('x1', at(30), { userId: 'u2' }));
+        await repo.save(row('x2', at(30), { guildId: 'g2' }));
+        expect(
+            await repo.findLatest('discord', 'u1', 'g1', 'delivered', t0)
+        ).toMatchObject({ messageId: 'd3' });
+        expect(
+            await repo.findLatest('discord', 'u1', 'g1', 'set', t0)
+        ).toMatchObject({ messageId: 's1' });
+        expect(
+            await repo.findLatest('discord', 'u1', 'g1', 'delivered', at(21))
+        ).toBeNull();
+        expect(
+            await repo.findLatest('discord', 'u9', 'g1', 'delivered', t0)
+        ).toBeNull();
+
+        // deleteOlderThan removes rows strictly older than the bound.
+        expect(await repo.deleteOlderThan(at(20))).toBe(3);
+        expect(await repo.findByMessage('discord', big)).toBeNull();
+        expect(await repo.findByMessage('discord', 'd1')).toBeNull();
+        expect(await repo.findByMessage('discord', 'd2')).not.toBeNull();
+
+        // Roll back: the table is gone and nothing else was touched.
+        await umzug.down({ to: '00019-reminder-messages.js' });
+        expect(await executed()).not.toContain('00019-reminder-messages.js');
+        expect(await executed()).toContain('00018-bot-state.js');
+        expect(await qi.tableExists('reminder_messages')).toBe(false);
+        expect(await qi.tableExists('bot_state')).toBe(true);
+
+        await umzug.up();
+        expect(await executed()).toContain('00019-reminder-messages.js');
+        expect(await repo.findByMessage('discord', 'd2')).toBeNull();
     });
 });

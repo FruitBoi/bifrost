@@ -36,7 +36,7 @@ class FakeApiError extends Error {
 }
 
 function makeClient() {
-    const send = vi.fn().mockResolvedValue({});
+    const send = vi.fn().mockResolvedValue({ id: 'sent-1' });
     return {
         send,
         client: { channels: { send } } as unknown as Client,
@@ -54,7 +54,8 @@ describe('FluxerReminderDeliverer', () => {
     });
 
     it('posts a ping line plus an embed, mentioning only the user', async () => {
-        await deliverer.deliver(reminder);
+        // Resolves with the posted message's ID (remembered for snoozing).
+        await expect(deliverer.deliver(reminder)).resolves.toBe('sent-1');
 
         expect(send).toHaveBeenCalledTimes(1);
         const [channelId, payload] = send.mock.calls[0] as [
@@ -120,9 +121,9 @@ describe('FluxerReminderDeliverer', () => {
         send.mockResolvedValueOnce({ id: 'msg-1', guildId: null });
         const onDelivered = vi.fn().mockResolvedValue(undefined);
         const client = { channels: { send } } as unknown as Client;
-        await new FluxerReminderDeliverer(client, onDelivered).deliver(
-            reminder
-        );
+        await expect(
+            new FluxerReminderDeliverer(client, onDelivered).deliver(reminder)
+        ).resolves.toBe('msg-1');
 
         expect(onDelivered).toHaveBeenCalledTimes(1);
         const [sent] = onDelivered.mock.calls[0] as [

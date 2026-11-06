@@ -81,7 +81,8 @@ export default class FluxerReminderDeliverer implements ReminderDeliverer {
         private readonly onDelivered?: (sent: Message) => Promise<void>
     ) {}
 
-    async deliver(reminder: Reminder): Promise<void> {
+    /** Resolves with the ID of the posted message. */
+    async deliver(reminder: Reminder): Promise<string> {
         let sent: Message;
         try {
             sent = await this.client.channels.send(reminder.channelId, {
@@ -106,5 +107,6 @@ export default class FluxerReminderDeliverer implements ReminderDeliverer {
             throw err;
         }
         await this.onDelivered?.(withReminderGuild(sent, reminder));
+        return sent.id;
     }
 }

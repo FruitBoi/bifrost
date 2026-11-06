@@ -15,6 +15,7 @@ import { ThreadDirectoryEntryModel } from './ThreadDirectoryEntryModel';
 import { MessageCountModel } from './MessageCountModel';
 import { CommandRoleModel } from './CommandRoleModel';
 import { BotStateModel } from './BotStateModel';
+import { ReminderMessageModel } from './ReminderMessageModel';
 
 // Guild -> Channel
 GuildLinkModel.hasMany(ChannelLinkModel, {
@@ -146,4 +147,7 @@ export {
     CommandRoleModel,
     // No associations: bot_state is a standalone key/value table (issue #47).
     BotStateModel,
+    // No associations: reminder_messages rows are keyed by raw platform IDs
+    // and outlive the reminders they belong to (issue #58).
+    ReminderMessageModel,
 };

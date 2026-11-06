@@ -10,6 +10,7 @@ import { SequelizeCategoryLinkRepository } from './db/sequelizerepos/SequelizeCa
 import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import { SequelizeUserLinkRepository } from './db/sequelizerepos/SequelizeUserLinkRepository';
 import { SequelizeReminderRepository } from './db/sequelizerepos/SequelizeReminderRepository';
+import { SequelizeReminderMessageRepository } from './db/sequelizerepos/SequelizeReminderMessageRepository';
 import { SequelizeUserTimezoneRepository } from './db/sequelizerepos/SequelizeUserTimezoneRepository';
 import { SequelizeHistoryMessageRepository } from './db/sequelizerepos/SequelizeHistoryMessageRepository';
 import HistoryTransferService from './services/history/HistoryTransferService';
@@ -219,8 +220,10 @@ const main = async () => {
     // Reminders (issue #9): one service for both platforms; each client
     // registers its own deliverer once it is ready, and the service starts
     // polling for due reminders after both clients have been started.
+    // The bot's reminder messages are remembered for snoozing (issue #58).
     const reminderService = new ReminderService(
-        new SequelizeReminderRepository()
+        new SequelizeReminderRepository(),
+        { messageRepo: new SequelizeReminderMessageRepository() }
     );
     // Date/time reminders (issue #27) need the user's time zone; reminders
     // waiting for one are kept in this service until the user sets it.
