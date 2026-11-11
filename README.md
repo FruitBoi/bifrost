@@ -23,6 +23,7 @@
 - Meows back when someone meows at it on Fluxer (see [Cat chat](#cat-chat))
 - Replies on Fluxer to public Instagram post and reel links (including kkinstagram-style redirect links and links bridged from Discord) with an Instagram card and the video or photos attached (see [Instagram posts](#instagram-posts))
 - Does the same for tweets: twitter.com and x.com links, embed-fixer aliases such as fixvx.com or fxtwitter.com, and tweet-shaped links on other alias sites it recognises by itself (see [Tweets](#tweets))
+- Opsec: `!opsec on 1h` (or `!opsex on`) stops bridging a Fluxer channel or thread to Discord for a while, with an announcement on both ends (see [Opsec](#opsec))
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Copy a Discord server's role icons to the same-named Fluxer roles (see [Role icon transfer](#role-icon-transfer))
@@ -268,6 +269,10 @@ The reply also shows progress toward **fish financial independence**: the portfo
 `-sim` trades a simulated day on a made-up fish ticker instead (no network access), and `-seed <n>` replays a simulated day (same prices, same outcome); `-seed` implies `-sim` and can't be combined with a ticker. `-cash <amount>` sets the starting bankroll (default $100). None of it is financial advice, for fish or anyone else.
 
 **Bridged to Discord, one way.** In a bridged channel a Fluxer `fishtrade` message and the bot's reply to it are relayed to the linked Discord channel, so Discord can watch the fish trade. Discord can't take part: with `commands.fluxerOnly` on (the default) a `fishtrade` typed on Discord just gets a "come to Fluxer" reply, and nothing is sent back to Fluxer.
+
+## Opsec
+
+`!opsec on [duration]` (alias `opsex`; `!b opsec on` works too) stops bridging the Fluxer channel or thread it is run in to Discord: for 30 minutes by default, or for a duration such as `10`, `45m` or `1h30m` (bare numbers are minutes, at most 24 hours). Before it starts, the bot posts an emoji-packed "A fluxer sex session is currently occurring that you are not privy to. Have a nice day Mr. Thiel." that is bridged to Discord. While it runs, nothing from that channel or thread reaches Discord: no messages, edits, reactions or typing (deletions are still mirrored, and Discord still bridges to Fluxer). When it runs out, or someone runs `!opsec off`, the bot posts "The sex session has ended." with plenty of emojis, and that one is bridged again. Running `!opsec on` during a session restarts its timer with the new duration; `!opsec` alone shows whether one is running and when it ends. It is Fluxer only and open to everyone. Sessions are kept in memory, so a restart ends them without the closing message.
 
 ## Message counts
 

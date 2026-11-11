@@ -132,6 +132,10 @@ import ClaudeLinesService, {
 } from './services/claudeLines/ClaudeLinesService';
 import { HISTORY_COMMAND_NAMES } from './services/history/historyArgs';
 import type DeployAnnounceService from './services/deployAnnounce/DeployAnnounceService';
+import OpsecFluxerCommandHandler from './commands/fluxer/handlers/OpsecFluxerCommandHandler';
+import OpsecService, {
+    OPSEC_COMMAND_NAMES,
+} from './services/opsec/OpsecService';
 
 const startFluxerClient = async ({
     linkService,
@@ -261,7 +265,11 @@ const startFluxerClient = async ({
     const twitterMediaService = botConfig.twitter.enabled
         ? new TwitterMediaService(twitterMediaOptions(botConfig))
         : null;
+    // `opsec on` (issue #60): pauses bridging of one Fluxer channel or thread
+    // to Discord for a while. Kept in memory; a restart ends every pause.
+    const opsecService = new OpsecService();
     const messageRelay = new FluxerToDiscordMessageRelay({
+        isPaused: (channelId) => opsecService.isActive(channelId),
         linkService,
         webhookService,
         messageTransformer,
@@ -538,6 +546,15 @@ const startFluxerClient = async ({
         commandRegistry.registerCommand(name, linesHandler);
     }
 
+    const opsecHandler = new OpsecFluxerCommandHandler(
+        client,
+        opsecService,
+        bridgeCommandMessage
+    );
+    for (const name of OPSEC_COMMAND_NAMES) {
+        commandRegistry.registerCommand(name, opsecHandler);
+    }
+
     const fishTradeHandler = new FishTradeFluxerCommandHandler(
         client,
         bridgeCommandMessage
@@ -628,6 +645,7 @@ const startFluxerClient = async ({
     // `reactions.enabled: false`.
     if (botConfig.reactions.enabled) {
         client.on(Events.MessageReactionAdd, async (payload) => {
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await reactionRelay.handleReactionAdd(payload);
             } catch (error) {
@@ -639,6 +657,7 @@ const startFluxerClient = async ({
         });
 
         client.on(Events.MessageReactionAddMany, async (payload) => {
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await reactionRelay.handleReactionAddMany(payload);
             } catch (error) {
@@ -650,6 +669,7 @@ const startFluxerClient = async ({
         });
 
         client.on(Events.MessageReactionRemove, async (payload) => {
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await reactionRelay.handleReactionRemove(payload);
             } catch (error) {
@@ -661,6 +681,7 @@ const startFluxerClient = async ({
         });
 
         client.on(Events.MessageReactionRemoveAll, async (payload) => {
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await reactionRelay.handleReactionRemoveAll(payload);
             } catch (error) {
@@ -672,6 +693,7 @@ const startFluxerClient = async ({
         });
 
         client.on(Events.MessageReactionRemoveEmoji, async (payload) => {
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await reactionRelay.handleReactionRemoveEmoji(payload);
             } catch (error) {
@@ -699,6 +721,7 @@ const startFluxerClient = async ({
         client.on(Events.TypingStart, async (payload) => {
             if (!payload.guildId) return;
             if (payload.userId === client.user?.id) return;
+            if (opsecService.isActive(payload.channelId)) return;
             try {
                 await typingBridge.handleFluxerTyping(payload.channelId);
             } catch (error) {
@@ -776,6 +799,8 @@ const startFluxerClient = async ({
 
     client.on(Events.MessageUpdate, async (_oldMessage, updatedMessage) => {
         if (!updatedMessage.partial && updatedMessage.webhookId) return;
+        // Edits made during an `opsec` pause stay on Fluxer too (issue #60).
+        if (opsecService.isActive(updatedMessage.channelId)) return;
 
         const linkedMessage = await linkService.getMessageLinkByFluxerMessageId(
             updatedMessage.id

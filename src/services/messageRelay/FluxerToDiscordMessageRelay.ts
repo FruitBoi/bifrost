@@ -35,6 +35,7 @@ export class DiscordWebhookMissingError extends Error {
 export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
     private readonly discordEntityResolver: DiscordEntityResolver;
     private readonly threadSyncService: ThreadSyncService;
+    private readonly isPaused: (fluxerChannelId: string) => boolean;
 
     constructor({
         linkService,
@@ -45,6 +46,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         messageCountService,
         discordEntityResolver,
         threadSyncService,
+        isPaused,
     }: {
         linkService: LinkService;
         webhookService: WebhookService;
@@ -54,6 +56,11 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         messageCountService?: MessageCountService;
         discordEntityResolver: DiscordEntityResolver;
         threadSyncService: ThreadSyncService;
+        /**
+         * True while bridging of a Fluxer channel or thread to Discord is
+         * paused with `opsec on` (issue #60).
+         */
+        isPaused?: (fluxerChannelId: string) => boolean;
     }) {
         super({
             linkService,
@@ -65,6 +72,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         });
         this.discordEntityResolver = discordEntityResolver;
         this.threadSyncService = threadSyncService;
+        this.isPaused = isPaused ?? (() => false);
     }
 
     private async resolveLink(message: Message): Promise<ChannelLink | null> {
@@ -133,6 +141,7 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         const linkService = this.getLinkService();
 
         if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
+        if (this.isPaused(message.channelId)) return;
 
         const linkedChannel = await this.resolveLink(message);
         if (!linkedChannel) return;

@@ -378,6 +378,17 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'opsec',
+        summary:
+            'Stops bridging this channel or thread to Discord for a while (30 minutes by default).',
+        aliases: ['opsex'],
+        fluxer: {
+            description:
+                'Pauses bridging of the channel or thread you run it in to Discord, for a duration (`30m`, `1h30m`, bare numbers are minutes; 30 minutes by default, at most 24 hours). Discord is told a Fluxer sex session is occurring that it is not privy to, and told again when it ends. Messages, edits, reactions and typing stay on Fluxer meanwhile; Discord still bridges to Fluxer. `opsec off` ends it early, `opsec` alone shows whether one is running. Kept in memory: a restart ends it silently. Alias `opsex`. Fluxer only, open to everyone.',
+            usageArgs: ['[on [duration] | off]'],
+        },
+    },
+    {
         name: 'fishtrade',
         summary: 'Lets your fish paper-trade the stock market.',
         aliases: ['fishtrading', 'stonks'],
