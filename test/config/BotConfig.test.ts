@@ -1149,6 +1149,7 @@ describe('twitter', () => {
     it('has the documented defaults', () => {
         expect(DEFAULT_BOT_CONFIG.twitter).toEqual({
             enabled: true,
+            alwaysRepost: false,
             discoverAliases: true,
             maxLinksPerMessage: 3,
             maxSizeMb: 10,
@@ -1159,12 +1160,17 @@ describe('twitter', () => {
 
     it('merges configured values over the defaults', () => {
         const { config, unknownKeys } = mergeBotConfig({
-            twitter: { discoverAliases: false, maxSizeMb: 24.5 },
+            twitter: {
+                alwaysRepost: true,
+                discoverAliases: false,
+                maxSizeMb: 24.5,
+            },
         });
 
         expect(unknownKeys).toEqual([]);
         expect(config.twitter).toEqual({
             enabled: true,
+            alwaysRepost: true,
             discoverAliases: false,
             maxLinksPerMessage: 3,
             maxSizeMb: 24.5,
@@ -1196,6 +1202,12 @@ describe('twitter', () => {
         expect(() =>
             mergeBotConfig({ twitter: { discoverAliases: 'yes' } })
         ).toThrow('twitter.discoverAliases');
+    });
+
+    it('rejects a non-boolean alwaysRepost', () => {
+        expect(() =>
+            mergeBotConfig({ twitter: { alwaysRepost: 'yes' } })
+        ).toThrow('twitter.alwaysRepost');
     });
 });
 

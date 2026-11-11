@@ -3,6 +3,7 @@ import { writeFile } from 'fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TwitterMediaService, {
     CommandRunner,
+    FLUXER_PREVIEW_TEXT_LENGTH,
     TwitterMediaOptions,
 } from '../../../src/services/twitter/TwitterMediaService';
 import { tweetSyndicationUrl } from '../../../src/services/twitter/tweetSyndication';
@@ -24,11 +25,14 @@ const HIGH = 'https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/high.mp4';
 const MID = 'https://video.twimg.com/ext_tw_video/1/pu/vid/640x360/mid.mp4';
 const LOW = 'https://video.twimg.com/ext_tw_video/1/pu/vid/320x180/low.mp4';
 
+// Most tests check the fetching itself, so every tweet is reposted; see
+// 'only tweets the Fluxer preview can't show' for the default.
 const OPTIONS: TwitterMediaOptions = {
     maxBytes: 10 * MB,
     maxDurationSeconds: 180,
     timeoutMs: 60_000,
     maxConcurrent: 2,
+    alwaysRepost: true,
 };
 
 const LINK: TweetLink = {
@@ -391,6 +395,113 @@ describe('TwitterMediaService syndication data', () => {
             ),
         });
         expect((await svc.fetchPost(LINK))!.profilePicUrl).toBeNull();
+    });
+});
+
+describe("TwitterMediaService only tweets the Fluxer preview can't show", () => {
+    const options = { alwaysRepost: false };
+
+    it('skips a photo tweet with short text without downloading', async () => {
+        const { svc, fetchCalls, commands } = service(
+            {
+                [API_URL]: json(tweet()),
+                [LARGE(1)]: file(4000, 'image/jpeg'),
+            },
+            {},
+            options
+        );
+        expect(await svc.fetchPost(LINK)).toBeNull();
+        expect(fetchCalls.map((c) => c.url)).toEqual([API_URL]);
+        expect(commands).toHaveLength(0);
+    });
+
+    it('skips a short text-only tweet', async () => {
+        const { svc } = service(
+            {
+                [API_URL]: json(
+                    tweet({ text: 'hi', entities: {}, mediaDetails: undefined })
+                ),
+            },
+            {},
+            options
+        );
+        expect(await svc.fetchPost(LINK)).toBeNull();
+    });
+
+    it('reposts a tweet with a video', async () => {
+        const { svc } = service(
+            {
+                [API_URL]: json(tweet({ mediaDetails: [photo(1), video()] })),
+                [LARGE(1)]: file(1000, 'image/jpeg'),
+                [HIGH]: file(3000, 'video/mp4'),
+            },
+            {},
+            options
+        );
+        const post = await svc.fetchPost(LINK);
+        expect(post!.files.map((f) => f.kind)).toEqual(['image', 'video']);
+    });
+
+    it('reposts a tweet with a GIF', async () => {
+        const url = 'https://video.twimg.com/tweet_video/g.mp4';
+        const gif = {
+            type: 'animated_gif',
+            video_info: {
+                variants: [{ bitrate: 0, content_type: 'video/mp4', url }],
+            },
+        };
+        const { svc } = service(
+            {
+                [API_URL]: json(tweet({ mediaDetails: [gif] })),
+                [url]: file(2000, 'video/mp4'),
+            },
+            {},
+            options
+        );
+        expect((await svc.fetchPost(LINK))!.files).toHaveLength(1);
+    });
+
+    it('reposts text too long for the preview, but not text that fits', async () => {
+        for (const [length, reposted] of [
+            [FLUXER_PREVIEW_TEXT_LENGTH, false],
+            [FLUXER_PREVIEW_TEXT_LENGTH + 1, true],
+        ] as const) {
+            // Emoji count as one character each, as in Fluxer's unfurler.
+            const text = '🚀'.repeat(length);
+            const { svc } = service(
+                {
+                    [API_URL]: json(
+                        tweet({ text, entities: {}, mediaDetails: undefined })
+                    ),
+                },
+                {},
+                options
+            );
+            const post = await svc.fetchPost(LINK);
+            expect(post === null).toBe(!reposted);
+            if (post) expect(post.text).toBe(text);
+        }
+    });
+
+    it('still posts the yt-dlp video when the data cannot be loaded', async () => {
+        const { svc } = service({ [API_URL]: status(500) }, {}, options);
+        const post = await svc.fetchPost(LINK);
+        expect(post!.files.map((f) => f.kind)).toEqual(['video']);
+    });
+
+    it('is the default', async () => {
+        const fetchFake = fakeFetch({ [API_URL]: json(tweet()) });
+        const svc = new TwitterMediaService(
+            {
+                maxBytes: 10 * MB,
+                maxDurationSeconds: 180,
+                timeoutMs: 60_000,
+                maxConcurrent: 2,
+                fetchImpl: fetchFake.impl,
+            },
+            fakeRunner().runner
+        );
+        expect(await svc.fetchPost(LINK)).toBeNull();
     });
 });
 

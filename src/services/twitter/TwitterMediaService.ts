@@ -19,6 +19,12 @@
  * the files that did fit (possibly none): the card alone is still useful. A
  * text-only tweet is returned with no files.
  *
+ * Only tweets Fluxer's own link preview can't show well are returned (issue
+ * #62): ones with a video or GIF, or with text longer than the preview shows
+ * (see {@link needsRepost}); others give null before any media is downloaded,
+ * unless `alwaysRepost` is set. When the data can't be loaded, only a video
+ * found by the fallback is returned.
+ *
  * Alias sites: links on hosts `twitterLinks.ts` does not know
  * (`knownHost: false`) are only accepted when Twitter's own data says the
  * tweet is by the user named in the link. The unknown host itself is never
@@ -103,6 +109,31 @@ export interface TwitterMediaOptions {
     maxDownloadBytes?: number;
     /** HTTP client; defaults to the global `fetch` (injected by tests). */
     fetchImpl?: typeof fetch;
+    /**
+     * Repost every tweet. By default (issue #62) only tweets Fluxer's own
+     * link preview can't show well are reposted: see {@link needsRepost}.
+     */
+    alwaysRepost?: boolean;
+}
+
+/**
+ * Longest tweet text, in characters, that Fluxer's default link preview shows
+ * in full: its unfurler cuts a page's description at 350 characters
+ * (`fluxer_unfurl/src/resolvers/default_resolver.rs`).
+ */
+export const FLUXER_PREVIEW_TEXT_LENGTH = 350;
+
+/**
+ * Whether a tweet is worth reposting over Fluxer's own link preview (issue
+ * #62): it has a video or GIF, which the preview can't play, or its text is
+ * too long for the preview to show in full.
+ */
+export function needsRepost(tweet: SyndicatedTweet): boolean {
+    return (
+        tweet.media.some((item) => item.kind === 'video') ||
+        Array.from((tweet.text ?? '').trim()).length >
+            FLUXER_PREVIEW_TEXT_LENGTH
+    );
 }
 
 /** Default for {@link TwitterMediaOptions.maxDownloadBytes}. */
@@ -352,6 +383,17 @@ export default class TwitterMediaService {
 
         if (result.status === 'missing') {
             logger.info(`Twitter: ${link.url} does not exist or is not public`);
+            return null;
+        }
+
+        if (
+            result.status === 'ok' &&
+            !this.options.alwaysRepost &&
+            !needsRepost(result.tweet)
+        ) {
+            logger.info(
+                `Twitter: ${link.url} fits Fluxer's link preview; not reposting`
+            );
             return null;
         }
 

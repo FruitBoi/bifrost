@@ -209,8 +209,13 @@ twitter:
     # Links in ||spoilers|| get spoiler files; links in <...> and code spans
     # are ignored. Protected, deleted or age-restricted tweets are skipped
     # silently. Needs `ffmpeg` (and `yt-dlp`) on PATH (the Docker image has
-    # them).
+    # them). Only tweets Fluxer's own link preview can't show well get a
+    # reply: ones with a video or GIF, or with text over 350 characters (the
+    # preview cuts it there); other tweets are left to the preview.
     enabled: true
+    # Reply to every tweet link, even photo and text tweets the preview
+    # already shows in full.
+    alwaysRepost: false
     # Also handle links on sites that aren't known aliases but look like a
     # tweet link (https://<site>/<user>/status/<id>): the link counts when
     # Twitter's own data says that tweet is by that user, and the site is

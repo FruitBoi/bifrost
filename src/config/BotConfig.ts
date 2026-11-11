@@ -195,8 +195,15 @@ export interface BotConfig {
          * from Twitter's public embed data (yt-dlp as the fallback). The
          * reply is not bridged; Discord keeps the plain link. Videos are
          * re-encoded with ffmpeg when too large. See `services/twitter/`.
+         * Only tweets with a video or GIF, or with text too long for
+         * Fluxer's own link preview, get a reply (see `alwaysRepost`).
          */
         enabled: boolean;
+        /**
+         * Reply to every tweet link, even when Fluxer's own link preview
+         * already shows the whole tweet (no video or GIF, short text).
+         */
+        alwaysRepost: boolean;
         /**
          * Also treat links on unknown sites shaped like a tweet link
          * (`/<user>/status/<id>`) as tweets, once Twitter's own data confirms
@@ -343,6 +350,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
     },
     twitter: {
         enabled: true,
+        alwaysRepost: false,
         discoverAliases: true,
         maxLinksPerMessage: 3,
         maxSizeMb: 10,
@@ -631,13 +639,16 @@ export function twitterMediaOptions(config: BotConfig): {
     maxDurationSeconds: number;
     timeoutMs: number;
     maxConcurrent: number;
+    alwaysRepost: boolean;
 } {
-    const { maxSizeMb, maxDurationSeconds, timeoutSeconds } = config.twitter;
+    const { maxSizeMb, maxDurationSeconds, timeoutSeconds, alwaysRepost } =
+        config.twitter;
     return {
         maxBytes: Math.floor(maxSizeMb * 1024 * 1024),
         maxDurationSeconds,
         timeoutMs: timeoutSeconds * 1000,
         maxConcurrent: 2,
+        alwaysRepost,
     };
 }
 
