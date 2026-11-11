@@ -472,12 +472,28 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                 : [strippedContent]
         );
         const [ownContent, fullContent = ownContent] = bridged.texts;
+        // Literal `@name` text pings a Fluxer namesake (issue #61). Polls
+        // carry generated content, so their text is never searched.
+        const usernameMentions = isPollPresent
+            ? new Map<string, string>()
+            : await this.resolveUsernameMentions(
+                  'discord',
+                  message.guildId ?? null,
+                  [fullContent],
+                  options
+              );
 
         // Discord only reports an @everyone / @here ping when the author was
         // allowed to make it; any other one is broken so the copy cannot ping.
         const pingsEveryone = message.mentions.everyone;
-        const renderContent = (content: string): string =>
-            this.replaceEmojis(
+        const renderContent = (text: string): string => {
+            // Placeholders hold no `@`, so the everyone handling and
+            // sanitising below leave them alone.
+            const content = MentionBridgeService.replaceUsernameMentions(
+                text,
+                usernameMentions
+            );
+            return this.replaceEmojis(
                 this.sanitizeContent(
                     message,
                     (id) => {
@@ -503,6 +519,7 @@ export default class DiscordMessageTransformer extends MessageTransformer<
                 ),
                 fluxerEmojis
             );
+        };
         const emojiReplacedContent = renderContent(ownContent);
         // The content as it would be without uploading the links, for when
         // those uploads fail.
@@ -523,7 +540,10 @@ export default class DiscordMessageTransformer extends MessageTransformer<
         // Polls carry generated content; direct mentions are not part of it.
         const mentionUserIds: string[] = isPollPresent
             ? []
-            : directMentions.map((m) => m.counterpartId);
+            : [
+                  ...directMentions.map((m) => m.counterpartId),
+                  ...usernameMentions.values(),
+              ];
         const mentionRoleIds: string[] = isPollPresent
             ? []
             : roleMentions.map((m) => m.counterpartId);

@@ -3,6 +3,7 @@ import { MessagePlatform } from '../../db/entities/MessageLink';
 import { UserLink } from '../../db/entities/UserLink';
 import { LinkService } from '../LinkService';
 import logger from '../../utils/logging/logger';
+import { CounterpartMemberLookup, GeneralMember } from './memberLookup';
 
 type MentionLinkLookup = Pick<
     LinkService,
@@ -69,7 +70,30 @@ export type MentionBridgeOptions = {
     roleLookup?: CounterpartRoleLookup;
     /** The `roles.bridgeMentions` config toggle. Default true. */
     bridgeRoleMentions?: boolean;
+    /**
+     * Finds members of the OTHER platform's guild by username, so a mention
+     * of someone without an identity mapping can still ping their namesake
+     * (issue #61); absent = such mentions stay plaintext.
+     */
+    memberLookup?: CounterpartMemberLookup;
 };
+
+export type UsernameMentionsInput = {
+    /** Platform the message was written on. */
+    platform: MessagePlatform;
+    /** Id of the guild (on `platform`) the message was written in. */
+    guildId: string | null;
+    /** The names typed after `@`, as written (see extractUsernameMentions). */
+    usernames: string[];
+    /** Edits are re-transformed; skip the per-message logging then. */
+    isEdit?: boolean;
+};
+
+/** Outcome of matching a username against the other guild's members. */
+type UsernameMatch =
+    | { kind: 'match'; member: GeneralMember }
+    | { kind: 'none' }
+    | { kind: 'ambiguous'; count: number };
 
 export type UnresolvedRoleMention = {
     id: string;
@@ -117,6 +141,17 @@ const ROLE_PLACEHOLDER_PATTERN = /\uE000bfrole:([^\uE001]+)\uE001/g;
 const EVERYONE_PLACEHOLDER_PATTERN = /\uE000bfeveryone:(everyone|here)\uE001/g;
 const EVERYONE_MENTION_PATTERN = /@(everyone|here)\b/g;
 
+// A literal `@name` typed as text. The `@` must not follow a word char, `<`,
+// `/`, `@` or `:` so emails, URLs like `https://x.com/@user` and real
+// `<@id>` mentions are left alone. The name uses the characters both
+// platforms allow in usernames, and must not run on into more of them (a
+// name longer than 32 never matches a shorter prefix).
+const USERNAME_MENTION_PATTERN =
+    /(?<![\w</@:])@([A-Za-z0-9_.]{2,32})(?![A-Za-z0-9_.])/g;
+// Fenced blocks first so their backticks are not taken for inline code.
+const CODE_PATTERN = /```[\s\S]*?```|``[\s\S]*?``|`[^`]*`/g;
+const RESERVED_USERNAMES = new Set(['everyone', 'here']);
+
 /**
  * Carries user pings across the bridge. Webhooks cannot send true replies on
  * either platform, so the only way to notify someone is to inject a real
@@ -143,6 +178,7 @@ const EVERYONE_MENTION_PATTERN = /@(everyone|here)\b/g;
 export default class MentionBridgeService {
     private readonly roleLookup: CounterpartRoleLookup | null;
     private readonly bridgeRoleMentions: boolean;
+    private readonly memberLookup: CounterpartMemberLookup | null;
 
     constructor(
         private readonly linkService: MentionLinkLookup,
@@ -150,6 +186,67 @@ export default class MentionBridgeService {
     ) {
         this.roleLookup = options.roleLookup ?? null;
         this.bridgeRoleMentions = options.bridgeRoleMentions ?? true;
+        this.memberLookup = options.memberLookup ?? null;
+    }
+
+    /**
+     * Lists the non-bot members of the guild linked to `guildLink` on the
+     * other platform whose username equals `username` case-insensitively.
+     * Never throws: a failed lookup counts as nobody found.
+     */
+    private async counterpartMembersNamed(
+        guildLink: GuildLink,
+        platform: MessagePlatform,
+        username: string
+    ): Promise<GeneralMember[]> {
+        if (!this.memberLookup) return [];
+        try {
+            const members =
+                platform === 'discord'
+                    ? await this.memberLookup.findFluxerMembersByUsername(
+                          guildLink.fluxerGuildId,
+                          username
+                      )
+                    : await this.memberLookup.findDiscordMembersByUsername(
+                          guildLink.discordGuildId,
+                          username
+                      );
+            return members.filter((member) => !member.bot);
+        } catch (error: unknown) {
+            logger.warn(
+                `⚠️ Member lookup by username failed for @${username}; relaying it as plaintext:`,
+                error
+            );
+            return [];
+        }
+    }
+
+    /**
+     * Picks the member `username` refers to: the only one whose username
+     * matches exactly, else the only one matching case-insensitively.
+     * Anything else is no match or ambiguous, and pings nobody, since a
+     * wrong ping is worse than none.
+     */
+    private static matchUsername(
+        candidates: GeneralMember[],
+        username: string
+    ): UsernameMatch {
+        const lower = username.toLowerCase();
+        const insensitive = candidates.filter(
+            (member) => member.username.toLowerCase() === lower
+        );
+        const exact = insensitive.filter(
+            (member) => member.username === username
+        );
+        if (exact.length === 1) return { kind: 'match', member: exact[0] };
+        if (exact.length === 0 && insensitive.length === 1) {
+            return { kind: 'match', member: insensitive[0] };
+        }
+        if (insensitive.length === 0) return { kind: 'none' };
+        return {
+            kind: 'ambiguous',
+            count: exact.length > 1 ? exact.length : insensitive.length,
+        };
     }
 
     /** The guild link the message's guild belongs to, or null when it is not bridged. */
@@ -290,6 +387,36 @@ export default class MentionBridgeService {
                       )
                     : null;
                 if (!counterpartId) {
+                    // Someone only on this side of the bridge may still have
+                    // a namesake on the other one (issue #61).
+                    const byName =
+                        guildLink && mention.username && this.memberLookup
+                            ? MentionBridgeService.matchUsername(
+                                  await this.counterpartMembersNamed(
+                                      guildLink,
+                                      platform,
+                                      mention.username
+                                  ),
+                                  mention.username
+                              )
+                            : null;
+                    if (byName?.kind === 'match') {
+                        resolved.push({
+                            id: mention.id,
+                            counterpartId: byName.member.id,
+                        });
+                        if (!isEdit) {
+                            logger.info(
+                                `🔔 User mention bridged by username: ${platform} user ${mention.id} (${displayName(mention)}) has no account mapped and pings ${other} user ${byName.member.id} of the same username`
+                            );
+                        }
+                        continue;
+                    }
+                    if (byName?.kind === 'ambiguous' && !isEdit) {
+                        logger.info(
+                            `🔕 User mention not bridged by username: ${byName.count} ${other} members are named ${displayName(mention)}`
+                        );
+                    }
                     unresolved.push(mention);
                     continue;
                 }
@@ -309,6 +436,76 @@ export default class MentionBridgeService {
         }
 
         if (!isEdit) this.logUnresolvedUserMentions(platform, unresolved);
+        return resolved;
+    }
+
+    /**
+     * Resolves names typed as literal `@name` text (see
+     * {@link extractUsernameMentions}) to the member of the linked guild on
+     * the other platform with that username, so someone only on that side of
+     * the bridge can still be pinged (issue #61). Returns typed name (as
+     * written) → counterpart user id; names nobody (or more than one member)
+     * answers to are left out and stay plaintext.
+     */
+    async resolveUsernameMentions(
+        input: UsernameMentionsInput
+    ): Promise<Map<string, string>> {
+        const { platform, guildId, isEdit } = input;
+        const resolved = new Map<string, string>();
+        const usernames = [...new Set(input.usernames)];
+        if (usernames.length === 0 || !this.memberLookup) return resolved;
+
+        const other = platform === 'discord' ? 'fluxer' : 'discord';
+        const log = (line: string): void => {
+            if (!isEdit) logger.info(line);
+        };
+
+        try {
+            const guildLink = await this.guildLinkOf(platform, guildId);
+            if (!guildLink) return resolved;
+
+            // The lookup is case-insensitive, so `@Alice` and `@alice` share
+            // one; each spelling is then matched on its own (exact first).
+            const candidatesByName = new Map<
+                string,
+                Promise<GeneralMember[]>
+            >();
+            for (const username of usernames) {
+                const key = username.toLowerCase();
+                let candidates = candidatesByName.get(key);
+                if (!candidates) {
+                    candidates = this.counterpartMembersNamed(
+                        guildLink,
+                        platform,
+                        username
+                    );
+                    candidatesByName.set(key, candidates);
+                }
+                const match = MentionBridgeService.matchUsername(
+                    await candidates,
+                    username
+                );
+                if (match.kind === 'match') {
+                    resolved.set(username, match.member.id);
+                    log(
+                        `🔔 Username mention bridged: @${username} typed on ${platform} pings ${other} user ${match.member.id} (@${match.member.username})`
+                    );
+                } else if (match.kind === 'ambiguous') {
+                    log(
+                        `🔕 Username mention relayed as plaintext: @${username} is ambiguous, ${match.count} ${other} members answer to it`
+                    );
+                } else {
+                    log(
+                        `🔕 Username mention relayed as plaintext: no ${other} member named @${username}`
+                    );
+                }
+            }
+        } catch (error: unknown) {
+            logger.warn(
+                `⚠️ Username mention lookup failed for ${platform} message; relaying the rest as plaintext:`,
+                error
+            );
+        }
         return resolved;
     }
 
@@ -443,6 +640,39 @@ export default class MentionBridgeService {
     }
 
     /**
+     * Extracts the names typed as literal `@name` text in raw content
+     * (distinct, as written), outside inline code and code blocks. A
+     * trailing `.` ends the sentence rather than the name; `@everyone` and
+     * `@here` are never names.
+     */
+    static extractUsernameMentions(content: string): string[] {
+        const names: string[] = [];
+        forEachUsernameMention(content, (name) => {
+            if (!names.includes(name)) names.push(name);
+            return null;
+        });
+        return names;
+    }
+
+    /**
+     * Replaces every literal `@name` whose name is a key of `counterparts`
+     * with a {@link mentionPlaceholder} of the mapped user, so sanitising
+     * cannot break it. Other `@name` text and code are left untouched.
+     */
+    static replaceUsernameMentions(
+        content: string,
+        counterparts: Map<string, string>
+    ): string {
+        if (counterparts.size === 0) return content;
+        return forEachUsernameMention(content, (name) => {
+            const counterpartId = counterparts.get(name);
+            return counterpartId
+                ? MentionBridgeService.mentionPlaceholder(counterpartId)
+                : null;
+        });
+    }
+
+    /**
      * A token that survives mention sanitising and `@`-breaking unchanged;
      * {@link restoreMentionPlaceholders} turns it back into `<@id>`.
      */
@@ -506,6 +736,34 @@ export default class MentionBridgeService {
         if (toAdd.length === 0) return content;
         return toAdd.map((id) => `<@${id}> `).join('') + content;
     }
+}
+
+/**
+ * Calls `render` for every literal `@name` outside code (with the name as
+ * written, minus trailing dots) and replaces the `@name` with what it
+ * returns; null keeps the text as it was. Returns the rewritten content.
+ */
+function forEachUsernameMention(
+    content: string,
+    render: (name: string) => string | null
+): string {
+    const replaceText = (text: string): string =>
+        text.replace(USERNAME_MENTION_PATTERN, (match, raw: string) => {
+            const name = raw.replace(/\.+$/, '');
+            if (name.length < 2) return match;
+            if (RESERVED_USERNAMES.has(name.toLowerCase())) return match;
+            const rendered = render(name);
+            if (rendered === null) return match;
+            return rendered + raw.slice(name.length);
+        });
+
+    let out = '';
+    let last = 0;
+    for (const code of content.matchAll(CODE_PATTERN)) {
+        out += replaceText(content.slice(last, code.index)) + code[0];
+        last = code.index + code[0].length;
+    }
+    return out + replaceText(content.slice(last));
 }
 
 function extractIds(content: string, pattern: RegExp): string[] {

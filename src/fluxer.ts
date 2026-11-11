@@ -254,6 +254,18 @@ const startFluxerClient = async ({
                 fetchFluxerRoles: (id) => fluxerEntityResolver.fetchRoles(id),
             },
             bridgeRoleMentions: botConfig.roles.bridgeMentions,
+            memberLookup: {
+                findDiscordMembersByUsername: (guildId, username) =>
+                    discordEntityResolver.findMembersByUsername(
+                        guildId,
+                        username
+                    ),
+                findFluxerMembersByUsername: (guildId, username) =>
+                    fluxerEntityResolver.findMembersByUsername(
+                        guildId,
+                        username
+                    ),
+            },
         }),
         new ReplyLinkResolver(linkService),
         new ChannelLinkBridge(linkService, new ReplyLinkResolver(linkService))

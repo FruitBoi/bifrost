@@ -16,6 +16,7 @@ import {
 } from '../../utils/fluxerApiGuard';
 import EntityResolver from '../entityResolver/EntityResolver';
 import { GeneralRole } from '../mentionBridge/MentionBridgeService';
+import { GeneralMember } from '../mentionBridge/memberLookup';
 
 const EMOJI_FAILURE_TTL_SECONDS = 30;
 const ROLE_FAILURE_TTL_SECONDS = 30;
@@ -32,6 +33,10 @@ export default class FluxerEntityResolver implements EntityResolver<
         useClones: false,
     });
     private readonly roleCache = new NodeCache({
+        stdTTL: 60,
+        useClones: false,
+    });
+    private readonly memberCache = new NodeCache({
         stdTTL: 60,
         useClones: false,
     });
@@ -228,6 +233,73 @@ export default class FluxerEntityResolver implements EntityResolver<
                 err
             );
             this.roleCache.set(id, [], ROLE_FAILURE_TTL_SECONDS);
+            return [];
+        }
+    }
+
+    /**
+     * Members of the guild whose username equals `username` case-insensitively.
+     * Uses the guild member search (prefix-style), then filters to exact
+     * username matches; nicknames and display names are ignored. The search
+     * hit has no bot flag, so it is read from the hydrated/cached member and
+     * defaults to false. If the search fails, the cached members are scanned
+     * instead. Results (including empty ones) are cached for a minute; a
+     * failure is logged and yields [] for a short while.
+     */
+    async findMembersByUsername(
+        guildId: string,
+        username: string
+    ): Promise<GeneralMember[]> {
+        const wanted = username.toLowerCase();
+        const key = `${guildId}:${wanted}`;
+
+        const cached = this.memberCache.get<GeneralMember[]>(key);
+        if (cached) return cached;
+        if (isFluxerApiBlocked()) return [];
+
+        try {
+            const guild = await this.ensureClient().guilds.fetch(guildId);
+
+            let members: GeneralMember[];
+            try {
+                const { members: hits } = await guild.members.search({
+                    query: username,
+                    limit: 100,
+                });
+                members = hits
+                    .filter((hit) => hit.username.toLowerCase() === wanted)
+                    .map((hit) => {
+                        const member =
+                            hit.member ?? guild.members.get(hit.userId);
+                        return {
+                            id: hit.userId,
+                            username: hit.username,
+                            bot: member?.user.bot ?? false,
+                        };
+                    });
+            } catch (searchErr) {
+                if (isFluxerApiBlockError(searchErr)) throw searchErr;
+                logger.warn(
+                    `⚠️ Fluxer member search failed for guild ${guildId}, scanning cached members for @${username}:`,
+                    searchErr
+                );
+                members = [...guild.members.values()]
+                    .filter((m) => m.user.username.toLowerCase() === wanted)
+                    .map((m) => ({
+                        id: m.id,
+                        username: m.user.username,
+                        bot: m.user.bot,
+                    }));
+            }
+            this.memberCache.set(key, members);
+            return members;
+        } catch (err) {
+            if (isFluxerApiBlockError(err)) markFluxerApiBlocked();
+            logger.warn(
+                `⚠️ Could not search Fluxer members for guild ${guildId}, relaying @${username} as plaintext:`,
+                err
+            );
+            this.memberCache.set(key, [], ROLE_FAILURE_TTL_SECONDS);
             return [];
         }
     }

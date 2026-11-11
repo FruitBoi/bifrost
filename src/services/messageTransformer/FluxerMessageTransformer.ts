@@ -250,7 +250,20 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             message.content,
             snapshot?.content ?? '',
         ]);
-        const [ownContent, snapshotContent] = bridged.texts;
+        const [bridgedContent, snapshotContent] = bridged.texts;
+        // Literal `@name` text pings a Discord namesake (issue #61). The
+        // placeholders hold no `@`, so neither everyonePlaceholders nor
+        // breakMentions can touch them.
+        const usernameMentions = await this.resolveUsernameMentions(
+            'fluxer',
+            message.guildId ?? null,
+            [bridgedContent],
+            options
+        );
+        const ownContent = MentionBridgeService.replaceUsernameMentions(
+            bridgedContent,
+            usernameMentions
+        );
         const sanitizedContent = this.sanitizeContent(
             message,
             (id) => {
@@ -325,7 +338,10 @@ export default class FluxerMessageTransformer extends MessageTransformer<
             );
         }
 
-        const allMentionUserIds = directMentions.map((m) => m.counterpartId);
+        const allMentionUserIds = [
+            ...directMentions.map((m) => m.counterpartId),
+            ...usernameMentions.values(),
+        ];
         let replyQuote: ReplyQuote | null = null;
         const referenced = message.referencedMessage;
         if (referenced) {

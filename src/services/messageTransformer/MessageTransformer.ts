@@ -72,6 +72,36 @@ export default abstract class MessageTransformer<SourceMessage, TargetMessage> {
         };
     }
 
+    /**
+     * Resolves the names typed as literal `@name` in `texts` (the message's
+     * own content, from `platform`) to members of the linked guild on the
+     * other side with that username (issue #61). Feed the result to
+     * MentionBridgeService.replaceUsernameMentions before sanitising, so the
+     * pings survive; names nobody answers to are absent and stay plaintext.
+     */
+    protected async resolveUsernameMentions(
+        platform: MessagePlatform,
+        guildId: string | null,
+        texts: string[],
+        options: TransformOptions
+    ): Promise<Map<string, string>> {
+        if (!this.mentionBridge) return new Map();
+        const usernames = [
+            ...new Set(
+                texts.flatMap((text) =>
+                    MentionBridgeService.extractUsernameMentions(text)
+                )
+            ),
+        ];
+        if (usernames.length === 0) return new Map();
+        return this.mentionBridge.resolveUsernameMentions({
+            platform,
+            guildId,
+            usernames,
+            isEdit: options.isEdit,
+        });
+    }
+
     abstract transformMessage(
         message: SourceMessage,
         otherEmojis?: GeneralEmoji[],

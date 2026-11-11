@@ -27,7 +27,7 @@
 - Lets your fish paper-trade the real stock market: `!b fishtrade Bubbles $AAPL` (see [Fish trading](#fish-trading))
 - Copy a Discord server's custom emojis and stickers to the linked Fluxer server with one command (see [Emoji and sticker transfer](#emoji-and-sticker-transfer))
 - Copy a Discord server's role icons to the same-named Fluxer roles (see [Role icon transfer](#role-icon-transfer))
-- Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role. Members can link their own accounts with `!b iam`, which the other account must confirm (see [Identity mapping](#identity-mapping))
+- Map a Fluxer account to a Discord account so pings reach the same person on both sides, and role pings reach the same-named role. People who are only on one side can still be pinged by username (see [Pinging by username](#pinging-by-username)). Members can link their own accounts with `!b iam`, which the other account must confirm (see [Identity mapping](#identity-mapping))
 - Reminders: `?remindme 1h30min take the pizza out` or `?remindme Monday 7pm call mum` pings you back in that channel (see [Reminders](#reminders))
 - Mass-delete messages for moderators: `?clean 20 -bots` (see [Moderation](#moderation))
 - Copy a linked channel's message history to the other platform, in the style of bridged messages: `!b history 500` (see [History transfer](#history-transfer))
@@ -290,13 +290,17 @@ The `role` command does three things at once and reports the outcome of each:
 2. **Identity mapping** — the two accounts are recorded as the same person for this server pair. Mappings are one-to-one: re-running the command for either account replaces that account's previous mapping. They are removed together with the server link.
 3. **Thread membership** — for every bridged thread pair (thread↔thread link) whose Discord thread the Discord user is a member of, the Fluxer member is added to the Fluxer thread. Adding someone to a public Fluxer thread requires the bot to be able to manage the parent channel; threads it could not add the member to are listed in the reply.
 
+### Pinging by username
+
+Someone who is only on one side of the bridge can still be pinged from the other side by their username. When a message has an `@name` (typed as text, or a mention of a user without a mapping), the bridge looks for a member of the linked server on the other platform whose username is exactly `name` and relays a real ping to them. An exact match wins; otherwise the match ignores letter case. Bots are skipped, and when nobody (or more than one member) matches, the text is relayed as it was, without a ping. Nicknames and display names are not matched, and `@name` inside code is left alone. A mapping always takes precedence over a username match.
+
 ### Self-service linking
 
 Members can link their own accounts with `iam`, without an admin. Reply to the bridged copy of a message you wrote on the other platform (for example, on Fluxer, reply to the copy of your own Discord message) and run `!b iam`. The bot posts a confirmation request on the other platform, replying to your original message and pinging only that account. The request is only a question: the other account has to confirm it, so nobody can link an account they do not control.
 
 From the other account, run `!b iam yes` (alias `confirm`) within 10 minutes, anywhere in the linked server. The two accounts are then mapped exactly as `!b role` would map them, so pings reach you on both sides. `!b iam no` (alias `deny`) dismisses the request instead.
 
-The bot never guesses mappings from names, IDs, or who replies to whom. In addition:
+The bot never guesses mappings from names, IDs, or who replies to whom (a [username ping](#pinging-by-username) pings that one message only and records nothing). In addition:
 
 - `iam` never replaces an existing mapping. If either account is already mapped, it refuses. Run `!b iam remove` (alias `unlink`) to remove your own mapping first, or ask an admin to change it with `!b role`.
 - There is one pending request per target account; a new request replaces the old one. You can send one request per minute.

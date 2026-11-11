@@ -16,6 +16,10 @@ import {
 import LinkProvisioner, {
     LinkTarget,
 } from '../../src/services/LinkProvisioner';
+import {
+    CounterpartMemberLookup,
+    GeneralMember,
+} from '../../src/services/mentionBridge/memberLookup';
 
 let counter = 0;
 export const nextId = (prefix = 'id') => `${prefix}-${++counter}`;
@@ -521,6 +525,30 @@ export function fakeFluxerThread(overrides: Record<string, unknown> = {}) {
         delete: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     };
+}
+
+/**
+ * In-memory member lookup for username mentions: matches like the real
+ * resolvers do (username equal case-insensitively), ignoring the guild id.
+ */
+export class FakeMemberLookup implements CounterpartMemberLookup {
+    discordMembers: GeneralMember[] = [];
+    fluxerMembers: GeneralMember[] = [];
+
+    async findDiscordMembersByUsername(guildId: string, username: string) {
+        void guildId;
+        return named(this.discordMembers, username);
+    }
+
+    async findFluxerMembersByUsername(guildId: string, username: string) {
+        void guildId;
+        return named(this.fluxerMembers, username);
+    }
+}
+
+function named(members: GeneralMember[], username: string) {
+    const lower = username.toLowerCase();
+    return members.filter((m) => m.username.toLowerCase() === lower);
 }
 
 export const flush = () => new Promise((r) => setTimeout(r, 0));

@@ -12,6 +12,7 @@ import NodeCache from 'node-cache';
 import logger from '../../utils/logging/logger';
 import EntityResolver from '../entityResolver/EntityResolver';
 import { GeneralRole } from '../mentionBridge/MentionBridgeService';
+import { GeneralMember } from '../mentionBridge/memberLookup';
 
 const ROLE_FAILURE_TTL_SECONDS = 30;
 
@@ -27,6 +28,10 @@ export default class DiscordEntityResolver implements EntityResolver<
         useClones: false,
     });
     private readonly roleCache = new NodeCache({
+        stdTTL: 60,
+        useClones: false,
+    });
+    private readonly memberCache = new NodeCache({
         stdTTL: 60,
         useClones: false,
     });
@@ -195,6 +200,55 @@ export default class DiscordEntityResolver implements EntityResolver<
                 err
             );
             this.roleCache.set(id, [], ROLE_FAILURE_TTL_SECONDS);
+            return [];
+        }
+    }
+
+    /**
+     * Members of the guild whose username equals `username` case-insensitively.
+     * Uses the REST member search (no privileged GuildMembers intent needed),
+     * which is prefix-based, so results are filtered down to exact username
+     * matches. Nicknames and display names are deliberately ignored. Results
+     * (including empty ones) are cached for a minute; a failure is logged and
+     * yields [] for a short while, so the mention is relayed as plain text.
+     */
+    async findMembersByUsername(
+        guildId: string,
+        username: string
+    ): Promise<GeneralMember[]> {
+        const wanted = username.toLowerCase();
+        const key = `${guildId}:${wanted}`;
+
+        const cached = this.memberCache.get<GeneralMember[]>(key);
+        if (cached) return cached;
+
+        try {
+            const guild = await this.fetchGuild(guildId);
+            if (!guild) {
+                throw new Error('Discord guild not found');
+            }
+
+            const found = await guild.members.search({
+                query: username,
+                limit: 100,
+            });
+            const members = [...found.values()]
+                .filter(
+                    (member) => member.user.username.toLowerCase() === wanted
+                )
+                .map((member) => ({
+                    id: member.id,
+                    username: member.user.username,
+                    bot: member.user.bot,
+                }));
+            this.memberCache.set(key, members);
+            return members;
+        } catch (err) {
+            logger.warn(
+                `⚠️ Could not search Discord members for guild ${guildId}, relaying @${username} as plaintext:`,
+                err
+            );
+            this.memberCache.set(key, [], ROLE_FAILURE_TTL_SECONDS);
             return [];
         }
     }
