@@ -112,11 +112,9 @@ export function parseOpsecArgs(args: string[]): OpsecArgs {
 export function opsecStartMessage(endsAt: number): string {
     const seconds = Math.floor(endsAt / 1000);
     return [
-        '🚨🔒🤫🍆💦🔥🫣🙈🚫👀🕶️🚨🔒🤫🍆💦🔥🫣🙈🚫👀🕶️',
-        '🍑😳💋🔞🥵😏🌶️🍌🛑🔐🤐🚷🍑😳💋🔞🥵😏🌶️🍌',
+        '🚨🔒🤫🍆💦🔥🫣🙈👀🕶️🍑🥵🌶️',
         '**A fluxer sex session is currently occurring that you are not privy to. Have a nice day Mr. Thiel.**',
-        '🕶️👀🚫🙈🫣🔥💦🍆🤫🔒🚨🕶️👀🚫🙈🫣🔥💦🍆🤫🔒🚨',
-        '🍌🌶️😏🥵🔞💋😳🍑🚷🤐🔐🛑🍌🌶️😏🥵🔞💋😳🍑',
+        '🌶️🥵🍑🕶️👀🙈🫣🔥💦🍆🤫🔒🚨',
         `-# Bridging to Discord resumes <t:${seconds}:R>.`,
     ].join('\n');
 }

@@ -16,7 +16,17 @@ function setup({ bot = false, guildId = 'guild-1' as string | null } = {}) {
             `${sent.content.includes('has ended') ? 'end' : 'start'}:${service.isActive('chan-1')}`
         );
     });
-    const handler = new OpsecFluxerCommandHandler(client, service, relay);
+    const sendToDiscord = vi.fn<
+        (source: Message, content: string) => Promise<void>
+    >(async () => {
+        log.push(`discord-start:${service.isActive('chan-1')}`);
+    });
+    const handler = new OpsecFluxerCommandHandler(
+        client,
+        service,
+        relay,
+        sendToDiscord
+    );
     const reply = vi.fn().mockResolvedValue({ id: 'r' });
     const message = {
         id: '1',
@@ -25,7 +35,16 @@ function setup({ bot = false, guildId = 'guild-1' as string | null } = {}) {
         author: { id: 'a', bot, username: 'a' },
         reply,
     } as unknown as Message;
-    return { service, log, send, relay, handler, reply, message };
+    return {
+        service,
+        log,
+        send,
+        relay,
+        sendToDiscord,
+        handler,
+        reply,
+        message,
+    };
 }
 
 describe('OpsecFluxerCommandHandler', () => {
@@ -36,16 +55,22 @@ describe('OpsecFluxerCommandHandler', () => {
         vi.useRealTimers();
     });
 
-    it('bridges the start message before pausing, the end message after', async () => {
-        const { service, log, handler, message, send } = setup();
+    it('sends the start message to Discord only before pausing, bridges the end message after', async () => {
+        const { service, log, handler, message, send, sendToDiscord, reply } =
+            setup();
         await handler.handleCommand(message, 'opsec', 'on', '10');
-        expect(log).toEqual(['start:false']);
-        expect(send.mock.calls[0][1].content).toContain('Mr. Thiel');
+        expect(log).toEqual(['discord-start:false']);
+        expect(sendToDiscord.mock.calls[0][0]).toBe(message);
+        expect(sendToDiscord.mock.calls[0][1]).toContain('Mr. Thiel');
+        expect(send).not.toHaveBeenCalled();
+        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain(
+            'has started'
+        );
         expect(service.isActive('chan-1')).toBe(true);
 
         await vi.advanceTimersByTimeAsync(10 * 60_000);
-        expect(log).toEqual(['start:false', 'end:false']);
-        expect(send).toHaveBeenCalledTimes(2);
+        expect(log).toEqual(['discord-start:false', 'end:false']);
+        expect(send).toHaveBeenCalledTimes(1);
     });
 
     it('off ends the session and posts the end message', async () => {
@@ -54,7 +79,7 @@ describe('OpsecFluxerCommandHandler', () => {
         await handler.handleCommand(message, 'opsex', 'off');
         await vi.advanceTimersByTimeAsync(0);
         expect(service.isActive('chan-1')).toBe(false);
-        expect(log).toEqual(['start:false', 'end:false']);
+        expect(log).toEqual(['discord-start:false', 'end:false']);
     });
 
     it('off when inactive says so', async () => {
@@ -67,18 +92,19 @@ describe('OpsecFluxerCommandHandler', () => {
     });
 
     it('on while active extends without bridging', async () => {
-        const { handler, message, reply, relay } = setup();
+        const { handler, message, reply, relay, sendToDiscord } = setup();
         await handler.handleCommand(message, 'opsec', 'on', '5');
         await handler.handleCommand(message, 'opsec', 'on', '20');
-        expect(relay).toHaveBeenCalledTimes(1);
-        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain(
+        expect(sendToDiscord).toHaveBeenCalledTimes(1);
+        expect(relay).not.toHaveBeenCalled();
+        expect(reply.mock.calls[1][0].embeds[0].data.description).toContain(
             'extended'
         );
     });
 
-    it('still pauses when bridging the start fails', async () => {
-        const { service, relay, handler, message } = setup();
-        relay.mockRejectedValueOnce(new Error('down'));
+    it('still pauses when sending the start to Discord fails', async () => {
+        const { service, sendToDiscord, handler, message } = setup();
+        sendToDiscord.mockRejectedValueOnce(new Error('down'));
         await handler.handleCommand(message, 'opsec', 'on');
         expect(service.isActive('chan-1')).toBe(true);
     });

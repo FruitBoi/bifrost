@@ -12,9 +12,9 @@ const USAGE = '`opsec on [duration]` / `opsec off` (alias `opsex`)';
 
 /**
  * `opsec` / `opsex` (issue #60): pauses bridging of this channel or thread to
- * Discord for a while. The announcements are posted on Fluxer and bridged to
- * Discord, the start one before the pause begins and the end one after it
- * was removed, since the relay skips paused channels.
+ * Discord for a while. The start notice is sent to Discord only (issue #68)
+ * before the pause begins; the end one is posted on Fluxer and bridged after
+ * the pause was removed, since the relay skips paused channels.
  */
 export default class OpsecFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -22,6 +22,9 @@ export default class OpsecFluxerCommandHandler extends FluxerCommandHandler {
         private readonly opsecService: OpsecService,
         private readonly relayReply:
             | ((sent: Message) => Promise<void>)
+            | null = null,
+        private readonly sendToDiscord:
+            | ((source: Message, content: string) => Promise<unknown>)
             | null = null
     ) {
         super(fluxerClient);
@@ -54,6 +57,19 @@ export default class OpsecFluxerCommandHandler extends FluxerCommandHandler {
             await this.relayReply(sent);
         } catch (err: unknown) {
             logger.error('❌ Failed to bridge an opsec announcement:', err);
+        }
+    }
+
+    /** Sends the start notice to Discord only, never throwing. */
+    private async announceOnDiscord(
+        source: Message,
+        content: string
+    ): Promise<void> {
+        if (!this.sendToDiscord) return;
+        try {
+            await this.sendToDiscord(source, content);
+        } catch (err: unknown) {
+            logger.error('❌ Failed to send the opsec start message:', err);
         }
     }
 
@@ -133,11 +149,20 @@ export default class OpsecFluxerCommandHandler extends FluxerCommandHandler {
                     );
                     return;
                 }
-                await this.announce(
-                    channelId,
+                await this.announceOnDiscord(
+                    message,
                     opsecStartMessage(Date.now() + parsed.durationMs)
                 );
-                this.opsecService.start(channelId, parsed.durationMs, onEnd);
+                const { endsAt } = this.opsecService.start(
+                    channelId,
+                    parsed.durationMs,
+                    onEnd
+                );
+                await this.reply(
+                    message,
+                    EmbedColors.Info,
+                    `A sex session has started. Bridging to Discord resumes <t:${Math.floor(endsAt / 1000)}:R>.`
+                );
                 return;
             }
         }

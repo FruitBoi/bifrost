@@ -137,6 +137,25 @@ export default class FluxerToDiscordMessageRelay extends MessageRelay<Message> {
         );
     }
 
+    /**
+     * Posts `content` as the bot on the Discord side of the Fluxer channel or
+     * thread `source` is in, with no Fluxer copy (the opsec start notice,
+     * issue #68). Returns false when that channel is not linked.
+     */
+    public async sendNoticeToDiscord(
+        source: Message,
+        content: string
+    ): Promise<boolean> {
+        const linkedChannel = await this.resolveLink(source);
+        if (!linkedChannel) return false;
+        await this.sendPayload(linkedChannel, {
+            content,
+            username: source.client.user?.username || 'Bifröst',
+            avatarURL: source.client.user?.avatarURL() || '',
+        });
+        return true;
+    }
+
     public async relayMessage(message: Message): Promise<void> {
         const linkService = this.getLinkService();
 

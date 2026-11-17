@@ -561,7 +561,8 @@ const startFluxerClient = async ({
     const opsecHandler = new OpsecFluxerCommandHandler(
         client,
         opsecService,
-        bridgeCommandMessage
+        bridgeCommandMessage,
+        (source, content) => messageRelay.sendNoticeToDiscord(source, content)
     );
     for (const name of OPSEC_COMMAND_NAMES) {
         commandRegistry.registerCommand(name, opsecHandler);
