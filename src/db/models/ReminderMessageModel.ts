@@ -12,6 +12,7 @@ export class ReminderMessageModel extends Model {
     declare guildId: string;
     declare channelId: string;
     declare message: string;
+    declare reminderId: number | null;
     declare createdAt: Date;
 }
 
@@ -50,6 +51,10 @@ ReminderMessageModel.init(
         message: {
             type: DataTypes.TEXT,
             allowNull: false,
+        },
+        reminderId: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
         },
         // Set explicitly by the repository (the service's clock), so it is a
         // plain attribute rather than a Sequelize-managed timestamp.

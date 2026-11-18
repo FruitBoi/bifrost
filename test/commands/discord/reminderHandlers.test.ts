@@ -41,6 +41,7 @@ function makeService() {
         recordMessage: vi.fn().mockResolvedValue(undefined),
         findMessage: vi.fn().mockResolvedValue(null),
         lastDelivered: vi.fn().mockResolvedValue(null),
+        cancelByMessage: vi.fn(),
     };
 }
 
@@ -55,6 +56,7 @@ function makeReminderMessage(
         guildId: 'guild-1',
         channelId: 'chan-1',
         message: 'water the plants',
+        reminderId: null,
         createdAt: NOW,
         ...overrides,
     };
@@ -326,6 +328,7 @@ describe('RemindMeDiscordCommandHandler', () => {
             guildId: 'guild-1',
             channelId: 'chan-1',
             message: 'water the plants',
+            reminderId: 12,
         });
     });
 
@@ -386,6 +389,7 @@ describe('RemindMeDiscordCommandHandler', () => {
             guildId: 'guild-1',
             channelId: 'chan-1',
             message: 'water the plants',
+            reminderId: 7,
         });
     });
 
@@ -541,6 +545,7 @@ describe('RemindMeDiscordCommandHandler snooze (issue #58)', () => {
                 guildId: 'guild-1',
                 channelId: 'chan-2',
                 message: 'stretch',
+                reminderId: 11,
             });
         }
     );
@@ -653,6 +658,60 @@ describe('RemindMeDiscordCommandHandler snooze (issue #58)', () => {
             message: 'bins',
         });
         expect(service.recordMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('RemindMeDiscordCommandHandler cancel (issue #65)', () => {
+    let service: ReturnType<typeof makeService>;
+    let handler: RemindMeDiscordCommandHandler;
+
+    const run = async (content: string, replyTo?: string) => {
+        const { message, reply } = makeMessage({ content, replyTo });
+        const args = content.split(/\s+/).slice(1);
+        await handler.handleCommand(message, 'remindme', ...args);
+        return reply;
+    };
+
+    beforeEach(() => {
+        service = makeService();
+        handler = new RemindMeDiscordCommandHandler(
+            client,
+            service as unknown as ReminderService,
+            makeTimezoneService(service),
+            TRIGGERS
+        );
+    });
+
+    it('cancels the reminder of the replied-to "Reminder set" message', async () => {
+        service.cancelByMessage.mockResolvedValue({
+            ok: true,
+            reminder: makeReminder({ id: 9 }),
+        });
+        const reply = await run('?remindme cancel', 'bot-msg');
+        expect(service.cancelByMessage).toHaveBeenCalledWith(
+            'discord',
+            'bot-msg',
+            'author'
+        );
+        expect(replied(reply)).toEqual(['Reminder **#9** cancelled.']);
+        expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it('explains how to cancel without a reply', async () => {
+        const reply = await run('?remindme cancel');
+        expect(service.cancelByMessage).not.toHaveBeenCalled();
+        expect(replied(reply)[0]).toContain('`?remindme cancel`');
+    });
+
+    it('relays why the reminder could not be cancelled', async () => {
+        service.cancelByMessage.mockResolvedValue({
+            ok: false,
+            reason: 'gone',
+        });
+        const reply = await run('?remindme cancel', 'bot-msg');
+        expect(replied(reply)).toEqual([
+            'That reminder already went off or was deleted.',
+        ]);
     });
 });
 

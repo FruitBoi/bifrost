@@ -23,7 +23,9 @@ import {
     timezonePromptMessage,
 } from '../../timezoneCommand';
 import {
+    cancelFailureMessage,
     extractChannelId,
+    isCancelArgs,
     NOT_YOUR_REMINDER_MESSAGE,
     nothingToSnoozeMessage,
     parseRemindMeArgs,
@@ -86,7 +88,8 @@ export function memberPermissionsIn(
  * read in the user's time zone; without one the reminder waits while the
  * user is asked to set it with `timezone`. `remindme snooze <time>` (or
  * `again`) sets the replied-to reminder, or the last one that went off,
- * again (issue #58).
+ * again (issue #58). `remindme cancel`, as a reply to a "Reminder set"
+ * message, cancels that reminder (issue #65).
  */
 export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -169,6 +172,10 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
                 COMMAND_PREFIX,
                 ...this.triggerPrefixes,
             ]) ?? args.join(' ');
+        if (isCancelArgs(raw)) {
+            await this.cancel(message);
+            return;
+        }
         const snooze = parseSnoozeArgs(raw);
         if (snooze.snooze) {
             await this.snooze(message, message.guildId, snooze);
@@ -341,7 +348,8 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
 
     /**
      * Remembers a "Reminder set" reply so that replying to it with
-     * `remindme snooze <time>` sets the same reminder again (issue #58).
+     * `remindme snooze <time>` sets the same reminder again (issue #58), and
+     * `remindme cancel` cancels it (issue #65).
      */
     private async recordSet(sent: Message, reminder: Reminder): Promise<void> {
         await this.reminderService.recordMessage({
@@ -352,7 +360,60 @@ export default class RemindMeFluxerCommandHandler extends FluxerCommandHandler {
             guildId: reminder.guildId,
             channelId: reminder.channelId,
             message: reminder.message,
+            reminderId: reminder.id,
         });
+    }
+
+    /**
+     * `remindme cancel` (issue #65): cancels the reminder whose "Reminder
+     * set" message the command replies to.
+     */
+    private async cancel(message: Message): Promise<void> {
+        const p = reminderHintPrefix(this.triggerPrefixes);
+        const repliedId = message.messageReference?.messageId;
+        if (!repliedId) {
+            await this.reply(
+                message,
+                cancelFailureMessage('no_reply', p),
+                EmbedColors.Error
+            );
+            return;
+        }
+        let result;
+        try {
+            result = await this.reminderService.cancelByMessage(
+                'fluxer',
+                repliedId,
+                message.author.id
+            );
+        } catch (err) {
+            logger.error(
+                `❌ Could not cancel a Fluxer reminder for user ${message.author.id}:`,
+                err
+            );
+            await this.reply(
+                message,
+                `Could not cancel the reminder: ${(err as Error).message}`,
+                EmbedColors.Error
+            );
+            return;
+        }
+        if (!result.ok) {
+            await this.reply(
+                message,
+                cancelFailureMessage(result.reason, p),
+                EmbedColors.Error
+            );
+            return;
+        }
+        logger.info(
+            `🗑️ Fluxer reminder #${result.reminder.id} cancelled by ${message.author.id} (reply to ${repliedId})`
+        );
+        await this.reply(
+            message,
+            `Reminder **#${result.reminder.id}** cancelled.`,
+            EmbedColors.Success
+        );
     }
 
     /**

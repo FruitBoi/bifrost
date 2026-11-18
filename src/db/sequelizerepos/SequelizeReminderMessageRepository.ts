@@ -26,6 +26,7 @@ function toReminderMessage(model: ReminderMessageModel): ReminderMessage {
         guildId: row.guildId,
         channelId: row.channelId,
         message: row.message,
+        reminderId: row.reminderId ?? null,
         createdAt: toDate(row.createdAt),
     };
 }

@@ -6,7 +6,8 @@ export type ReminderMessageKind = 'set' | 'delivered';
 /**
  * One of the bot's own messages that belongs to a reminder (issue #58), so
  * `remindme again` / `remindme snooze` can find the reminder a user replies
- * to, or the last one that went off. Kept apart from `reminders` because
+ * to, or the last one that went off, and `remindme cancel` can cancel it
+ * (issue #65). Kept apart from `reminders` because
  * delivered reminders are deleted from that table; rows are pruned after
  * `REMINDER_MESSAGE_RETENTION_MS`.
  */
@@ -22,7 +23,16 @@ export interface ReminderMessage {
     channelId: string;
     /** The reminder text. */
     message: string;
+    /**
+     * The reminder a 'set' message confirmed, so replying to it with
+     * `remindme cancel` deletes it (issue #65); null for delivered messages
+     * and rows recorded before it was kept.
+     */
+    reminderId: number | null;
     createdAt: Date;
 }
 
-export type RecordReminderMessageData = Omit<ReminderMessage, 'createdAt'>;
+export type RecordReminderMessageData = Omit<
+    ReminderMessage,
+    'createdAt' | 'reminderId'
+> & { reminderId?: number | null };

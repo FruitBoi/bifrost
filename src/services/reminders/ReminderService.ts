@@ -56,6 +56,23 @@ export type CreateReminderResult =
     | { ok: true; reminder: Reminder }
     | { ok: false; reason: CreateReminderFailure };
 
+/**
+ * Why `remindme cancel` could not cancel (issue #65): the replied-to message
+ * is not a remembered reminder message, belongs to someone else, is a
+ * delivered reminder, predates reminder IDs being kept, or its reminder
+ * already went off or was deleted.
+ */
+export type CancelReminderFailure =
+    | 'not_found'
+    | 'not_yours'
+    | 'delivered'
+    | 'unknown_reminder'
+    | 'gone';
+
+export type CancelReminderResult =
+    | { ok: true; reminder: Reminder }
+    | { ok: false; reason: CancelReminderFailure };
+
 export interface ReminderServiceOptions {
     /** Clock; defaults to `Date.now`. Tests pass a fixed function. */
     now?: () => number;
@@ -191,7 +208,11 @@ export default class ReminderService {
         if (!this.messageRepo) return;
         const now = this.now();
         try {
-            await this.messageRepo.save({ ...data, createdAt: new Date(now) });
+            await this.messageRepo.save({
+                ...data,
+                reminderId: data.reminderId ?? null,
+                createdAt: new Date(now),
+            });
         } catch (err) {
             logger.warn(
                 `⚠️ Could not remember ${data.kind} reminder message ${data.messageId} on ${data.platform}:`,
@@ -237,6 +258,44 @@ export default class ReminderService {
             'delivered',
             new Date(this.retentionCutoff())
         );
+    }
+
+    /**
+     * Cancels the reminder whose "Reminder set" message is `messageId`
+     * (issue #65: replying to it with `remindme cancel`). Only the owner may
+     * cancel; a delivered message, or a set message whose reminder already
+     * went off or was deleted, cannot be cancelled. The reminder must still
+     * match the message (user, channel and text) so a reused ID never
+     * cancels someone else's reminder.
+     */
+    async cancelByMessage(
+        platform: ReminderPlatform,
+        messageId: string,
+        userId: string
+    ): Promise<CancelReminderResult> {
+        const source = await this.findMessage(platform, messageId);
+        if (source === null) return { ok: false, reason: 'not_found' };
+        if (source.userId !== userId) return { ok: false, reason: 'not_yours' };
+        if (source.kind === 'delivered') {
+            return { ok: false, reason: 'delivered' };
+        }
+        if (source.reminderId === null) {
+            return { ok: false, reason: 'unknown_reminder' };
+        }
+        const reminder = await this.repo.findById(source.reminderId);
+        if (
+            !reminder ||
+            reminder.platform !== platform ||
+            reminder.userId !== source.userId ||
+            reminder.channelId !== source.channelId ||
+            reminder.message !== source.message
+        ) {
+            return { ok: false, reason: 'gone' };
+        }
+        if (!(await this.repo.deleteById(reminder.id))) {
+            return { ok: false, reason: 'gone' };
+        }
+        return { ok: true, reminder };
     }
 
     private retentionCutoff(): number {

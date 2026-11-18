@@ -6,7 +6,9 @@
  * issue #27 the time may also be a date and/or time of day (`Oct 26 20:15`,
  * `Monday 7pm`, `tomorrow`), parsed by {@link parseReminderDate}. Since
  * issue #58 `remindme snooze <time>` / `remindme again <time>` sets an
- * existing reminder again ({@link parseSnoozeArgs}).
+ * existing reminder again ({@link parseSnoozeArgs}). Since issue #65
+ * `remindme cancel`, as a reply to a "Reminder set" message, cancels that
+ * reminder ({@link isCancelArgs}).
  */
 import { parseChannelRef } from '../../utils/channelRef';
 import { parseReminderDate, ReminderDateSpec } from './reminderDate';
@@ -293,6 +295,45 @@ export const NOT_YOUR_REMINDER_MESSAGE =
 /** Reply to text after the time in the snooze form (issue #58). */
 export const SNOOZE_ONLY_TIME_MESSAGE =
     'Snoozing only takes a time, e.g. `snooze 10m` or `again tomorrow 9am`: the reminder keeps its text and channel.';
+
+/**
+ * True when everything after `remindme` is the cancel form (issue #65):
+ * `cancel` as the first word, in any case. A normal reminder must start
+ * with a time, so nothing valid is lost; anything after the word is ignored
+ * (`cancel pls`).
+ */
+export function isCancelArgs(raw: string): boolean {
+    return raw.trim().split(/\s+/)[0].toLowerCase() === 'cancel';
+}
+
+/** Why `remindme cancel` could not cancel (see `CancelReminderFailure`). */
+export type CancelFailureReason =
+    | 'no_reply'
+    | 'not_found'
+    | 'not_yours'
+    | 'delivered'
+    | 'unknown_reminder'
+    | 'gone';
+
+/** Reply when `remindme cancel` cannot cancel (issue #65). */
+export function cancelFailureMessage(
+    reason: CancelFailureReason,
+    prefix: string
+): string {
+    switch (reason) {
+        case 'no_reply':
+        case 'not_found':
+            return `To cancel a reminder, reply to its "Reminder set" message with \`${prefix}remindme cancel\`, or use \`${prefix}reminder delete <id>\` (see \`${prefix}reminders\`).`;
+        case 'not_yours':
+            return 'You can only cancel your own reminders.';
+        case 'delivered':
+            return `That reminder already went off. Reply with \`${prefix}remindme snooze <time>\` to set it again.`;
+        case 'unknown_reminder':
+            return `That reminder cannot be cancelled by reply; use \`${prefix}reminder delete <id>\` (see \`${prefix}reminders\`).`;
+        case 'gone':
+            return 'That reminder already went off or was deleted.';
+    }
+}
 
 /** `<#123>`, a bare `123` or a channel link → `'123'`; a name or anything else → null. */
 export function extractChannelId(ref: string): string | null {

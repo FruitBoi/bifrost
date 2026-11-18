@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+    cancelFailureMessage,
     extractChannelId,
+    isCancelArgs,
     parseDuration,
     parseReminderDeleteArgs,
     parseReminderTime,
@@ -444,6 +446,47 @@ describe('parseSnoozeArgs (issue #58)', () => {
             ok: false,
             reason: 'unexpected_text',
         });
+    });
+});
+
+describe('isCancelArgs (issue #65)', () => {
+    it.each(['cancel', 'CANCEL', '  Cancel  ', 'cancel pls'])(
+        'reads %j as the cancel form',
+        (raw) => {
+            expect(isCancelArgs(raw)).toBe(true);
+        }
+    );
+
+    it.each(['', '10m cancel the meeting', 'cancelled', 'snooze 10m'])(
+        'does not read %j as the cancel form',
+        (raw) => {
+            expect(isCancelArgs(raw)).toBe(false);
+        }
+    );
+});
+
+describe('cancelFailureMessage (issue #65)', () => {
+    it('explains how to cancel when there is no usable reply', () => {
+        for (const reason of ['no_reply', 'not_found'] as const) {
+            const text = cancelFailureMessage(reason, '?');
+            expect(text).toContain('`?remindme cancel`');
+            expect(text).toContain('`?reminder delete <id>`');
+        }
+    });
+
+    it('has a message for every other reason', () => {
+        expect(cancelFailureMessage('not_yours', '?')).toBe(
+            'You can only cancel your own reminders.'
+        );
+        expect(cancelFailureMessage('delivered', '?')).toContain(
+            'already went off'
+        );
+        expect(cancelFailureMessage('unknown_reminder', '?')).toContain(
+            '`?reminder delete <id>`'
+        );
+        expect(cancelFailureMessage('gone', '?')).toBe(
+            'That reminder already went off or was deleted.'
+        );
     });
 });
 

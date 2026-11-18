@@ -22,6 +22,7 @@ import * as messageCounts from '../../src/db/migrations/00016-message-counts';
 import * as commandRoles from '../../src/db/migrations/00017-command-roles';
 import * as botState from '../../src/db/migrations/00018-bot-state';
 import * as reminderMessages from '../../src/db/migrations/00019-reminder-messages';
+import * as reminderMessageIds from '../../src/db/migrations/00020-reminder-message-ids';
 import {
     MessageLinkModel,
     ThreadDirectoryEntryModel,
@@ -136,6 +137,11 @@ const umzug = new Umzug({
             name: '00019-reminder-messages.js',
             up: reminderMessages.up,
             down: reminderMessages.down,
+        },
+        {
+            name: '00020-reminder-message-ids.js',
+            up: reminderMessageIds.up,
+            down: reminderMessageIds.down,
         },
     ],
     context: sequelize.getQueryInterface(),
@@ -2365,6 +2371,7 @@ describe('migration 00019-reminder-messages', () => {
             guildId: 'g1',
             channelId: 'c1',
             message: `text ${messageId}`,
+            reminderId: null,
             createdAt,
             ...overrides,
         });
@@ -2426,5 +2433,64 @@ describe('migration 00019-reminder-messages', () => {
         await umzug.up();
         expect(await executed()).toContain('00019-reminder-messages.js');
         expect(await repo.findByMessage('discord', 'd2')).toBeNull();
+    });
+});
+
+describe('migration 00020-reminder-message-ids', () => {
+    it('adds reminder_messages.reminderId, works with the repository, and rolls back cleanly', async () => {
+        await umzug.up();
+        expect(await executed()).toContain('00020-reminder-message-ids.js');
+        const cols = await qi.describeTable('reminder_messages');
+        expect(cols.reminderId).toMatchObject({ allowNull: true });
+        expect(cols.reminderId.type).toMatch(/INT/i);
+
+        const repo = new SequelizeReminderMessageRepository();
+        const createdAt = new Date('2026-11-17T12:00:00.000Z');
+        const row = {
+            platform: 'fluxer' as const,
+            messageId: 'set-65',
+            kind: 'set' as const,
+            userId: 'u1',
+            guildId: 'g1',
+            channelId: 'c1',
+            message: 'cancel me',
+            reminderId: 42,
+            createdAt,
+        };
+        await repo.save(row);
+        expect(await repo.findByMessage('fluxer', 'set-65')).toEqual(row);
+        await repo.save({ ...row, messageId: 'old', reminderId: null });
+        expect(await repo.findByMessage('fluxer', 'old')).toMatchObject({
+            reminderId: null,
+        });
+
+        // Roll back: the column is gone, the rows and indexes stay.
+        await umzug.down({ to: '00020-reminder-message-ids.js' });
+        expect(await executed()).not.toContain('00020-reminder-message-ids.js');
+        expect(await executed()).toContain('00019-reminder-messages.js');
+        expect(await qi.describeTable('reminder_messages')).not.toHaveProperty(
+            'reminderId'
+        );
+        expect(
+            await select<{ messageId: string }>(
+                "SELECT messageId FROM reminder_messages WHERE messageId IN ('set-65', 'old') ORDER BY messageId"
+            )
+        ).toEqual([{ messageId: 'old' }, { messageId: 'set-65' }]);
+        const names = (await showIndexes('reminder_messages')).map(
+            (i) => i.name
+        );
+        expect(names).toEqual(
+            expect.arrayContaining([
+                'reminder_messages_platform_message',
+                'reminder_messages_platform_user_guild_kind_created',
+                'reminder_messages_created_at',
+            ])
+        );
+
+        await umzug.up();
+        expect(await executed()).toContain('00020-reminder-message-ids.js');
+        expect(await repo.findByMessage('fluxer', 'set-65')).toMatchObject({
+            reminderId: null,
+        });
     });
 });

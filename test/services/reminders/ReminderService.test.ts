@@ -642,6 +642,7 @@ describe('ReminderService', () => {
                 guildId: 'g1',
                 channelId: 'c1',
                 message: 'buy milk',
+                reminderId: null,
                 createdAt: new Date(NOW),
             });
             expect(await service.findMessage('fluxer', 'm1')).toBeNull();
@@ -668,6 +669,7 @@ describe('ReminderService', () => {
                 guildId: 'g1',
                 channelId: 'c1',
                 message: 'stretch',
+                reminderId: null,
                 createdAt: new Date(NOW),
             });
             expect(
@@ -688,6 +690,83 @@ describe('ReminderService', () => {
             await service.deliverDue();
             expect(repo.rows).toEqual([]);
             expect(messages.rows).toEqual([]);
+        });
+
+        describe('cancelByMessage (issue #65)', () => {
+            const setReminder = async (
+                overrides: Partial<{ userId: string; message: string }> = {}
+            ) => {
+                const reminder = await repo.create({
+                    platform: 'discord',
+                    userId: 'u1',
+                    guildId: 'g1',
+                    channelId: 'c1',
+                    message: 'buy milk',
+                    dueAt: new Date(NOW + 60_000),
+                    ...overrides,
+                });
+                await record({
+                    userId: reminder.userId,
+                    message: reminder.message,
+                    reminderId: reminder.id,
+                });
+                return reminder;
+            };
+
+            it('deletes the reminder its set message confirmed', async () => {
+                const reminder = await setReminder();
+                expect(
+                    await service.cancelByMessage('discord', 'm1', 'u1')
+                ).toEqual({ ok: true, reminder });
+                expect(repo.rows).toEqual([]);
+                // A second cancel finds nothing left to cancel.
+                expect(
+                    await service.cancelByMessage('discord', 'm1', 'u1')
+                ).toEqual({ ok: false, reason: 'gone' });
+            });
+
+            it('refuses unknown, foreign, delivered and old messages', async () => {
+                await setReminder();
+                expect(
+                    await service.cancelByMessage('discord', 'other', 'u1')
+                ).toEqual({ ok: false, reason: 'not_found' });
+                expect(
+                    await service.cancelByMessage('fluxer', 'm1', 'u1')
+                ).toEqual({ ok: false, reason: 'not_found' });
+                expect(
+                    await service.cancelByMessage('discord', 'm1', 'u2')
+                ).toEqual({ ok: false, reason: 'not_yours' });
+
+                await record({ messageId: 'd1', kind: 'delivered' });
+                expect(
+                    await service.cancelByMessage('discord', 'd1', 'u1')
+                ).toEqual({ ok: false, reason: 'delivered' });
+
+                await record({ messageId: 'old' });
+                expect(
+                    await service.cancelByMessage('discord', 'old', 'u1')
+                ).toEqual({ ok: false, reason: 'unknown_reminder' });
+                expect(repo.rows).toHaveLength(1);
+            });
+
+            it('leaves a reminder alone that no longer matches its message', async () => {
+                const reminder = await setReminder();
+                repo.rows[0] = { ...reminder, message: 'something else' };
+                expect(
+                    await service.cancelByMessage('discord', 'm1', 'u1')
+                ).toEqual({ ok: false, reason: 'gone' });
+                expect(repo.rows).toHaveLength(1);
+            });
+
+            it('treats a delivered reminder as gone', async () => {
+                await setReminder({ message: 'stretch' });
+                clock = NOW + 120_000;
+                await service.deliverDue();
+                expect(repo.rows).toEqual([]);
+                expect(
+                    await service.cancelByMessage('discord', 'm1', 'u1')
+                ).toEqual({ ok: false, reason: 'gone' });
+            });
         });
 
         it('deletes the delivered reminder even when recording fails', async () => {
