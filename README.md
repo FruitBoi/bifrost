@@ -288,7 +288,7 @@ The `role` command does three things at once and reports the outcome of each:
 
 1. **Roles** — every Fluxer role with the same name as one of the Discord user's roles is added to the Fluxer member.
 2. **Identity mapping** — the two accounts are recorded as the same person for this server pair. Mappings are one-to-one: re-running the command for either account replaces that account's previous mapping. They are removed together with the server link.
-3. **Thread membership** — for every bridged thread pair (thread↔thread link) whose Discord thread the Discord user is a member of, the Fluxer member is added to the Fluxer thread. Adding someone to a public Fluxer thread requires the bot to be able to manage the parent channel; threads it could not add the member to are listed in the reply.
+3. **Thread membership** — for every bridged thread pair (thread↔thread link) whose Discord thread the Discord user is a member of, the Fluxer member is added to the Fluxer thread. An archived Fluxer thread is reopened first: the bot posts a short message in it (not bridged to Discord), then adds the member. Adding someone to a public Fluxer thread requires the bot to be able to manage the parent channel; threads it could not add the member to are listed in the reply.
 
 ### Pinging by username
 

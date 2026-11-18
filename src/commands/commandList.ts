@@ -206,7 +206,7 @@ const commandList: Command[] = [
         aliases: ['map'],
         fluxer: {
             description:
-                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in. Alias `map`. Restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.identity` from the config when none are set).',
+                'Treats the mentioned Fluxer member as the given Discord user: every Fluxer role with the same name as one of the Discord user’s roles is added, the two accounts are mapped to each other (replacing an existing mapping) so pings of either are bridged to the other, and the member is added to every bridged thread the Discord user is in (an archived Fluxer thread is reopened first by the bot posting a short message in it). Alias `map`. Restricted to the roles set by the server administrators with `commandroles` (falling back to `roles.identity` from the config when none are set).',
             usageArgs: ['<@fluxerUser> <discordUserId>'],
         },
     },

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RESTJSONErrorCodes } from 'discord.js';
-import ThreadMemberSyncService from '../../src/services/threadMemberSync/ThreadMemberSyncService';
+import ThreadMemberSyncService, {
+    ARCHIVED_THREAD_NOTICE,
+} from '../../src/services/threadMemberSync/ThreadMemberSyncService';
 import DiscordEntityResolver from '../../src/services/entityResolver/DiscordEntityResolver';
 import FluxerEntityResolver from '../../src/services/entityResolver/FluxerEntityResolver';
 import {
@@ -22,6 +24,7 @@ type FluxerThreadFake = ReturnType<typeof fakeFluxerThread> & {
         fetchOne: ReturnType<typeof vi.fn>;
         add: ReturnType<typeof vi.fn>;
     };
+    send: ReturnType<typeof vi.fn>;
 };
 
 /** What discord.js throws when the user is not in the thread. */
@@ -50,9 +53,21 @@ function discordThread(
 
 function fluxerThread(
     id: string,
-    opts: { member?: boolean; addError?: Error; name?: string } = {}
+    opts: {
+        member?: boolean;
+        addError?: Error;
+        name?: string;
+        archived?: boolean;
+        sendError?: Error;
+    } = {}
 ): FluxerThreadFake {
-    const { member = false, addError, name } = opts;
+    const {
+        member = false,
+        addError,
+        name,
+        archived = false,
+        sendError,
+    } = opts;
     const fetchOne = vi.fn(async (userId: string) => {
         if (!member) throw new Error('Unknown member');
         return { id: userId };
@@ -60,8 +75,14 @@ function fluxerThread(
     const add = vi.fn(async () => {
         if (addError) throw addError;
     });
+    const send = vi.fn(async () => {
+        if (sendError) throw sendError;
+        return { id: 'msg' };
+    });
     return fakeFluxerThread({
         id,
+        archived,
+        send,
         members: { fetchOne, add },
         ...(name !== undefined ? { name } : {}),
     }) as FluxerThreadFake;
@@ -358,6 +379,72 @@ describe('ThreadMemberSyncService.addFluxerUserToDiscordUsersThreads', () => {
                 discordThreadId: 'dt-2',
                 fluxerThreadId: 'ft-2',
             }),
+        ]);
+    });
+
+    it('posts in an archived Fluxer thread to unarchive it before adding the user', async () => {
+        const t = setup();
+        const order: string[] = [];
+        const fluxer = fluxerThread('ft-1', { archived: true });
+        fluxer.send.mockImplementation(async () => {
+            order.push('send');
+            return { id: 'msg' };
+        });
+        fluxer.members.add.mockImplementation(async () => {
+            order.push('add');
+        });
+        t.pair(1, { fluxer });
+
+        const result = await t.sync();
+
+        expect(fluxer.send).toHaveBeenCalledWith({
+            content: ARCHIVED_THREAD_NOTICE,
+        });
+        expect(order).toEqual(['send', 'add']);
+        expect(result.added).toHaveLength(1);
+        expect(result.failed).toEqual([]);
+    });
+
+    it('does not post in a thread that is not archived', async () => {
+        const t = setup();
+        const p = t.pair(1);
+
+        await t.sync();
+
+        expect(p.fluxer!.send).not.toHaveBeenCalled();
+        expect(p.fluxer!.members.add).toHaveBeenCalledWith(FLUXER_USER);
+    });
+
+    it('does not post in an archived thread the user is already in', async () => {
+        const t = setup();
+        const p = t.pair(1, {
+            fluxer: fluxerThread('ft-1', { archived: true, member: true }),
+        });
+
+        const result = await t.sync();
+
+        expect(p.fluxer!.send).not.toHaveBeenCalled();
+        expect(result.already).toHaveLength(1);
+    });
+
+    it('reports "failed" and skips adding when the archived thread cannot be reopened', async () => {
+        const t = setup();
+        const p = t.pair(1, {
+            fluxer: fluxerThread('ft-1', {
+                archived: true,
+                sendError: new Error('Missing Permissions'),
+            }),
+        });
+
+        const result = await t.sync();
+
+        expect(p.fluxer!.members.add).not.toHaveBeenCalled();
+        expect(result.added).toEqual([]);
+        expect(result.failed).toEqual([
+            {
+                thread: expect.objectContaining({ fluxerThreadId: 'ft-1' }),
+                reason: 'thread is archived and could not be reopened: Missing Permissions',
+            },
         ]);
     });
 

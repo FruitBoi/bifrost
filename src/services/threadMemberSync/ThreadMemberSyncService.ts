@@ -30,6 +30,10 @@ type ThreadLookups = Pick<LinkService, 'getChannelLinksForGuildLink'>;
 type DiscordThreads = Pick<DiscordEntityResolver, 'fetchThread'>;
 type FluxerThreads = Pick<FluxerEntityResolver, 'fetchThread'>;
 
+/** Posted in an archived Fluxer thread to unarchive it before adding someone. */
+export const ARCHIVED_THREAD_NOTICE =
+    '📂 Reopening this archived thread to add a member.';
+
 function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
 }
@@ -48,7 +52,8 @@ function isUnknownMemberError(err: unknown): boolean {
  * thread pair (a link with both thread IDs set) is checked: when the Discord
  * user is a member of the Discord thread, the Fluxer user is added to the
  * Fluxer counterpart. Used by the Fluxer `role` command so someone moving
- * from Discord lands in the same conversations.
+ * from Discord lands in the same conversations. An archived Fluxer thread
+ * is first reopened by posting a short message in it.
  */
 export default class ThreadMemberSyncService {
     constructor(
@@ -147,6 +152,30 @@ export default class ThreadMemberSyncService {
             if (alreadyIn) {
                 result.already.push(ref);
                 continue;
+            }
+
+            // An archived thread is reopened by posting in it (issue #67), so
+            // the member lands in a live thread. The bot's own messages are
+            // not bridged, so this stays on Fluxer.
+            if (fluxerThread.archived) {
+                try {
+                    await fluxerThread.send({
+                        content: ARCHIVED_THREAD_NOTICE,
+                    });
+                    logger.info(
+                        `🧵 Unarchived Fluxer thread ${fluxerThreadId} (${ref.name}) by posting in it, to add Fluxer user ${fluxerUserId}`
+                    );
+                } catch (err) {
+                    logger.warn(
+                        `⚠️ Could not post in archived Fluxer thread ${fluxerThreadId} (${ref.name}) to unarchive it:`,
+                        err
+                    );
+                    result.failed.push({
+                        thread: ref,
+                        reason: `thread is archived and could not be reopened: ${errorMessage(err)}`,
+                    });
+                    continue;
+                }
             }
 
             try {
