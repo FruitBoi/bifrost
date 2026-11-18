@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OpsecService, {
+    OPSEC_ACTIVITY_DELAY_MS,
     OPSEC_DEFAULT_DURATION_MS,
     opsecEndMessage,
     opsecStartMessage,
@@ -116,5 +117,54 @@ describe('OpsecService', () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(svc.isActive('a')).toBe(false);
         expect(svc.isActive('b')).toBe(false);
+    });
+
+    it('delays the end by 3 minutes while people are talking', () => {
+        const svc = new OpsecService();
+        const onEnd = vi.fn();
+        expect(OPSEC_ACTIVITY_DELAY_MS).toBe(3 * 60_000);
+        svc.start('c', 10 * 60_000, onEnd);
+        vi.advanceTimersByTime(9 * 60_000);
+        svc.noteActivity('c');
+        vi.advanceTimersByTime(60_000);
+        expect(onEnd).not.toHaveBeenCalled();
+        expect(svc.isActive('c')).toBe(true);
+        expect(svc.endsAt('c')).toBe(Date.now() + OPSEC_ACTIVITY_DELAY_MS);
+
+        // Still talking near the new end: delayed again.
+        vi.advanceTimersByTime(2 * 60_000);
+        svc.noteActivity('c');
+        vi.advanceTimersByTime(60_000);
+        expect(onEnd).not.toHaveBeenCalled();
+
+        // Quiet for 3 minutes: it ends.
+        vi.advanceTimersByTime(OPSEC_ACTIVITY_DELAY_MS);
+        expect(onEnd).toHaveBeenCalledTimes(1);
+        expect(svc.isActive('c')).toBe(false);
+    });
+
+    it('ends on time when the last message is older than 3 minutes', () => {
+        const svc = new OpsecService();
+        const onEnd = vi.fn();
+        svc.start('c', 10 * 60_000, onEnd);
+        vi.advanceTimersByTime(60_000);
+        svc.noteActivity('c');
+        vi.advanceTimersByTime(9 * 60_000);
+        expect(onEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores activity in channels without a session, and stop still ends now', () => {
+        const svc = new OpsecService();
+        const onEnd = vi.fn();
+        svc.noteActivity('c');
+        svc.start('c', 1000, onEnd);
+        vi.advanceTimersByTime(1000);
+        expect(onEnd).toHaveBeenCalledTimes(1);
+
+        const onEnd2 = vi.fn();
+        svc.start('d', 1000, onEnd2);
+        svc.noteActivity('d');
+        expect(svc.stop('d')).toBe(true);
+        expect(onEnd2).toHaveBeenCalledTimes(1);
     });
 });

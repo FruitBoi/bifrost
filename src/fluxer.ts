@@ -879,6 +879,11 @@ const startFluxerClient = async ({
     client.on(Events.MessageCreate, async (message) => {
         if (message.author.id === client.user?.id) return;
 
+        // People talking delay the end of an opsec session (issue #69).
+        if (!message.author.bot && !message.webhookId) {
+            opsecService.noteActivity(message.channelId);
+        }
+
         if (message.guildId && message.webhookId) {
             const link = await linkService.getChannelLinkByFluxerLocation(
                 message.channelId

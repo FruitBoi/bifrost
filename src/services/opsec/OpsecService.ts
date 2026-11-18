@@ -4,9 +4,15 @@ import logger from '../../utils/logging/logger';
 export const OPSEC_COMMAND_NAMES = ['opsec', 'opsex'] as const;
 export const OPSEC_DEFAULT_DURATION_MS = 30 * 60_000;
 export const OPSEC_MAX_DURATION_MS = 24 * 60 * 60_000;
+/**
+ * Issue #69: if someone talked within this long before a session is due to
+ * end, the end is pushed back by this much (again and again while they talk).
+ */
+export const OPSEC_ACTIVITY_DELAY_MS = 3 * 60_000;
 
 interface Pause {
     endsAt: number;
+    lastActivityAt: number | null;
     timer: ReturnType<typeof setTimeout>;
     onEnd: () => void | Promise<void>;
 }
@@ -23,6 +29,8 @@ export default class OpsecService {
      * out (or `stop` is called) the entry is removed first, then `onEnd` is
      * called (errors from it are logged, never thrown). Calling start on an
      * active channel replaces its timer and onEnd and returns extended: true.
+     * If someone talked (see `noteActivity`) within OPSEC_ACTIVITY_DELAY_MS
+     * of the end, the end is delayed by OPSEC_ACTIVITY_DELAY_MS instead.
      */
     start(
         channelId: string,
@@ -32,10 +40,19 @@ export default class OpsecService {
         const previous = this.pauses.get(channelId);
         if (previous) clearTimeout(previous.timer);
         const endsAt = Date.now() + durationMs;
-        const timer = setTimeout(() => this.end(channelId), durationMs);
-        timer.unref?.();
-        this.pauses.set(channelId, { endsAt, timer, onEnd });
+        this.pauses.set(channelId, {
+            endsAt,
+            lastActivityAt: previous?.lastActivityAt ?? null,
+            timer: this.schedule(channelId, durationMs),
+            onEnd,
+        });
         return { endsAt, extended: previous !== undefined };
+    }
+
+    /** Records that someone talked in `channelId`, if a pause is running there. */
+    noteActivity(channelId: string, at: number = Date.now()): void {
+        const pause = this.pauses.get(channelId);
+        if (pause) pause.lastActivityAt = at;
     }
 
     /** Ends the pause now (removing it, then calling its onEnd). */
@@ -54,6 +71,31 @@ export default class OpsecService {
     /** Epoch ms the pause ends, or null. */
     endsAt(channelId: string): number | null {
         return this.pauses.get(channelId)?.endsAt ?? null;
+    }
+
+    private schedule(
+        channelId: string,
+        delayMs: number
+    ): ReturnType<typeof setTimeout> {
+        const timer = setTimeout(() => this.expire(channelId), delayMs);
+        timer.unref?.();
+        return timer;
+    }
+
+    /** Timer callback: delays the end while people are talking, else ends it. */
+    private expire(channelId: string): void {
+        const pause = this.pauses.get(channelId);
+        if (!pause) return;
+        const now = Date.now();
+        if (
+            pause.lastActivityAt !== null &&
+            now - pause.lastActivityAt < OPSEC_ACTIVITY_DELAY_MS
+        ) {
+            pause.endsAt = now + OPSEC_ACTIVITY_DELAY_MS;
+            pause.timer = this.schedule(channelId, OPSEC_ACTIVITY_DELAY_MS);
+            return;
+        }
+        this.end(channelId);
     }
 
     private end(channelId: string): void {
